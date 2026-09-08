@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin"
 
 const AUTHORIZED_ADMIN_EMAIL = process.env.ADMIN_EMAIL || "lexmedia8gh@gmail.com"
