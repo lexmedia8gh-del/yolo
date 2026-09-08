@@ -303,3 +303,27 @@ export async function copyToClipboard(text: string): Promise<boolean> {
     return true
   }
 }
+
+// ─── Centralized App URL Utilities ───────────────────────────
+export function getAppUrl(): string {
+  // Try to use process.env.NEXT_PUBLIC_APP_URL
+  const envUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_VERCEL_URL || process.env.VERCEL_URL;
+  if (envUrl) {
+    return envUrl.startsWith('http') ? envUrl : `https://${envUrl}`;
+  }
+  
+  // Fallback to window.location.origin in browser
+  if (typeof window !== 'undefined' && window.location) {
+    return window.location.origin;
+  }
+  
+  // Local development fallback
+  return 'http://localhost:3000';
+}
+
+export function appUrl(path = "") {
+  const base = getAppUrl().replace(/\/$/, '');
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${cleanPath}`;
+}
+

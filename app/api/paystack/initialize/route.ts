@@ -20,8 +20,17 @@ export async function POST(req: NextRequest) {
     const amountInSubunits = Math.round(amount * 100)
     const reference = `LXM_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
     
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-    const callbackUrl = `${appUrl}/pay/${token}?reference=${reference}`
+    let appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_VERCEL_URL || process.env.VERCEL_URL
+    if (!appUrl) {
+      if (process.env.NODE_ENV === 'production') {
+        return NextResponse.json(
+          { error: 'Production environment is missing NEXT_PUBLIC_APP_URL configuration.' },
+          { status: 500 }
+        )
+      }
+      appUrl = 'http://localhost:3000'
+    }
+    const callbackUrl = `${appUrl.replace(/\/$/, '')}/pay/${token}?reference=${reference}`
 
     const response = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
