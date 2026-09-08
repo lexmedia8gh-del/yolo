@@ -75,6 +75,7 @@ export default function ClientsPage() {
     notes: '',
     status: 'active' as ClientStatus,
   })
+  const [sendWelcomeSms, setSendWelcomeSms] = useState(true)
 
   // Load clients
   useEffect(() => {
@@ -110,6 +111,7 @@ export default function ClientsPage() {
       notes: '',
       status: 'active',
     })
+    setSendWelcomeSms(true)
     setEditingClient(null)
   }
 
@@ -177,6 +179,37 @@ export default function ClientsPage() {
           createdBy: 'admin',
         })
         toast.success('Client created successfully.')
+
+        // Trigger welcome SMS if requested and phone is provided
+        const targetPhone = formData.phone?.trim() || formData.whatsappNumber?.trim()
+        if (sendWelcomeSms && targetPhone) {
+          const smsToastId = toast.loading('Sending welcome SMS...')
+          try {
+            const smsRes = await fetch('/api/sms/welcome', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                phone: targetPhone,
+                clientName: formData.fullName.trim(),
+                clientId: newClientId,
+              }),
+            })
+            const smsData = await smsRes.json()
+
+            if (smsRes.ok && smsData.success === true) {
+              toast.success('Welcome SMS delivered successfully!', { id: smsToastId })
+            } else {
+              const errMsg = smsData?.error || 'Failed to deliver SMS'
+              toast.error(`Welcome SMS notice: ${errMsg}`, { id: smsToastId, duration: 5000 })
+            }
+          } catch (smsErr) {
+            console.error('SMS sending error:', smsErr)
+            toast.error('Welcome SMS notice: Network error sending SMS', { id: smsToastId, duration: 4000 })
+          }
+        } else if (sendWelcomeSms && !targetPhone) {
+          toast('Welcome SMS skipped: No phone number entered', { icon: 'ℹ️' })
+        }
+
         setIsAddModalOpen(false)
         resetForm()
         router.push(`/clients/${newClientId}?action=new-project`)
@@ -576,6 +609,33 @@ export default function ClientsPage() {
               className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-white text-sm focus:ring-2 focus:ring-accent-500 outline-none"
             />
           </div>
+
+          {!editingClient && (
+            <div className="p-3.5 bg-gray-50/90 rounded-xl border border-gray-200/80 space-y-2">
+              <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={sendWelcomeSms}
+                  onChange={(e) => setSendWelcomeSms(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer"
+                />
+                <div className="text-xs">
+                  <span className="font-semibold text-gray-800 flex items-center gap-1.5">
+                    <MessageSquare size={13} className="text-indigo-600" />
+                    Send Welcome SMS Notification
+                  </span>
+                  <p className="text-gray-500 mt-0.5">
+                    Automatically sends a personalized greeting via Textbelt once the client record is created.
+                  </p>
+                </div>
+              </label>
+              {sendWelcomeSms && (
+                <div className="text-[11px] text-gray-600 bg-white p-2 rounded-lg border border-gray-200/60 font-sans italic">
+                  &ldquo;Hello {formData.fullName.trim() || '[Client Name]'}, welcome to Ctrl Room. Thank you for choosing us. We are pleased to have you with us and will keep you updated regarding your service.&rdquo;
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 pt-4 border-t border-border">
             <Button type="button" variant="outline" onClick={() => setIsAddModalOpen(false)}>

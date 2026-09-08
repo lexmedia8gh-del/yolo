@@ -46,6 +46,7 @@ import { RecordPaymentModal } from '@/components/payments/RecordPaymentModal'
 import { PaymentDetailsModal } from '@/components/payments/PaymentDetailsModal'
 import { PaymentLinkModal } from '@/components/payments/PaymentLinkModal'
 import { PreparePaymentMessageModal } from '@/components/payments/PreparePaymentMessageModal'
+import { SendWelcomeSmsModal } from '@/components/clients/SendWelcomeSmsModal'
 import toast from 'react-hot-toast'
 
 type TabId = 'projects' | 'invoices' | 'payments' | 'links' | 'notes' | 'communication'
@@ -71,6 +72,7 @@ export default function ClientProfilePage() {
   // Wizard & Template Modals
   const [showWizard, setShowWizard] = useState(false)
   const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false)
+  const [showWelcomeSmsModal, setShowWelcomeSmsModal] = useState(false)
 
   // Payment & Link Modals
   const [showRecordPaymentModal, setShowRecordPaymentModal] = useState(false)
@@ -449,6 +451,14 @@ export default function ClientProfilePage() {
               >
                 <FileText size={14} className="text-indigo-600" />
                 Intake & Info Templates
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowWelcomeSmsModal(true)}
+                className="w-full flex items-center gap-2.5 p-2.5 rounded-lg border border-indigo-200 bg-indigo-50/50 hover:bg-indigo-100/60 hover:border-indigo-300 transition-colors text-xs font-medium text-indigo-800"
+              >
+                <Send size={14} className="text-indigo-600" />
+                Send Welcome SMS (Textbelt)
               </button>
               {(client.whatsappNumber || client.phone) && (
                 <a
@@ -1063,6 +1073,17 @@ export default function ClientProfilePage() {
           amount={selectedLinkForMessage.amount}
           invoiceNumber={selectedLinkForMessage.invoiceNumber}
           linkTitle={selectedLinkForMessage.title}
+        />
+      )}
+
+      {/* Send Welcome SMS Modal */}
+      {showWelcomeSmsModal && client && (
+        <SendWelcomeSmsModal
+          isOpen={showWelcomeSmsModal}
+          onClose={() => setShowWelcomeSmsModal(false)}
+          clientName={client.fullName}
+          phoneNumber={client.phone || client.whatsappNumber || ''}
+          clientId={client.id}
         />
       )}
     </div>

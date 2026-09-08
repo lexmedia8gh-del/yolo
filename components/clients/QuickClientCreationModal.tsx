@@ -190,6 +190,31 @@ export function QuickClientCreationModal({
       const newId = await saveClientDirectly(clientPayload)
       toast.success('Client created successfully!')
       onClose()
+
+      // Attempt Welcome SMS if phone number is present
+      const targetPhone = clientPayload.phone || clientPayload.whatsappNumber
+      if (targetPhone) {
+        try {
+          const smsRes = await fetch('/api/sms/welcome', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              phone: targetPhone,
+              clientName: clientPayload.fullName,
+              clientId: newId,
+            }),
+          })
+          const smsData = await smsRes.json()
+          if (smsRes.ok && smsData.success === true) {
+            toast.success('Welcome SMS sent to client!')
+          } else if (smsData?.error) {
+            toast.error(`Welcome SMS notice: ${smsData.error}`, { duration: 5000 })
+          }
+        } catch (smsErr) {
+          console.warn('Welcome SMS dispatch error:', smsErr)
+        }
+      }
+
       if (onClientCreatedDirectly) {
         onClientCreatedDirectly(newId)
       }
