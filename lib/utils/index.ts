@@ -304,40 +304,71 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
-// ─── Centralized App URL Utilities ───────────────────────────
+// ─── Centralized App URL & Payment Link Utilities ───────────
+/**
+ * Returns the application base URL without trailing slash.
+ * 
+ * 1. Browser-side: Always prefers window.location.origin.
+ *    This ensures that when an admin or user is using the deployed Ctrl Room app,
+ *    links dynamically match the current deployed domain (or localhost during local dev).
+ * 
+ * 2. Server-side: Uses configured APP_URL, NEXT_PUBLIC_APP_URL, or VERCEL_URL.
+ *    Prefers non-localhost URLs and forbids falling back to localhost in production.
+ */
 export function getAppUrl(): string {
-  const envUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_VERCEL_URL || process.env.VERCEL_URL;
-  
-  if (envUrl) {
-    const normalized = envUrl.startsWith('http') ? envUrl : `https://${envUrl}`;
-    if (process.env.NODE_ENV === 'production' && (normalized.includes('localhost') || normalized.includes('127.0.0.1'))) {
-      console.error('ERROR: Production URL generation attempted with localhost. Check APP_URL configuration.');
-    }
-    return normalized;
+  // Browser context: authoritative for client-side interactions
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin.replace(/\/$/, '')
   }
-  
-  // Browser context fallback
-  if (typeof window !== 'undefined' && window.location) {
-    const origin = window.location.origin;
-    if (process.env.NODE_ENV === 'production' && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
-      console.error('ERROR: Production URL generation attempted with localhost. Check APP_URL configuration.');
-    }
-    return origin;
+
+  // Server context: evaluate environment variables
+  const candidateUrls = [
+    process.env.APP_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.NEXT_PUBLIC_VERCEL_URL,
+    process.env.VERCEL_URL,
+  ].filter(Boolean) as string[]
+
+  // In production or when candidate URLs exist, prefer non-localhost entries
+  const nonLocalhost = candidateUrls.find(
+    (u) => !u.includes('localhost') && !u.includes('127.0.0.1')
+  )
+
+  const selectedUrl = nonLocalhost || candidateUrls[0]
+
+  if (selectedUrl) {
+    const normalized = selectedUrl.startsWith('http')
+      ? selectedUrl
+      : `https://${selectedUrl}`
+    return normalized.replace(/\/$/, '')
   }
-  
-  // Server-side without environment variables in production must fail clearly
+
+  // Server-side in production without environment variables must fail clearly
   if (process.env.NODE_ENV === 'production') {
-    console.error('ERROR: Production environment is missing NEXT_PUBLIC_APP_URL or VERCEL_URL configuration.');
-    throw new Error('APP_URL is not configured for production. Please set NEXT_PUBLIC_APP_URL in your hosting platform environment.');
+    console.error('ERROR: Production environment is missing APP_URL or NEXT_PUBLIC_APP_URL configuration.')
+    throw new Error('APP_URL is not configured for production. Please set APP_URL in your hosting platform environment.')
   }
-  
+
   // Local development default fallback
-  return 'http://localhost:3000';
+  return 'http://localhost:3000'
 }
 
-export function appUrl(path = "") {
-  const base = getAppUrl().replace(/\/$/, '');
-  const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  return `${base}${cleanPath}`;
+/**
+ * Builds an absolute application URL given a path.
+ */
+export function appUrl(path = ''): string {
+  const base = getAppUrl()
+  const cleanPath = path ? (path.startsWith('/') ? path : `/${path}`) : ''
+  return `${base}${cleanPath}`
+}
+
+/**
+ * Centralized payment-link generator for Ctrl Room.
+ * Generates the authoritative customer-facing payment URL across the app:
+ * Admin dashboard, Copy button, WhatsApp messages, Email, Invoices, and Projects.
+ */
+export function getPaymentLink(tokenOrId: string): string {
+  const cleanToken = (tokenOrId || 'sample').trim()
+  return appUrl(`/pay/${cleanToken}`)
 }
 

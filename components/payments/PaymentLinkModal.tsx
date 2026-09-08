@@ -27,6 +27,7 @@ import {
   copyToClipboard,
   generateSecureToken,
   appUrl,
+  getPaymentLink,
 } from '@/lib/utils'
 import { PreparePaymentMessageModal } from './PreparePaymentMessageModal'
 import toast from 'react-hot-toast'
@@ -136,8 +137,8 @@ export function PaymentLinkModal({
   }, [currentInvoice, currentProject])
 
   const getEffectiveUrl = (token?: string, url?: string) => {
-    if (url) return url
-    return appUrl(`/pay/${token || 'sample'}`)
+    if (url && !url.includes('localhost') && !url.includes('127.0.0.1')) return url
+    return getPaymentLink(token || 'sample')
   }
 
   const handleSave = async (e: React.FormEvent) => {

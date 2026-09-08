@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getAppUrl } from '@/lib/utils'
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,17 +21,16 @@ export async function POST(req: NextRequest) {
     const amountInSubunits = Math.round(amount * 100)
     const reference = `LXM_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
     
-    let appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_VERCEL_URL || process.env.VERCEL_URL
-    if (!appUrl) {
-      if (process.env.NODE_ENV === 'production') {
-        return NextResponse.json(
-          { error: 'Production environment is missing NEXT_PUBLIC_APP_URL configuration.' },
-          { status: 500 }
-        )
-      }
-      appUrl = 'http://localhost:3000'
+    let baseAppUrl: string
+    try {
+      baseAppUrl = getAppUrl()
+    } catch (err: any) {
+      return NextResponse.json(
+        { error: err.message || 'Server APP_URL is not configured for production.' },
+        { status: 500 }
+      )
     }
-    const callbackUrl = `${appUrl.replace(/\/$/, '')}/pay/${token}?reference=${reference}`
+    const callbackUrl = `${baseAppUrl}/pay/${token}?reference=${reference}`
 
     const response = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',

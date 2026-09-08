@@ -51,7 +51,11 @@ export function PreparePaymentMessageModal({
   currency = 'GHS',
   isDeposit = false,
 }: PreparePaymentMessageModalProps) {
-  const effectiveUrl = paymentUrl || paymentLinkUrl || ''
+  let rawUrl = paymentUrl || paymentLinkUrl || ''
+  if (typeof window !== 'undefined' && (rawUrl.includes('localhost') || rawUrl.includes('127.0.0.1')) && !window.location.origin.includes('localhost')) {
+    rawUrl = rawUrl.replace(/https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/, window.location.origin)
+  }
+  const effectiveUrl = rawUrl
   const [template, setTemplate] = useState<MessageTemplate>(
     isDeposit ? 'deposit_request' : 'whatsapp_standard'
   )

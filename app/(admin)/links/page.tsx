@@ -40,6 +40,7 @@ import {
   generateSecureToken,
   generateWhatsAppLink,
   appUrl,
+  getPaymentLink,
 } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
@@ -128,7 +129,7 @@ export default function LinksPage() {
         createdBy: 'admin',
       })
 
-      const publicUrl = appUrl(`/pay/${token}`)
+      const publicUrl = getPaymentLink(token)
 
       toast.success('Payment request link generated successfully.')
       copyToClipboard(publicUrl)
@@ -271,7 +272,7 @@ export default function LinksPage() {
               </thead>
               <tbody className="divide-y divide-gray-100 text-xs">
                 {filteredLinks.map((link) => {
-                  const publicUrl = appUrl(`/pay/${link.token}`)
+                  const publicUrl = getPaymentLink(link.token)
                   const clientObj = clients.find((c) => c.id === link.clientId)
                   const whatsappNum = clientObj?.whatsappNumber || clientObj?.phone
 

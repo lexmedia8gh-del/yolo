@@ -45,6 +45,7 @@ import {
   copyToClipboard,
   calculateInvoiceTotals,
   appUrl,
+  getPaymentLink,
 } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
@@ -270,7 +271,7 @@ export default function InvoicesPage() {
         createdBy: 'admin',
       })
 
-      const publicUrl = appUrl(`/pay/${token}`)
+      const publicUrl = getPaymentLink(token)
 
       setGeneratedLinkData({ url: publicUrl, token })
       toast.success(`Payment link generated for ${inv.invoiceNumber}`)
