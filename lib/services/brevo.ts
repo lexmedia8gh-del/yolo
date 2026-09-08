@@ -5,6 +5,8 @@
  * Never import this file into client components or client-side code.
  */
 
+import { getAppUrl } from '@/lib/utils'
+
 interface SendDeliveryEmailParams {
   toEmail: string
   clientName: string
@@ -29,7 +31,7 @@ interface SendPaymentReminderEmailParams {
  * Replaces localhost or dynamic IP origins with official production URL if set
  */
 function getProductionUrl(urlStr: string): string {
-  const prodBase = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL || ''
+  const prodBase = getAppUrl()
   if (!prodBase) return urlStr
 
   try {
@@ -59,7 +61,7 @@ function makeAbsoluteLogoUrl(logoUrl: string | undefined): string {
     return getProductionUrl(logoUrl)
   }
   // Relative URL — prepend production base
-  const prodBase = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL || ''
+  const prodBase = getAppUrl()
   if (!prodBase) return '' // Can't make absolute without a base; hide image
   const normalizedBase = prodBase.startsWith('http') ? prodBase : `https://${prodBase}`
   return `${normalizedBase.replace(/\/$/, '')}${logoUrl}`

@@ -306,18 +306,32 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 
 // ─── Centralized App URL Utilities ───────────────────────────
 export function getAppUrl(): string {
-  // Try to use process.env.NEXT_PUBLIC_APP_URL
   const envUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_VERCEL_URL || process.env.VERCEL_URL;
+  
   if (envUrl) {
-    return envUrl.startsWith('http') ? envUrl : `https://${envUrl}`;
+    const normalized = envUrl.startsWith('http') ? envUrl : `https://${envUrl}`;
+    if (process.env.NODE_ENV === 'production' && (normalized.includes('localhost') || normalized.includes('127.0.0.1'))) {
+      console.error('ERROR: Production URL generation attempted with localhost. Check APP_URL configuration.');
+    }
+    return normalized;
   }
   
-  // Fallback to window.location.origin in browser
+  // Browser context fallback
   if (typeof window !== 'undefined' && window.location) {
-    return window.location.origin;
+    const origin = window.location.origin;
+    if (process.env.NODE_ENV === 'production' && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
+      console.error('ERROR: Production URL generation attempted with localhost. Check APP_URL configuration.');
+    }
+    return origin;
   }
   
-  // Local development fallback
+  // Server-side without environment variables in production must fail clearly
+  if (process.env.NODE_ENV === 'production') {
+    console.error('ERROR: Production environment is missing NEXT_PUBLIC_APP_URL or VERCEL_URL configuration.');
+    throw new Error('APP_URL is not configured for production. Please set NEXT_PUBLIC_APP_URL in your hosting platform environment.');
+  }
+  
+  // Local development default fallback
   return 'http://localhost:3000';
 }
 

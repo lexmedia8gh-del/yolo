@@ -3,6 +3,7 @@ import { getAdminDb, requireAdmin } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 import { FieldValue } from 'firebase-admin/firestore'
 import { sendDeliveryReadyEmail } from '@/lib/services/brevo'
+import { appUrl } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -116,7 +117,7 @@ export async function POST(req: NextRequest) {
         }
 
         if (clientEmail) {
-          const publicUrl = `${new URL(req.url).origin}/delivery/${encodeURIComponent(deliveryData.accessToken)}`
+          const publicUrl = appUrl(`/delivery/${encodeURIComponent(deliveryData.accessToken)}`)
           const emailRes = await sendDeliveryReadyEmail({
             toEmail: clientEmail,
             clientName,
@@ -195,7 +196,7 @@ export async function POST(req: NextRequest) {
       success: true,
       deliveryId,
       accessToken: deliveryData.accessToken,
-      publicUrl: `${new URL(req.url).origin}/delivery/${encodeURIComponent(deliveryData.accessToken)}`,
+      publicUrl: appUrl(`/delivery/${encodeURIComponent(deliveryData.accessToken)}`),
       isReleased: willRelease,
       adminOverride: isAdminOverride,
       adminOverrideReason: updates.adminOverrideReason || null,

@@ -36,6 +36,7 @@ import {
   generateLxmInvoiceNumber,
   generateSecureToken,
   copyToClipboard,
+  appUrl,
 } from '@/lib/utils'
 import { where, orderBy } from '@/lib/firebase/firestore'
 import toast from 'react-hot-toast'
@@ -344,8 +345,7 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
       let clientLinkId = ''
 
       try {
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
-        paymentUrl = `${appUrl}/pay/${linkToken}`
+        paymentUrl = appUrl(`/pay/${linkToken}`)
 
         clientLinkId = await addDocument(COLLECTIONS.CLIENT_LINKS, {
           token: linkToken,

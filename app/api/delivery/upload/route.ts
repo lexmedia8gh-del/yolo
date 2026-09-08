@@ -4,6 +4,7 @@ import { COLLECTIONS } from '@/lib/firebase/firestore'
 import { FieldValue } from 'firebase-admin/firestore'
 import { sendDeliveryPaymentRequiredEmail } from '@/lib/services/brevo'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
+import { appUrl } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -153,8 +154,7 @@ export async function POST(req: NextRequest) {
         }
 
         if (clientEmail) {
-          const origin = new URL(req.url).origin
-          const paymentUrl = `${origin}/delivery/${encodeURIComponent(deliveryData.accessToken || deliveryId)}`
+          const paymentUrl = appUrl(`/delivery/${encodeURIComponent(deliveryData.accessToken || deliveryId)}`)
 
           const emailRes = await sendDeliveryPaymentRequiredEmail({
             toEmail: clientEmail,
