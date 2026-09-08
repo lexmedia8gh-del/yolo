@@ -144,9 +144,10 @@ export function ProjectDeliveryManager({
       setCanonicalUrl(data.publicUrl || '')
       setSelectedExpOption(currentDelivery.expirationOption || 'never')
       setFiles(data.files || [])
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error loading delivery manager:', err)
-      toast.error('Delivery files could not be loaded. Please try again.')
+      const detail = err?.message || 'Please check your connection and try again.'
+      toast.error(`Delivery files could not be loaded: ${detail}`)
     } finally {
       setLoading(false)
     }

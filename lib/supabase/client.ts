@@ -9,7 +9,39 @@ let clientInstance: SupabaseClient | null = null
  * Checks if Supabase client-side environment variables are defined.
  */
 export function isSupabaseConfigured(): boolean {
-  return Boolean(supabaseUrl && supabaseAnonKey && supabaseUrl.trim() !== '' && supabaseAnonKey.trim() !== '')
+  return Boolean(
+    supabaseUrl &&
+    supabaseAnonKey &&
+    supabaseUrl.trim() !== '' &&
+    supabaseAnonKey.trim() !== '' &&
+    !supabaseUrl.includes('placeholder')
+  )
+}
+
+/**
+ * Returns detailed diagnostic information about the Supabase connection configuration.
+ */
+export function getSupabaseConfigStatus(): { configured: boolean; urlConfigured: boolean; keyConfigured: boolean; error?: string } {
+  const urlConfigured = Boolean(supabaseUrl && supabaseUrl.trim() !== '' && !supabaseUrl.includes('placeholder'))
+  const keyConfigured = Boolean(supabaseAnonKey && supabaseAnonKey.trim() !== '' && !supabaseAnonKey.includes('placeholder'))
+  
+  if (!urlConfigured || !keyConfigured) {
+    const missing: string[] = []
+    if (!urlConfigured) missing.push('NEXT_PUBLIC_SUPABASE_URL')
+    if (!keyConfigured) missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY')
+    return {
+      configured: false,
+      urlConfigured,
+      keyConfigured,
+      error: `Missing required Supabase environment variable(s): ${missing.join(', ')}. Please add them in Settings.`,
+    }
+  }
+
+  return {
+    configured: true,
+    urlConfigured: true,
+    keyConfigured: true,
+  }
 }
 
 /**
@@ -20,9 +52,8 @@ export function getSupabaseClient(): SupabaseClient {
   if (!clientInstance) {
     if (!isSupabaseConfigured()) {
       console.warn(
-        '[Supabase] NEXT_PUBLIC_SUPABASE_URL and/or NEXT_PUBLIC_SUPABASE_ANON_KEY are missing. Initializing fallback client.'
+        '[Supabase] NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY missing. Initializing fallback client.'
       )
-      // Fallback placeholder client to prevent runtime crashes when credentials are not yet configured in Settings
       clientInstance = createClient(
         supabaseUrl || 'https://placeholder.supabase.co',
         supabaseAnonKey || 'placeholder-anon-key',
@@ -50,3 +81,4 @@ export function getSupabaseClient(): SupabaseClient {
  * Pre-instantiated Supabase client for convenient direct imports.
  */
 export const supabase = getSupabaseClient()
+
