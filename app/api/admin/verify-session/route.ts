@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { getAdminAuth } from "@/lib/firebase/admin"
 
 /**
@@ -17,9 +17,14 @@ export async function POST(req: NextRequest) {
     const auth = getAdminAuth()
     const decoded = await auth.verifyIdToken(token)
 
-    const authorizedEmail = process.env.ADMIN_EMAIL || "lexmedia8gh@gmail.com"
+    const authorizedEmails = [
+      (process.env.ADMIN_EMAIL || "").toLowerCase().trim(),
+      "lexmedia8gh@gmail.com",
+      "lexmediaapp@gmail.com"
+    ].filter(Boolean)
+
     const hasAdminClaim = decoded.admin === true
-    const isAuthorizedEmail = decoded.email === authorizedEmail
+    const isAuthorizedEmail = decoded.email && authorizedEmails.includes(decoded.email.toLowerCase().trim())
 
     if (!hasAdminClaim && !isAuthorizedEmail) {
       return NextResponse.json(

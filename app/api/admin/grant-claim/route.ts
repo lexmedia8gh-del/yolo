@@ -1,26 +1,41 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin"
 
-const AUTHORIZED_ADMIN_EMAIL = process.env.ADMIN_EMAIL || "lexmedia8gh@gmail.com"
-
 export async function POST(req: NextRequest) {
   try {
-    const { secret } = await req.json()
+    const { secret, email } = await req.json()
 
     const expectedSecret = process.env.CLAIM_SECRET
     if (!expectedSecret || secret !== expectedSecret) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
+    const defaultAdminEmail = (process.env.ADMIN_EMAIL || "lexmedia8gh@gmail.com").toLowerCase().trim()
+    const targetEmail = (email || defaultAdminEmail).toLowerCase().trim()
+
+    // Ensure the target email is an authorized admin email
+    const authorizedEmails = [
+      defaultAdminEmail,
+      "lexmedia8gh@gmail.com",
+      "lexmediaapp@gmail.com"
+    ].filter(Boolean)
+
+    if (!authorizedEmails.includes(targetEmail)) {
+      return NextResponse.json(
+        { error: `Email ${targetEmail} is not authorized for administrator custom claims.` },
+        { status: 403 }
+      )
+    }
+
     const auth = getAdminAuth()
 
     let userRecord
     try {
-      userRecord = await auth.getUserByEmail(AUTHORIZED_ADMIN_EMAIL)
+      userRecord = await auth.getUserByEmail(targetEmail)
     } catch (err: any) {
       if (err.code === "auth/user-not-found") {
         return NextResponse.json(
-          { error: `User ${AUTHORIZED_ADMIN_EMAIL} not found. Sign in via Google first, then call this endpoint.` },
+          { error: `User ${targetEmail} not found. Sign in via Google first, then call this endpoint.` },
           { status: 404 }
         )
       }
@@ -32,7 +47,7 @@ export async function POST(req: NextRequest) {
     const db = getAdminDb()
     await db.collection("users").doc(userRecord.uid).set(
       {
-        email: AUTHORIZED_ADMIN_EMAIL,
+        email: targetEmail,
         displayName: userRecord.displayName || "LexMedia Admin",
         role: "admin",
         uid: userRecord.uid,
@@ -41,11 +56,11 @@ export async function POST(req: NextRequest) {
       { merge: true }
     )
 
-    console.log(`[grant-claim] Admin claim set for: ${AUTHORIZED_ADMIN_EMAIL} (uid: ${userRecord.uid})`)
+    console.log(`[grant-claim] Admin claim set for: ${targetEmail} (uid: ${userRecord.uid})`)
 
     return NextResponse.json({
       success: true,
-      message: `Admin claim granted to ${AUTHORIZED_ADMIN_EMAIL}. User must sign out and back in for the claim to take effect.`,
+      message: `Admin claim granted to ${targetEmail}. User must sign out and back in for the claim to take effect.`,
       uid: userRecord.uid,
     })
   } catch (error: any) {

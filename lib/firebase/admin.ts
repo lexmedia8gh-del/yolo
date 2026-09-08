@@ -67,8 +67,12 @@ export async function requireAdmin(request: NextRequest) {
     const hasAdminClaim = decoded.admin === true;
 
     // Bootstrap fallback: allow the configured ADMIN_EMAIL even before the claim is granted
-    const authorizedEmail = process.env.ADMIN_EMAIL || 'lexmedia8gh@gmail.com';
-    const isAuthorizedEmail = decoded.email === authorizedEmail;
+    const authorizedEmails = [
+      (process.env.ADMIN_EMAIL || '').toLowerCase().trim(),
+      'lexmedia8gh@gmail.com',
+      'lexmediaapp@gmail.com'
+    ].filter(Boolean);
+    const isAuthorizedEmail = decoded.email && authorizedEmails.includes(decoded.email.toLowerCase().trim());
 
     if (!hasAdminClaim && !isAuthorizedEmail) {
       console.warn(`[Auth] Unauthorized access attempt by: ${decoded.email}`);
