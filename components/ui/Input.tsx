@@ -34,7 +34,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         {label && (
           <label
             htmlFor={inputId}
-            className="block text-sm font-medium text-gray-700"
+            className="block text-sm font-medium text-gray-700 dark:text-gray-200"
           >
             {label}
             {props.required && (
@@ -44,7 +44,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         )}
         <div className="relative">
           {leftIcon && (
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-muted">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-muted dark:text-gray-400">
               {leftIcon}
             </div>
           )}
@@ -52,12 +52,12 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             ref={ref}
             id={inputId}
             className={cn(
-              'block w-full rounded-lg border bg-white text-gray-900 placeholder-gray-400 text-sm transition-colors duration-150',
-              'focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600',
-              'disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed',
+              'block w-full rounded-lg border bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm transition-colors duration-150',
+              'focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 dark:focus:border-indigo-500',
+              'disabled:bg-gray-50 dark:disabled:bg-gray-800/60 disabled:text-gray-500 dark:disabled:text-gray-400 disabled:cursor-not-allowed',
               error
                 ? 'border-rose-500 focus:ring-rose-500/20 focus:border-rose-500'
-                : 'border-gray-300 hover:border-gray-400',
+                : 'border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-600',
               leftIcon ? 'pl-9' : 'pl-3',
               (rightIcon || rightElement) ? 'pr-9' : 'pr-3',
               'h-9',
@@ -66,14 +66,14 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             {...props}
           />
           {(rightIcon || rightElement) && (
-            <div className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted">
+            <div className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted dark:text-gray-400">
               {rightIcon || rightElement}
             </div>
           )}
         </div>
         {error && <p className="text-xs text-danger-600">{error}</p>}
         {helperText && !error && (
-          <p className="text-xs text-muted">{helperText}</p>
+          <p className="text-xs text-muted dark:text-gray-400">{helperText}</p>
         )}
       </div>
     )
@@ -98,7 +98,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         {label && (
           <label
             htmlFor={inputId}
-            className="block text-sm font-medium text-gray-700"
+            className="block text-sm font-medium text-gray-700 dark:text-gray-200"
           >
             {label}
             {props.required && <span className="text-danger-500 ml-1">*</span>}
@@ -108,16 +108,16 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
           ref={ref}
           id={inputId}
           className={cn(
-            'block w-full rounded-lg border bg-white text-gray-900 placeholder-gray-400 text-sm px-3 py-2 transition-colors duration-150 resize-none',
-            'focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600',
-            'disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed',
-            error ? 'border-rose-500' : 'border-gray-300 hover:border-gray-400',
+            'block w-full rounded-lg border bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm px-3 py-2 transition-colors duration-150 resize-none',
+            'focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 dark:focus:border-indigo-500',
+            'disabled:bg-gray-50 dark:disabled:bg-gray-800/60 disabled:text-gray-500 dark:disabled:text-gray-400 disabled:cursor-not-allowed',
+            error ? 'border-rose-500' : 'border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-600',
             className
           )}
           {...props}
         />
         {error && <p className="text-xs text-danger-600">{error}</p>}
-        {helperText && !error && <p className="text-xs text-muted">{helperText}</p>}
+        {helperText && !error && <p className="text-xs text-muted dark:text-gray-400">{helperText}</p>}
       </div>
     )
   }
@@ -144,7 +144,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
     return (
       <div className={cn('space-y-1.5', wrapperClassName)}>
         {label && (
-          <label htmlFor={inputId} className="block text-sm font-medium text-gray-700">
+          <label htmlFor={inputId} className="block text-sm font-medium text-gray-700 dark:text-gray-200">
             {label}
             {props.required && <span className="text-danger-500 ml-1">*</span>}
           </label>
@@ -153,27 +153,27 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
           ref={ref}
           id={inputId}
           className={cn(
-            'block w-full h-9 rounded-lg border bg-white text-gray-900 text-sm pl-3 pr-8 transition-colors duration-150',
-            'focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600',
-            'disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed',
-            error ? 'border-rose-500' : 'border-gray-300 hover:border-gray-400',
+            'block w-full h-9 rounded-lg border bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm pl-3 pr-8 transition-colors duration-150',
+            'focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 dark:focus:border-indigo-500',
+            'disabled:bg-gray-50 dark:disabled:bg-gray-800/60 disabled:text-gray-500 dark:disabled:text-gray-400 disabled:cursor-not-allowed',
+            error ? 'border-rose-500' : 'border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-600',
             className
           )}
           {...props}
         >
           {placeholder && (
-            <option value="" disabled>
+            <option value="" disabled className="dark:bg-gray-900 text-gray-400">
               {placeholder}
             </option>
           )}
           {options.map((opt) => (
-            <option key={opt.value} value={opt.value}>
+            <option key={opt.value} value={opt.value} className="dark:bg-gray-900 dark:text-gray-100">
               {opt.label}
             </option>
           ))}
         </select>
         {error && <p className="text-xs text-danger-600">{error}</p>}
-        {helperText && !error && <p className="text-xs text-muted">{helperText}</p>}
+        {helperText && !error && <p className="text-xs text-muted dark:text-gray-400">{helperText}</p>}
       </div>
     )
   }

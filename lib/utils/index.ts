@@ -126,32 +126,32 @@ export function getInitials(name?: string | null): string {
 export function getStatusColor(status: string): string {
   const map: Record<string, string> = {
     // Invoice / Payment statuses
-    Draft: 'bg-gray-50 text-gray-700 border border-gray-200',
-    Pending: 'bg-amber-50 text-amber-700 border border-amber-200',
-    'Partially Paid': 'bg-indigo-50 text-indigo-700 border border-indigo-200',
-    Paid: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
-    Overdue: 'bg-rose-50 text-rose-700 border border-rose-200',
-    Cancelled: 'bg-gray-50 text-gray-600 border border-gray-200',
+    Draft: 'bg-gray-50 dark:bg-gray-800/80 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700',
+    Pending: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60',
+    'Partially Paid': 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60',
+    Paid: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60',
+    Overdue: 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60',
+    Cancelled: 'bg-gray-50 dark:bg-gray-800/80 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700',
     // Project statuses
-    Inquiry: 'bg-gray-50 text-gray-700 border border-gray-200',
-    'Awaiting Payment': 'bg-amber-50 text-amber-700 border border-amber-200',
-    'In Progress': 'bg-blue-50 text-blue-700 border border-blue-200',
-    Review: 'bg-purple-50 text-purple-700 border border-purple-200',
-    Revision: 'bg-orange-50 text-orange-700 border border-orange-200',
-    Completed: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+    Inquiry: 'bg-gray-50 dark:bg-gray-800/80 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700',
+    'Awaiting Payment': 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60',
+    'In Progress': 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60',
+    Review: 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60',
+    Revision: 'bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800/60',
+    Completed: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60',
     // Generic
-    active: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
-    inactive: 'bg-gray-50 text-gray-600 border border-gray-200',
-    archived: 'bg-gray-50 text-gray-600 border border-gray-200',
-    disabled: 'bg-rose-50 text-rose-700 border border-rose-200',
-    expired: 'bg-orange-50 text-orange-700 border border-orange-200',
+    active: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60',
+    inactive: 'bg-gray-50 dark:bg-gray-800/80 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700',
+    archived: 'bg-gray-50 dark:bg-gray-800/80 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700',
+    disabled: 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60',
+    expired: 'bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800/60',
     // Payment
-    Unpaid: 'bg-amber-50 text-amber-700 border border-amber-200',
-    success: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
-    failed: 'bg-rose-50 text-rose-700 border border-rose-200',
-    abandoned: 'bg-gray-50 text-gray-600 border border-gray-200',
+    Unpaid: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60',
+    success: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60',
+    failed: 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60',
+    abandoned: 'bg-gray-50 dark:bg-gray-800/80 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700',
   }
-  return map[status] ?? 'bg-gray-50 text-gray-600 border border-gray-200'
+  return map[status] ?? 'bg-gray-50 dark:bg-gray-800/80 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'
 }
 
 // ─── Number Utilities ────────────────────────────────────────

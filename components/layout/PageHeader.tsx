@@ -25,13 +25,13 @@ export function PageHeader({
     >
       <div>
         {breadcrumbs && breadcrumbs.length > 0 && (
-          <nav className="flex items-center gap-1.5 text-xs text-muted mb-1.5">
+          <nav className="flex items-center gap-1.5 text-xs text-muted dark:text-gray-400 mb-1.5">
             {breadcrumbs.map((crumb, i) => (
               <React.Fragment key={i}>
-                {i > 0 && <span>/</span>}
+                {i > 0 && <span className="text-gray-300 dark:text-gray-600">/</span>}
                 <span
                   className={
-                    i === breadcrumbs.length - 1 ? 'text-gray-700 font-medium' : ''
+                    i === breadcrumbs.length - 1 ? 'text-gray-700 dark:text-gray-200 font-medium' : ''
                   }
                 >
                   {crumb.label}
@@ -40,8 +40,8 @@ export function PageHeader({
             ))}
           </nav>
         )}
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{title}</h1>
-        {subtitle && <p className="text-sm text-muted mt-1">{subtitle}</p>}
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">{title}</h1>
+        {subtitle && <p className="text-sm text-muted dark:text-gray-400 mt-1">{subtitle}</p>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </div>

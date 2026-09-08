@@ -18,15 +18,15 @@ const variantClasses: Record<ButtonVariant, string> = {
   primary:
     'bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800 shadow-sm transition-colors',
   secondary:
-    'bg-gray-900 text-white hover:bg-gray-800 active:bg-gray-950 shadow-sm transition-colors',
+    'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-white active:bg-gray-950 dark:active:bg-gray-200 shadow-sm transition-colors',
   ghost:
-    'bg-transparent text-gray-700 hover:bg-gray-100 active:bg-gray-200 transition-colors',
+    'bg-transparent text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 active:bg-gray-200 dark:active:bg-gray-700 transition-colors',
   danger:
     'bg-rose-600 text-white hover:bg-rose-700 active:bg-rose-800 shadow-sm transition-colors',
   success:
     'bg-emerald-600 text-white hover:bg-emerald-700 active:bg-emerald-800 shadow-sm transition-colors',
   outline:
-    'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 active:bg-gray-100 shadow-sm transition-colors',
+    'bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 active:bg-gray-100 dark:active:bg-gray-700 shadow-sm transition-colors',
 }
 
 const sizeClasses: Record<ButtonSize, string> = {

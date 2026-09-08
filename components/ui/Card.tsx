@@ -25,8 +25,8 @@ export function Card({
   return (
     <div
       className={cn(
-        'rounded-xl border border-gray-200/80 bg-white shadow-sm',
-        hover && 'transition-all duration-150 hover:border-gray-300 hover:shadow',
+        'rounded-xl border border-gray-200/80 dark:border-gray-800/90 bg-white dark:bg-gray-900 shadow-sm text-gray-900 dark:text-gray-100',
+        hover && 'transition-all duration-150 hover:border-gray-300 dark:hover:border-gray-700 hover:shadow',
         paddingClasses[padding],
         className
       )}
@@ -60,10 +60,10 @@ export function CardHeader({
       {(title || subtitle) && (
         <div>
           {title && (
-            <h3 className="text-base font-semibold text-gray-900">{title}</h3>
+            <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
           )}
           {subtitle && (
-            <p className="text-sm text-muted mt-0.5">{subtitle}</p>
+            <p className="text-sm text-muted dark:text-gray-400 mt-0.5">{subtitle}</p>
           )}
         </div>
       )}
@@ -93,7 +93,7 @@ export function CardFooter({
   return (
     <div
       className={cn(
-        'flex items-center justify-between gap-4 mt-6 pt-4 border-t border-border',
+        'flex items-center justify-between gap-4 mt-6 pt-4 border-t border-border dark:border-gray-800',
         className
       )}
       {...props}
@@ -105,5 +105,5 @@ export function CardFooter({
 
 // Divider inside card
 export function CardDivider({ className }: { className?: string }) {
-  return <div className={cn('border-t border-border my-4', className)} />
+  return <div className={cn('border-t border-border dark:border-gray-800 my-4', className)} />
 }

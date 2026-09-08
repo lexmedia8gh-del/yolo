@@ -88,7 +88,7 @@ export function NotificationBell() {
     <div className="relative" ref={menuRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors focus:outline-none"
+        className="relative p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors focus:outline-none"
         aria-label="Notifications"
       >
         <Bell size={18} />
@@ -100,12 +100,12 @@ export function NotificationBell() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-xl border border-gray-200 z-50 overflow-hidden animate-fade-in">
-          <div className="p-3.5 border-b border-gray-100 flex items-center justify-between bg-slate-50/50">
+        <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-gray-900 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-800 z-50 overflow-hidden animate-fade-in">
+          <div className="p-3.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-slate-50/50 dark:bg-gray-850/50">
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-gray-900 text-sm">Notifications</span>
+              <span className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Notifications</span>
               {unreadCount > 0 && (
-                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-600">
+                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">
                   {unreadCount} new
                 </span>
               )}
@@ -113,7 +113,7 @@ export function NotificationBell() {
             {unreadCount > 0 && (
               <button
                 onClick={handleMarkAllRead}
-                className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1 cursor-pointer"
+                className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-medium flex items-center gap-1 cursor-pointer"
               >
                 <CheckCheck size={14} />
                 Mark all read
@@ -121,12 +121,12 @@ export function NotificationBell() {
             )}
           </div>
 
-          <div className="max-h-[380px] overflow-y-auto divide-y divide-gray-100">
+          <div className="max-h-[380px] overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800">
             {notifications.length === 0 ? (
               <div className="py-10 text-center px-4">
-                <Bell size={28} className="mx-auto text-gray-300 mb-2" />
-                <p className="text-sm font-medium text-gray-600">No notifications yet</p>
-                <p className="text-xs text-gray-400 mt-1">
+                <Bell size={28} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-300">No notifications yet</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                   Payments and project delivery updates will show up here.
                 </p>
               </div>
@@ -141,33 +141,33 @@ export function NotificationBell() {
                 return (
                   <div
                     key={n.id}
-                    className={`p-3.5 hover:bg-gray-50 transition-colors flex items-start gap-3 relative ${
-                      !n.isRead ? 'bg-indigo-50/30' : ''
+                    className={`p-3.5 hover:bg-gray-50 dark:hover:bg-gray-800/70 transition-colors flex items-start gap-3 relative ${
+                      !n.isRead ? 'bg-indigo-50/30 dark:bg-indigo-950/30' : ''
                     }`}
                   >
-                    <div className="mt-0.5 w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
+                    <div className="mt-0.5 w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
                       <CreditCard size={15} />
                     </div>
                     <div className="flex-1 min-w-0 pr-6">
                       <div className="flex items-center gap-1.5">
-                        <p className="text-xs font-semibold text-gray-900 truncate">
+                        <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">
                           {n.title}
                         </p>
                         {!n.isRead && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 shrink-0" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 dark:bg-indigo-400 shrink-0" />
                         )}
                       </div>
-                      <p className="text-xs text-gray-600 mt-0.5 line-clamp-2 leading-relaxed">
+                      <p className="text-xs text-gray-600 dark:text-gray-300 mt-0.5 line-clamp-2 leading-relaxed">
                         {n.message}
                       </p>
                       <div className="flex items-center gap-3 mt-1.5">
-                        <span className="text-[11px] text-gray-400">
+                        <span className="text-[11px] text-gray-400 dark:text-gray-500">
                           {formatDate(n.createdAt)}
                         </span>
                         <Link
                           href={linkHref}
                           onClick={() => setIsOpen(false)}
-                          className="text-[11px] text-indigo-600 hover:underline flex items-center gap-0.5 font-medium"
+                          className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-0.5 font-medium"
                         >
                           View Details <ExternalLink size={10} />
                         </Link>
@@ -177,7 +177,7 @@ export function NotificationBell() {
                       <button
                         onClick={(e) => handleMarkAsRead(n.id, e)}
                         title="Mark as read"
-                        className="absolute top-3.5 right-3 text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-200/50"
+                        className="absolute top-3.5 right-3 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded hover:bg-gray-200/50 dark:hover:bg-gray-700/50"
                       >
                         <Check size={13} />
                       </button>

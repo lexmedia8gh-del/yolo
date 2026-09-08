@@ -78,7 +78,7 @@ export function Modal({
       {/* Modal */}
       <div
         className={cn(
-          'relative w-full bg-white shadow-modal animate-scale-in',
+          'relative w-full bg-white dark:bg-gray-900 border border-gray-200/80 dark:border-gray-800 shadow-modal animate-scale-in text-gray-900 dark:text-gray-100',
           'rounded-t-3xl sm:rounded-2xl',
           'max-h-[90vh] flex flex-col',
           sizeClasses[size],
@@ -87,19 +87,19 @@ export function Modal({
       >
         {/* Header */}
         {(title || !hideClose) && (
-          <div className="flex items-start justify-between p-6 border-b border-border shrink-0">
+          <div className="flex items-start justify-between p-6 border-b border-border dark:border-gray-800 shrink-0">
             <div>
               {title && (
-                <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
               )}
               {subtitle && (
-                <p className="text-sm text-muted mt-0.5">{subtitle}</p>
+                <p className="text-sm text-muted dark:text-gray-400 mt-0.5">{subtitle}</p>
               )}
             </div>
             {!hideClose && (
               <button
                 onClick={onClose}
-                className="p-1.5 rounded-lg hover:bg-gray-100 text-muted transition-colors shrink-0 ml-4"
+                className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-muted dark:text-gray-400 transition-colors shrink-0 ml-4"
                 aria-label="Close"
               >
                 <X size={18} />
@@ -113,7 +113,7 @@ export function Modal({
 
         {/* Footer */}
         {footer && (
-          <div className="shrink-0 p-6 border-t border-border bg-gray-50 rounded-b-2xl">
+          <div className="shrink-0 p-6 border-t border-border dark:border-gray-800 bg-gray-50 dark:bg-gray-900/80 rounded-b-2xl">
             {footer}
           </div>
         )}
@@ -148,7 +148,7 @@ export function ConfirmModal({
 }: ConfirmModalProps) {
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={title} size="sm">
-      <p className="text-sm text-gray-600">{message}</p>
+      <p className="text-sm text-gray-600 dark:text-gray-300">{message}</p>
       <div className="flex gap-3 mt-6 justify-end">
         <Button variant="outline" onClick={onClose} disabled={loading}>
           {cancelLabel}

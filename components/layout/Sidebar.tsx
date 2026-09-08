@@ -112,23 +112,23 @@ export function Sidebar({ isOpen = true, onClose }: SidebarProps) {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed top-0 left-0 h-full w-60 bg-white border-r border-gray-200 flex flex-col z-40',
+          'fixed top-0 left-0 h-full w-60 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col z-40',
           'transition-transform duration-200 ease-in-out',
           'lg:translate-x-0 lg:relative lg:z-auto',
           isOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
         {/* Brand Header */}
-        <div className="h-16 flex items-center px-5 border-b border-gray-200 shrink-0">
+        <div className="h-16 flex items-center px-5 border-b border-gray-200 dark:border-gray-800 shrink-0">
           <Link href="/dashboard" className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gray-900 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+            <div className="w-8 h-8 rounded-lg bg-gray-900 dark:bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
               LM
             </div>
             <div>
-              <span className="font-bold text-gray-900 text-sm tracking-tight block leading-tight">
+              <span className="font-bold text-gray-900 dark:text-gray-100 text-sm tracking-tight block leading-tight">
                 LexMedia
               </span>
-              <span className="text-[11px] text-gray-500 font-medium block leading-tight">
+              <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium block leading-tight">
                 Admin Suite
               </span>
             </div>
@@ -152,15 +152,15 @@ export function Sidebar({ isOpen = true, onClose }: SidebarProps) {
                     className={cn(
                       'flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
                       isActive
-                        ? 'bg-indigo-50/80 text-indigo-700 font-semibold'
-                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                        ? 'bg-indigo-50/80 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-semibold'
+                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/70 hover:text-gray-900 dark:hover:text-gray-100'
                     )}
                   >
                     <Icon
                       size={18}
                       className={cn(
                         'shrink-0',
-                        isActive ? 'text-indigo-600' : 'text-gray-400'
+                        isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400 dark:text-gray-500'
                       )}
                     />
                     <span className="flex-1 truncate">{item.label}</span>
@@ -173,19 +173,19 @@ export function Sidebar({ isOpen = true, onClose }: SidebarProps) {
 
         {/* User Profile */}
         {lexUser && (
-          <div className="p-3 border-t border-gray-200 shrink-0 bg-gray-50/50">
+          <div className="p-3 border-t border-gray-200 dark:border-gray-800 shrink-0 bg-gray-50/50 dark:bg-gray-850/50">
             <Link
               href="/settings"
               onClick={onClose}
-              className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-white hover:shadow-xs transition-all"
+              className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-white dark:hover:bg-gray-800 hover:shadow-xs transition-all"
             >
               <div className="flex items-center gap-3">
                 <Avatar name={lexUser?.name || 'Admin'} src={lexUser?.photoURL} size="sm" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-gray-900 truncate">
+                  <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">
                     {lexUser?.name || 'Lexmedia Admin'}
                   </p>
-                  <p className="text-[11px] text-gray-700 truncate">
+                  <p className="text-[11px] text-gray-700 dark:text-gray-300 truncate">
                     {lexUser?.email || ''}
                   </p>
                 </div>

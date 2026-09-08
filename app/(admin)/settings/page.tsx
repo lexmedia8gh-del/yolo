@@ -21,8 +21,10 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input, Textarea, Select } from '@/components/ui/Input'
+import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { DataResetManager } from '@/components/settings/DataResetManager'
 import { useAuth } from '@/lib/hooks/useAuth'
+import { useTheme } from '@/lib/contexts/ThemeContext'
 import { getDocument, setDocument, COLLECTIONS } from '@/lib/firebase/firestore'
 import { changePassword } from '@/lib/firebase/auth'
 import { storage } from '@/lib/firebase/config'
@@ -389,10 +391,19 @@ export default function SettingsPage() {
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
                     className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all text-left ${
-                      isActive ? 'bg-accent-50 text-accent-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                      isActive
+                        ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-semibold'
+                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/70 hover:text-gray-900 dark:hover:text-gray-100'
                     }`}
                   >
-                    <Icon size={16} className={isActive ? 'text-accent-600' : 'text-gray-400'} />
+                    <Icon
+                      size={16}
+                      className={
+                        isActive
+                          ? 'text-indigo-600 dark:text-indigo-400'
+                          : 'text-gray-400 dark:text-gray-500'
+                      }
+                    />
                     {tab.label}
                   </button>
                 )
@@ -544,7 +555,16 @@ export default function SettingsPage() {
               {activeTab === 'account' && (
                 <div className="space-y-4">
                   <Card>
-                    <h3 className="text-base font-semibold text-gray-900 mb-6">My Profile</h3>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Theme Preference</h3>
+                        <p className="text-sm text-muted dark:text-gray-400 mt-0.5">Toggle between Light, Dark, or System mode.</p>
+                      </div>
+                      <ThemeToggle variant="segmented" />
+                    </div>
+                  </Card>
+                  <Card>
+                    <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-6">My Profile</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <Input label="Full Name" value={lexUser?.name ?? ''} readOnly helperText="Contact your administrator to change your name" />
                       <Input label="Email Address" value={lexUser?.email ?? user?.email ?? ''} readOnly />
@@ -552,8 +572,8 @@ export default function SettingsPage() {
                     </div>
                   </Card>
                   <Card>
-                    <h3 className="text-base font-semibold text-gray-900 mb-1">Change Password</h3>
-                    <p className="text-sm text-muted mb-6">You must know your current password to set a new one.</p>
+                    <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">Change Password</h3>
+                    <p className="text-sm text-muted dark:text-gray-400 mb-6">You must know your current password to set a new one.</p>
                     <div className="space-y-4 max-w-sm">
                       <Input label="Current Password" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} leftIcon={<Lock size={15} />} required />
                       <Input label="New Password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} leftIcon={<Lock size={15} />} required />
