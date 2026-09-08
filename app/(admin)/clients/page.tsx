@@ -23,6 +23,9 @@ import {
   X,
   Check,
   Trash2,
+  Sparkles,
+  ArrowUpDown,
+  FileText,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -30,6 +33,8 @@ import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { Badge } from '@/components/ui/Badge'
 import { Spinner } from '@/components/ui/Spinner'
+import { QuickClientCreationModal } from '@/components/clients/QuickClientCreationModal'
+import { ClientInformationTemplatesModal } from '@/components/clients/ClientInformationTemplatesModal'
 import {
   COLLECTIONS,
   getDocuments,
@@ -48,9 +53,12 @@ export default function ClientsPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [sortBy, setSortBy] = useState<'recent' | 'name' | 'balance' | 'projects'>('recent')
 
   // Modal States
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [isQuickAddOpen, setIsQuickAddOpen] = useState(false)
+  const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false)
   const [editingClient, setEditingClient] = useState<Client | null>(null)
   const [deactivatingClient, setDeactivatingClient] = useState<Client | null>(null)
   const [deletingClient, setDeletingClient] = useState<Client | null>(null)
@@ -218,23 +226,44 @@ export default function ClientsPage() {
     }
   }
 
-  // Filtered clients list
-  const filteredClients = clients.filter((c) => {
-    const matchesSearch =
-      c.fullName.toLowerCase().includes(search.toLowerCase()) ||
-      c.email.toLowerCase().includes(search.toLowerCase()) ||
-      (c.company && c.company.toLowerCase().includes(search.toLowerCase())) ||
-      (c.phone && c.phone.includes(search))
+  const saveClientDirectly = async (payload: any): Promise<string> => {
+    const newClientId = await addDocument(COLLECTIONS.CLIENTS, payload)
+    return newClientId
+  }
 
-    const matchesStatus =
-      statusFilter === 'all'
-        ? true
-        : statusFilter === 'active'
-        ? c.status === 'active'
-        : c.status === 'inactive'
+  // Filtered & sorted clients list
+  const filteredClients = clients
+    .filter((c) => {
+      const matchesSearch =
+        c.fullName.toLowerCase().includes(search.toLowerCase()) ||
+        c.email.toLowerCase().includes(search.toLowerCase()) ||
+        (c.company && c.company.toLowerCase().includes(search.toLowerCase())) ||
+        (c.phone && c.phone.includes(search))
 
-    return matchesSearch && matchesStatus
-  })
+      const matchesStatus =
+        statusFilter === 'all'
+          ? true
+          : statusFilter === 'active'
+          ? c.status === 'active'
+          : c.status === 'inactive'
+
+      return matchesSearch && matchesStatus
+    })
+    .sort((a, b) => {
+      if (sortBy === 'name') {
+        return (a.fullName || '').localeCompare(b.fullName || '')
+      }
+      if (sortBy === 'balance') {
+        return (b.outstandingBalance || 0) - (a.outstandingBalance || 0)
+      }
+      if (sortBy === 'projects') {
+        return (b.projectCount || 0) - (a.projectCount || 0)
+      }
+      // 'recent' default
+      const timeA = (a.createdAt as any)?.toMillis ? (a.createdAt as any).toMillis() : 0
+      const timeB = (b.createdAt as any)?.toMillis ? (b.createdAt as any).toMillis() : 0
+      return timeB - timeA
+    })
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -243,9 +272,26 @@ export default function ClientsPage() {
         title="Clients"
         subtitle="Manage client records, view project history, and track payment balances."
         action={
-          <Button onClick={openAddModal} variant="primary" icon={<UserPlus size={18} />}>
-            Add Client
-          </Button>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <Button
+              onClick={() => setIsTemplatesModalOpen(true)}
+              variant="outline"
+              icon={<FileText size={16} />}
+            >
+              Templates
+            </Button>
+            <Button
+              onClick={() => setIsQuickAddOpen(true)}
+              variant="outline"
+              className="border-accent-300 text-accent-700 hover:bg-accent-50"
+              icon={<Sparkles size={16} className="text-accent-600" />}
+            >
+              Quick Add (Paste)
+            </Button>
+            <Button onClick={openAddModal} variant="primary" icon={<UserPlus size={18} />}>
+              Add Client
+            </Button>
+          </div>
         }
       />
 
@@ -260,7 +306,7 @@ export default function ClientsPage() {
           />
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2 text-sm text-gray-500">
             <Filter size={16} />
             <span>Status:</span>
@@ -273,6 +319,21 @@ export default function ClientsPage() {
             <option value="all">All Clients</option>
             <option value="active">Active Only</option>
             <option value="inactive">Inactive Only</option>
+          </select>
+
+          <div className="flex items-center gap-2 text-sm text-gray-500 ml-1">
+            <ArrowUpDown size={15} />
+            <span>Sort:</span>
+          </div>
+          <select
+            value={sortBy}
+            onChange={(e: any) => setSortBy(e.target.value)}
+            className="px-3.5 py-2 rounded-xl border border-border bg-white text-sm font-medium focus:ring-2 focus:ring-accent-500 outline-none"
+          >
+            <option value="recent">Most Recent</option>
+            <option value="name">Name (A-Z)</option>
+            <option value="balance">Highest Outstanding</option>
+            <option value="projects">Most Projects</option>
           </select>
         </div>
       </div>
@@ -425,6 +486,25 @@ export default function ClientsPage() {
         size="md"
       >
         <form onSubmit={handleSaveClient} className="space-y-4">
+          {!editingClient && (
+            <div className="p-3 bg-accent-50/60 rounded-xl border border-accent-200/70 flex items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2 text-accent-900">
+                <Sparkles size={15} className="text-accent-600 shrink-0" />
+                <span>Have a WhatsApp message or raw notes?</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAddModalOpen(false)
+                  setIsQuickAddOpen(true)
+                }}
+                className="text-xs font-semibold text-accent-700 hover:text-accent-900 underline shrink-0 cursor-pointer"
+              >
+                Use Quick Paste
+              </button>
+            </div>
+          )}
+
           <Input
             label="Full Name *"
             placeholder="e.g. Ama Mensah"
@@ -585,6 +665,39 @@ export default function ClientsPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Quick Client Creation Modal (Paste from WhatsApp / Notes) */}
+      <QuickClientCreationModal
+        isOpen={isQuickAddOpen}
+        onClose={() => setIsQuickAddOpen(false)}
+        onApplyToNormalForm={(extractedData) => {
+          setFormData({
+            fullName: extractedData.fullName || '',
+            email: extractedData.email || '',
+            phone: extractedData.phone || '',
+            whatsappNumber: extractedData.whatsappNumber || extractedData.phone || '',
+            company: extractedData.company || '',
+            address: extractedData.address || '',
+            notes: extractedData.notes
+              ? `${extractedData.notes}${extractedData.serviceOrProject ? `\nRequested Service: ${extractedData.serviceOrProject}` : ''}`
+              : extractedData.serviceOrProject
+              ? `Requested Service: ${extractedData.serviceOrProject}`
+              : '',
+            status: 'active',
+          })
+          setIsAddModalOpen(true)
+        }}
+        onClientCreatedDirectly={(newClientId) => {
+          router.push(`/clients/${newClientId}?action=new-project`)
+        }}
+        saveClientDirectly={saveClientDirectly}
+      />
+
+      {/* Client Information Templates Modal (WhatsApp / Intake / Briefs) */}
+      <ClientInformationTemplatesModal
+        isOpen={isTemplatesModalOpen}
+        onClose={() => setIsTemplatesModalOpen(false)}
+      />
     </div>
   )
 }

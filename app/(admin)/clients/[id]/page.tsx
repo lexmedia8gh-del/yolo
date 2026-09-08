@@ -37,6 +37,7 @@ import { where, orderBy } from '@/lib/firebase/firestore'
 import type { Client, Project, Invoice, Payment, ClientLink } from '@/lib/types'
 import { formatCurrency, formatDate, getStatusColor, copyToClipboard } from '@/lib/utils'
 import { NewProjectWizard } from '@/components/projects/NewProjectWizard'
+import { ClientInformationTemplatesModal } from '@/components/clients/ClientInformationTemplatesModal'
 import toast from 'react-hot-toast'
 
 type TabId = 'projects' | 'invoices' | 'payments' | 'links' | 'notes' | 'communication'
@@ -59,8 +60,9 @@ export default function ClientProfilePage() {
   const [whatsappMessages, setWhatsappMessages] = useState<any[]>([])
   const [tabLoading, setTabLoading] = useState(false)
 
-  // Wizard
+  // Wizard & Template Modals
   const [showWizard, setShowWizard] = useState(false)
+  const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false)
 
   useEffect(() => {
     if (searchParams.get('action') === 'new-project') {
@@ -204,13 +206,22 @@ export default function ClientProfilePage() {
           </div>
         </div>
 
-        <Button
-          variant="primary"
-          icon={<Plus size={15} />}
-          onClick={() => setShowWizard(true)}
-        >
-          Create Project / Select Service
-        </Button>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <Button
+            variant="outline"
+            icon={<FileText size={15} />}
+            onClick={() => setIsTemplatesModalOpen(true)}
+          >
+            Intake & Templates
+          </Button>
+          <Button
+            variant="primary"
+            icon={<Plus size={15} />}
+            onClick={() => setShowWizard(true)}
+          >
+            Create Project / Select Service
+          </Button>
+        </div>
       </div>
 
       {/* Action Banner for Starting Project */}
@@ -727,6 +738,16 @@ export default function ClientProfilePage() {
           </div>
         </div>
       </div>
+
+      {/* Client Information & Follow-up Templates Modal */}
+      {client && (
+        <ClientInformationTemplatesModal
+          isOpen={isTemplatesModalOpen}
+          onClose={() => setIsTemplatesModalOpen(false)}
+          defaultClientName={client.fullName}
+          defaultPhoneNumber={client.whatsappNumber || client.phone}
+        />
+      )}
     </div>
   )
 }
