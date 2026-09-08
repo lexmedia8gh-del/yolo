@@ -517,7 +517,7 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
                 <div className="py-12 text-center space-y-3 bg-gray-50 rounded-xl border border-dashed border-gray-300">
                   <PackageIcon size={32} className="mx-auto text-gray-400" />
                   <p className="text-sm font-semibold text-gray-700">No packages for this service</p>
-                  <p className="text-xs text-gray-500">Go to Packages and create packages linked to "{selectedService.name}".</p>
+                  <p className="text-xs text-gray-500">Go to Packages and create packages linked to &quot;{selectedService.name}&quot;.</p>
                 </div>
               ) : (
                 <div className="space-y-3">

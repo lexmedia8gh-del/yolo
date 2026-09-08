@@ -93,7 +93,7 @@ export default function WhatsAppPage() {
           </div>
           <h4 className="font-bold text-gray-900 text-sm">One-Click Dispatch</h4>
           <p className="text-xs text-muted">
-            Admins can currently click "Send via WhatsApp" on any project or payment link to dispatch instantly.
+            Admins can currently click &quot;Send via WhatsApp&quot; on any project or payment link to dispatch instantly.
           </p>
         </div>
 

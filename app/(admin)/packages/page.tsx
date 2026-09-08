@@ -356,7 +356,7 @@ export default function PackagesPage() {
                   {/* Features List */}
                   {pkg.whatsIncluded && pkg.whatsIncluded.length > 0 && (
                     <div className="space-y-2 pt-2 border-t border-border/60">
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">What's Included</p>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">What&apos;s Included</p>
                       <ul className="space-y-1.5">
                         {pkg.whatsIncluded.map((item) => (
                           <li key={item.id} className="flex items-start gap-2 text-xs text-gray-700">

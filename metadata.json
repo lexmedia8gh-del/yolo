@@ -1,0 +1,6 @@
+{
+  "name": "Lexmedia",
+  "description": "Client and payment management system for Lexmedia creative agency.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
