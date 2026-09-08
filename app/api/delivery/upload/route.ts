@@ -3,8 +3,7 @@ import { getAdminDb, requireAdmin } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 import { FieldValue } from 'firebase-admin/firestore'
 import { sendDeliveryPaymentRequiredEmail } from '@/lib/services/brevo'
-import fs from 'fs'
-import path from 'path'
+import { getSupabaseServerClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,22 +38,39 @@ export async function POST(req: NextRequest) {
     const sanitizedName = file ? file.name.replace(/[^a-zA-Z0-9._\- ]/g, '_').trim() || 'file' : 'file'
     const id = fileDocId || Math.random().toString(36).substring(2, 15)
 
-    // Save to local public storage directory: public/uploads/deliveries/{projectId}/{deliveryId}/{id}/{sanitizedName}
-    const relativeStorageDir = path.join('uploads', 'deliveries', projectId, deliveryId, id)
-    const absoluteTargetDir = path.join(process.cwd(), 'public', relativeStorageDir)
+    let downloadUrl = directUrl
+    let storagePath = directStoragePath || `deliveries/${projectId}/${deliveryId}/${id}/${sanitizedName}`
 
     if (!directUrl) {
       if (!buffer) {
         return NextResponse.json({ error: 'Missing file upload buffer' }, { status: 400 })
       }
-      await fs.promises.mkdir(absoluteTargetDir, { recursive: true })
-      const absoluteFilePath = path.join(absoluteTargetDir, sanitizedName)
-      await fs.promises.writeFile(absoluteFilePath, buffer)
+
+      // Secure server-side upload directly to Supabase Storage (no local filesystem)
+      const supabase = getSupabaseServerClient()
+      const { error: uploadError } = await supabase.storage
+        .from('Delivery files')
+        .upload(storagePath, buffer, {
+          contentType: file ? (file.type || 'application/octet-stream') : 'application/octet-stream',
+          upsert: true
+        })
+
+      if (uploadError) {
+        console.error('[Supabase Server Upload Error] Upload failed:', uploadError)
+        return NextResponse.json(
+          { error: `Supabase Storage upload failed: ${uploadError.message}` },
+          { status: 500 }
+        )
+      }
+
+      // Fetch the public URL of the uploaded object
+      const { data: urlData } = supabase.storage
+        .from('Delivery files')
+        .getPublicUrl(storagePath)
+
+      downloadUrl = urlData?.publicUrl || ''
     }
 
-    // Web-accessible download URL via streaming endpoint
-    const downloadUrl = directUrl || `/api/files?id=${id}`
-    const storagePath = directStoragePath || `deliveries/${projectId}/${deliveryId}/${id}/${sanitizedName}`
     const fileName = directUrl ? directFileName : (file ? file.name : '')
     const fileSize = directUrl ? (parseInt(directFileSize, 10) || 0) : (file ? file.size : 0)
     const fileType = directUrl ? directFileType : (file ? (file.type || file.name.split('.').pop() || 'application/octet-stream') : 'application/octet-stream')

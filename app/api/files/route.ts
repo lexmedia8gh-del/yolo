@@ -1,6 +1,7 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
+import { getSupabaseServerClient } from '@/lib/supabase/server'
 import fs from 'fs'
 import path from 'path'
 
@@ -31,10 +32,33 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Storage path not found' }, { status: 404 })
     }
 
+    // Try downloading from Supabase Storage first (durable cloud storage)
+    try {
+      const supabase = getSupabaseServerClient()
+      const { data: fileBlob, error: downloadError } = await supabase.storage
+        .from('Delivery files')
+        .download(storagePath)
+
+      if (fileBlob && !downloadError) {
+        const fileBuffer = Buffer.from(await fileBlob.arrayBuffer())
+        return new NextResponse(fileBuffer, {
+          status: 200,
+          headers: {
+            'Content-Type': mimeType,
+            'Content-Disposition': 'inline; filename="' + encodeURIComponent(fileName) + '"',
+            'Content-Length': fileBuffer.length.toString(),
+          },
+        })
+      }
+    } catch (supabaseErr) {
+      console.warn('[Storage Server Stream Warning] Failed to fetch from Supabase Storage:', supabaseErr)
+    }
+
+    // Fallback to local filesystem for legacy compatibility
     const localFilePath = path.join(process.cwd(), 'public', 'uploads', storagePath)
 
     if (!fs.existsSync(localFilePath)) {
-      return NextResponse.json({ error: 'File on disk not found' }, { status: 404 })
+      return NextResponse.json({ error: 'File on disk or cloud storage not found' }, { status: 404 })
     }
 
     const fileBuffer = await fs.promises.readFile(localFilePath)
@@ -43,7 +67,7 @@ export async function GET(req: NextRequest) {
       status: 200,
       headers: {
         'Content-Type': mimeType,
-        'Content-Disposition': 'inline; filename=\"' + encodeURIComponent(fileName) + '\"',
+        'Content-Disposition': 'inline; filename="' + encodeURIComponent(fileName) + '"',
         'Content-Length': fileBuffer.length.toString(),
       },
     })
@@ -52,3 +76,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to retrieve file' }, { status: 500 })
   }
 }
+
