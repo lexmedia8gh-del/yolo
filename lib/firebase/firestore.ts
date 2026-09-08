@@ -44,6 +44,7 @@ export const COLLECTIONS = {
   DELIVERY_FILES: 'deliveryFiles',
   REMINDERS: 'reminders',
   TASKS: 'tasks',
+  QUICK_JOBS: 'quickJobs',
 } as const
 
 // Helper for local storage persistence fallback

@@ -17,6 +17,7 @@ import {
   BellRing,
   Settings,
   ChevronRight,
+  Zap,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/hooks/useAuth'
@@ -27,6 +28,11 @@ const navItems = [
     label: 'Dashboard',
     href: '/dashboard',
     icon: LayoutDashboard,
+  },
+  {
+    label: 'Quick Jobs',
+    href: '/quick-jobs',
+    icon: Zap,
   },
   {
     label: 'Smart Reminders',

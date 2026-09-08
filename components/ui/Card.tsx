@@ -26,7 +26,7 @@ export function Card({
     <div
       className={cn(
         'rounded-xl border border-gray-200/80 dark:border-gray-800/90 bg-white dark:bg-gray-900 shadow-sm text-gray-900 dark:text-gray-100',
-        hover && 'transition-all duration-150 hover:border-gray-300 dark:hover:border-gray-700 hover:shadow',
+        hover && 'transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-300 dark:hover:border-gray-700 hover:shadow-md',
         paddingClasses[padding],
         className
       )}

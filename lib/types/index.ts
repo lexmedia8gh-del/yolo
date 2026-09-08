@@ -492,6 +492,42 @@ export interface DashboardStats {
   overdueInvoices: number
 }
 
+// ─── Quick Jobs ──────────────────────────────────────────────
+export type QuickJobStatus = 'Pending' | 'In Progress' | 'Ready for Delivery' | 'Completed' | 'Cancelled'
+
+export interface QuickJobServiceSnapshot {
+  id: string
+  name: string
+  category: string
+  description?: string
+  defaultPrice: number
+}
+
+export interface QuickJob {
+  id: string
+  clientId: string
+  clientName: string
+  clientEmail?: string
+  clientPhone?: string
+  serviceId?: string
+  serviceSnapshot?: QuickJobServiceSnapshot
+  jobDescription: string
+  originalAgreedPrice: number
+  quantity: number
+  deadline?: string // YYYY-MM-DD
+  notes?: string
+  status: QuickJobStatus
+  paymentStatus: PaymentStatus
+  depositPaid: number
+  amountPaid: number
+  outstandingBalance: number
+  currency: string
+  fileIds?: string[]
+  createdAt: Timestamp | string
+  updatedAt: Timestamp | string
+  createdBy?: string
+}
+
 // ─── Smart Reminders & Tasks ─────────────────────────────────
 export type ReminderStatus = 'pending' | 'completed' | 'snoozed' | 'cancelled'
 export type ReminderCategory = 'field' | 'event' | 'payment' | 'milestone' | 'client' | 'general'
