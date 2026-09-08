@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import {
@@ -23,6 +23,10 @@ import {
   ExternalLink,
   FolderKanban,
   AlertCircle,
+  Eye,
+  PiggyBank,
+  Send,
+  Copy,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -38,6 +42,10 @@ import type { Client, Project, Invoice, Payment, ClientLink } from '@/lib/types'
 import { formatCurrency, formatDate, getStatusColor, copyToClipboard } from '@/lib/utils'
 import { NewProjectWizard } from '@/components/projects/NewProjectWizard'
 import { ClientInformationTemplatesModal } from '@/components/clients/ClientInformationTemplatesModal'
+import { RecordPaymentModal } from '@/components/payments/RecordPaymentModal'
+import { PaymentDetailsModal } from '@/components/payments/PaymentDetailsModal'
+import { PaymentLinkModal } from '@/components/payments/PaymentLinkModal'
+import { PreparePaymentMessageModal } from '@/components/payments/PreparePaymentMessageModal'
 import toast from 'react-hot-toast'
 
 type TabId = 'projects' | 'invoices' | 'payments' | 'links' | 'notes' | 'communication'
@@ -63,6 +71,39 @@ export default function ClientProfilePage() {
   // Wizard & Template Modals
   const [showWizard, setShowWizard] = useState(false)
   const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false)
+
+  // Payment & Link Modals
+  const [showRecordPaymentModal, setShowRecordPaymentModal] = useState(false)
+  const [showPaymentLinkModal, setShowPaymentLinkModal] = useState(false)
+  const [selectedPaymentForDetails, setSelectedPaymentForDetails] = useState<Payment | null>(null)
+  const [selectedLinkForMessage, setSelectedLinkForMessage] = useState<ClientLink | null>(null)
+
+  const reloadFinancials = useCallback(async () => {
+    if (!id) return
+    try {
+      const [updatedClient, updatedProjects, updatedInvoices, updatedPayments, updatedLinks] =
+        await Promise.all([
+          getDocument<Client>(COLLECTIONS.CLIENTS, id),
+          getDocuments<Project>(COLLECTIONS.PROJECTS, [where('clientId', '==', id)]),
+          getDocuments<Invoice>(COLLECTIONS.INVOICES, [where('clientId', '==', id)]),
+          getDocuments<Payment>(COLLECTIONS.PAYMENTS, [where('clientId', '==', id)]),
+          getDocuments<ClientLink>(COLLECTIONS.CLIENT_LINKS, [where('clientId', '==', id)]),
+        ])
+      if (updatedClient) setClient(updatedClient)
+      setProjects(updatedProjects)
+      setInvoices(updatedInvoices)
+      setPayments(
+        [...updatedPayments].sort((a, b) => {
+          const aDate = a.paidAt ? new Date(a.paidAt as any).getTime() : 0
+          const bDate = b.paidAt ? new Date(b.paidAt as any).getTime() : 0
+          return bDate - aDate
+        })
+      )
+      setLinks(updatedLinks)
+    } catch (err) {
+      console.warn('Error reloading client financials:', err)
+    }
+  }, [id])
 
   useEffect(() => {
     if (searchParams.get('action') === 'new-project') {
@@ -213,6 +254,20 @@ export default function ClientProfilePage() {
             onClick={() => setIsTemplatesModalOpen(true)}
           >
             Intake & Templates
+          </Button>
+          <Button
+            variant="outline"
+            icon={<Link2 size={15} />}
+            onClick={() => setShowPaymentLinkModal(true)}
+          >
+            Payment Link
+          </Button>
+          <Button
+            variant="outline"
+            icon={<CreditCard size={15} />}
+            onClick={() => setShowRecordPaymentModal(true)}
+          >
+            Record Payment / Deposit
           </Button>
           <Button
             variant="primary"
@@ -544,33 +599,96 @@ export default function ClientProfilePage() {
                   {/* Payments Tab */}
                   {activeTab === 'payments' && (
                     <div className="space-y-4">
-                      <h4 className="font-bold text-gray-900 text-sm">Payments ({payments.length})</h4>
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div>
+                          <h4 className="font-bold text-gray-900 text-sm">Payments & Deposits ({payments.length})</h4>
+                          <p className="text-xs text-gray-500">View and record client deposits and payments.</p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          icon={<Plus size={14} />}
+                          onClick={() => setShowRecordPaymentModal(true)}
+                        >
+                          Record Deposit / Payment
+                        </Button>
+                      </div>
+
                       {payments.length === 0 ? (
                         <div className="py-10 text-center bg-gray-50 rounded-xl border border-dashed border-border">
                           <CreditCard size={28} className="mx-auto mb-2 text-gray-400" />
-                          <p className="text-sm text-muted">No payment records yet.</p>
+                          <p className="text-sm text-muted">No payment records yet for this client.</p>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="mt-3"
+                            icon={<Plus size={14} />}
+                            onClick={() => setShowRecordPaymentModal(true)}
+                          >
+                            Record First Deposit
+                          </Button>
                         </div>
                       ) : (
                         <div className="space-y-2">
-                          {payments.map((pmt) => (
-                            <div
-                              key={pmt.id}
-                              className="flex items-center justify-between p-4 rounded-xl border border-border"
-                            >
-                              <div className="flex-1 min-w-0">
-                                <p className="font-mono text-xs text-gray-600 truncate">{pmt.paystackReference}</p>
-                                <p className="text-xs text-muted mt-0.5">
-                                  Invoice: {pmt.invoiceNumber} · {formatDate(pmt.paidAt)}
-                                </p>
+                          {payments.map((pmt) => {
+                            const isDeposit = pmt.paymentType === 'deposit' || pmt.isDeposit
+                            return (
+                              <div
+                                key={pmt.id}
+                                onClick={() => setSelectedPaymentForDetails(pmt)}
+                                className="flex items-center justify-between p-4 rounded-xl border border-border hover:bg-gray-50 transition-colors cursor-pointer"
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span
+                                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                        isDeposit
+                                          ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                          : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                      }`}
+                                    >
+                                      {isDeposit ? 'Deposit' : 'Payment'}
+                                    </span>
+                                    <p className="font-mono text-xs text-gray-700 truncate">
+                                      {pmt.paystackReference}
+                                    </p>
+                                  </div>
+                                  <p className="text-xs text-muted mt-1">
+                                    {pmt.invoiceNumber ? `Invoice: ${pmt.invoiceNumber}` : 'Direct Client Account'}
+                                    {' · '}
+                                    <span className="capitalize">{pmt.paymentMethod || pmt.channel || 'Manual'}</span>
+                                    {' · '}
+                                    {formatDate(pmt.paidAt)}
+                                  </p>
+                                  {pmt.notes && (
+                                    <p className="text-xs text-gray-500 italic mt-0.5 truncate">
+                                      &ldquo;{pmt.notes}&rdquo;
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-3 ml-4 flex-shrink-0">
+                                  <div className="text-right">
+                                    <p className="text-sm font-bold text-emerald-600">
+                                      {formatCurrency(pmt.amount)}
+                                    </p>
+                                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${getStatusColor(pmt.status)}`}>
+                                      {pmt.status}
+                                    </span>
+                                  </div>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setSelectedPaymentForDetails(pmt)
+                                    }}
+                                    className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                                    title="View Details"
+                                  >
+                                    <Eye size={15} />
+                                  </button>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-3 ml-4 flex-shrink-0">
-                                <p className="text-sm font-bold text-success-600">{formatCurrency(pmt.amount)}</p>
-                                <span className={`text-xs font-semibold px-2 py-1 rounded-lg ${getStatusColor(pmt.status)}`}>
-                                  {pmt.status}
-                                </span>
-                              </div>
-                            </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       )}
                     </div>
@@ -579,35 +697,58 @@ export default function ClientProfilePage() {
                   {/* Payment Links Tab */}
                   {activeTab === 'links' && (
                     <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-bold text-gray-900 text-sm">Payment Links ({links.length})</h4>
-                        <Link href={`/links?client=${encodeURIComponent(client.fullName)}`}>
-                          <Button size="sm" variant="outline" icon={<Plus size={14} />}>
-                            New Link
-                          </Button>
-                        </Link>
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div>
+                          <h4 className="font-bold text-gray-900 text-sm">Payment Links ({links.length})</h4>
+                          <p className="text-xs text-muted">Online Paystack checkout and custom supplied links.</p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          icon={<Plus size={14} />}
+                          onClick={() => setShowPaymentLinkModal(true)}
+                        >
+                          Add / Create Link
+                        </Button>
                       </div>
+
                       {links.length === 0 ? (
                         <div className="py-10 text-center bg-gray-50 rounded-xl border border-dashed border-border">
                           <Link2 size={28} className="mx-auto mb-2 text-gray-400" />
-                          <p className="text-sm text-muted">No payment links yet.</p>
+                          <p className="text-sm text-muted">No payment links saved yet for this client.</p>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="mt-3"
+                            icon={<Plus size={14} />}
+                            onClick={() => setShowPaymentLinkModal(true)}
+                          >
+                            Save First Link
+                          </Button>
                         </div>
                       ) : (
                         <div className="space-y-2">
                           {links.map((link) => {
-                            const appUrl = process.env.NEXT_PUBLIC_APP_URL || ''
-                            const payUrl = `${appUrl}/pay/${link.token}`
+                            const appUrl = typeof window !== 'undefined' ? window.location.origin : ''
+                            const payUrl = link.url || `${appUrl}/pay/${link.token}`
                             return (
                               <div
                                 key={link.id}
-                                className="p-4 rounded-xl border border-border hover:bg-gray-50 transition-colors space-y-2"
+                                className="p-4 rounded-xl border border-border hover:bg-gray-50 transition-colors space-y-2.5"
                               >
                                 <div className="flex items-center justify-between">
                                   <div>
-                                    <p className="font-semibold text-sm text-gray-900">
-                                      {link.invoiceNumber || 'Payment Link'}
-                                    </p>
-                                    <p className="text-xs text-muted">{formatDate(link.createdAt)}</p>
+                                    <div className="flex items-center gap-2">
+                                      <p className="font-semibold text-sm text-gray-900">
+                                        {link.title || link.invoiceNumber || 'Payment Link'}
+                                      </p>
+                                      {link.isCustom && (
+                                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
+                                          Supplied Link
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-muted mt-0.5">{formatDate(link.createdAt)}</p>
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <p className="font-bold text-gray-900 text-sm">{formatCurrency(link.amount || 0)}</p>
@@ -616,20 +757,40 @@ export default function ClientProfilePage() {
                                     </span>
                                   </div>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                  <code className="flex-1 text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded-lg truncate">
+                                <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                                  <code className="flex-1 text-xs text-gray-600 bg-gray-100 px-2 py-1.5 rounded-lg truncate font-mono min-w-[160px]">
                                     {payUrl}
                                   </code>
-                                  <button
-                                    onClick={async () => {
-                                      await copyToClipboard(payUrl)
-                                      toast.success('Link copied!')
-                                    }}
-                                    className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors text-gray-500"
-                                    title="Copy link"
-                                  >
-                                    <ExternalLink size={14} />
-                                  </button>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <button
+                                      onClick={async () => {
+                                        await copyToClipboard(payUrl)
+                                        toast.success('Link copied!')
+                                      }}
+                                      className="px-2 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors text-gray-600 inline-flex items-center gap-1 text-xs font-medium"
+                                      title="Copy link"
+                                    >
+                                      <Copy size={13} />
+                                      <span>Copy</span>
+                                    </button>
+                                    <button
+                                      onClick={() => setSelectedLinkForMessage(link)}
+                                      className="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-colors inline-flex items-center gap-1 text-xs font-medium border border-emerald-200"
+                                      title="Prepare payment message"
+                                    >
+                                      <MessageSquare size={13} />
+                                      <span>Message</span>
+                                    </button>
+                                    <a
+                                      href={payUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="p-1 rounded-lg hover:bg-gray-200 transition-colors text-gray-500 inline-flex items-center"
+                                      title="Open link"
+                                    >
+                                      <ExternalLink size={14} />
+                                    </a>
+                                  </div>
                                 </div>
                               </div>
                             )
@@ -746,6 +907,58 @@ export default function ClientProfilePage() {
           onClose={() => setIsTemplatesModalOpen(false)}
           defaultClientName={client.fullName}
           defaultPhoneNumber={client.whatsappNumber || client.phone}
+        />
+      )}
+
+      {/* Record Payment / Deposit Modal */}
+      {client && (
+        <RecordPaymentModal
+          isOpen={showRecordPaymentModal}
+          onClose={() => setShowRecordPaymentModal(false)}
+          preselectedClientId={client.id}
+          onSuccess={() => {
+            reloadFinancials()
+            toast.success('Payment successfully recorded')
+          }}
+        />
+      )}
+
+      {/* Payment Details Modal */}
+      <PaymentDetailsModal
+        isOpen={!!selectedPaymentForDetails}
+        onClose={() => setSelectedPaymentForDetails(null)}
+        payment={selectedPaymentForDetails}
+        onPaymentDeleted={() => {
+          reloadFinancials()
+        }}
+      />
+
+      {/* Payment Link Modal */}
+      {client && (
+        <PaymentLinkModal
+          isOpen={showPaymentLinkModal}
+          onClose={() => setShowPaymentLinkModal(false)}
+          preselectedClientId={client.id}
+          onSuccess={() => {
+            reloadFinancials()
+            toast.success('Payment link added')
+          }}
+        />
+      )}
+
+      {/* Prepare Payment Message Modal */}
+      {selectedLinkForMessage && client && (
+        <PreparePaymentMessageModal
+          isOpen={!!selectedLinkForMessage}
+          onClose={() => setSelectedLinkForMessage(null)}
+          client={client}
+          paymentUrl={
+            selectedLinkForMessage.url ||
+            `${typeof window !== 'undefined' ? window.location.origin : ''}/pay/${selectedLinkForMessage.token}`
+          }
+          amount={selectedLinkForMessage.amount}
+          invoiceNumber={selectedLinkForMessage.invoiceNumber}
+          linkTitle={selectedLinkForMessage.title}
         />
       )}
     </div>

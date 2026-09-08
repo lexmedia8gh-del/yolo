@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import {
@@ -20,6 +20,9 @@ import {
   Calendar,
   AlertCircle,
   Edit2,
+  Plus,
+  Eye,
+  PiggyBank,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -33,6 +36,8 @@ import {
 } from '@/lib/firebase/firestore'
 import { where } from '@/lib/firebase/firestore'
 import { ProjectDeliveryManager } from '@/components/delivery/ProjectDeliveryManager'
+import { RecordPaymentModal } from '@/components/payments/RecordPaymentModal'
+import { PaymentDetailsModal } from '@/components/payments/PaymentDetailsModal'
 import type { Project, Invoice, Payment, ClientLink, ProjectStatus } from '@/lib/types'
 import {
   formatCurrency,
@@ -73,43 +78,51 @@ export default function ProjectDetailPage() {
   const [sendingWA, setSendingWA] = useState(false)
   const [waSent, setWaSent] = useState(false)
 
+  // Payment modals
+  const [showRecordPaymentModal, setShowRecordPaymentModal] = useState(false)
+  const [selectedPaymentForDetails, setSelectedPaymentForDetails] = useState<Payment | null>(null)
+
+  const reloadProjectData = useCallback(async () => {
+    if (!id) return
+    try {
+      const proj = await getDocument<Project>(COLLECTIONS.PROJECTS, id)
+      if (proj) setProject(proj)
+
+      if (proj?.clientId) {
+        const cli = await getDocument<any>(COLLECTIONS.CLIENTS, proj.clientId)
+        setClient(cli)
+      }
+
+      if (proj?.invoiceId) {
+        const inv = await getDocument<Invoice>(COLLECTIONS.INVOICES, proj.invoiceId)
+        setInvoice(inv)
+      }
+
+      const pmts = await getDocuments<Payment>(COLLECTIONS.PAYMENTS, [
+        where('projectId', '==', id),
+      ])
+      setPayments(
+        [...pmts].sort((a, b) => {
+          const aDate = a.paidAt ? new Date(a.paidAt as any).getTime() : 0
+          const bDate = b.paidAt ? new Date(b.paidAt as any).getTime() : 0
+          return bDate - aDate
+        })
+      )
+
+      const links = await getDocuments<ClientLink>(COLLECTIONS.CLIENT_LINKS, [
+        where('projectId', '==', id),
+      ])
+      setPaymentLink(links[0] ?? null)
+    } catch (err) {
+      console.error('Project reload error:', err)
+    }
+  }, [id])
+
   useEffect(() => {
     if (!id) return
     setLoading(true)
-
-    const load = async () => {
-      try {
-        const proj = await getDocument<Project>(COLLECTIONS.PROJECTS, id)
-        setProject(proj)
-
-        if (proj?.clientId) {
-          const cli = await getDocument<any>(COLLECTIONS.CLIENTS, proj.clientId)
-          setClient(cli)
-        }
-
-        if (proj?.invoiceId) {
-          const inv = await getDocument<Invoice>(COLLECTIONS.INVOICES, proj.invoiceId)
-          setInvoice(inv)
-        }
-
-        const pmts = await getDocuments<Payment>(COLLECTIONS.PAYMENTS, [
-          where('projectId', '==', id),
-        ])
-        setPayments(pmts)
-
-        const links = await getDocuments<ClientLink>(COLLECTIONS.CLIENT_LINKS, [
-          where('projectId', '==', id),
-        ])
-        setPaymentLink(links[0] ?? null)
-      } catch (err) {
-        console.error(err)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    load()
-  }, [id])
+    reloadProjectData().finally(() => setLoading(false))
+  }, [id, reloadProjectData])
 
   const handleUpdateStatus = async () => {
     if (!project) return
@@ -213,14 +226,24 @@ export default function ProjectDetailPage() {
             </p>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          icon={<Edit2 size={14} />}
-          onClick={() => { setNewStatus(project.status); setShowStatusModal(true) }}
-        >
-          Update Status
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<CreditCard size={14} />}
+            onClick={() => setShowRecordPaymentModal(true)}
+          >
+            Record Deposit / Payment
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<Edit2 size={14} />}
+            onClick={() => { setNewStatus(project.status); setShowStatusModal(true) }}
+          >
+            Update Status
+          </Button>
+        </div>
       </div>
 
       {/* Financial summary */}
@@ -391,30 +414,88 @@ export default function ProjectDetailPage() {
 
           {/* Payments */}
           <div className="bg-white p-5 rounded-xl border border-gray-200/80 shadow-xs">
-            <h3 className="text-sm font-semibold text-gray-900 border-b border-gray-100 pb-3 mb-4">
-              Payment History ({payments.length})
-            </h3>
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3 mb-4">
+              <h3 className="text-sm font-semibold text-gray-900">
+                Payment History ({payments.length})
+              </h3>
+              <Button
+                size="sm"
+                variant="outline"
+                icon={<Plus size={13} />}
+                onClick={() => setShowRecordPaymentModal(true)}
+              >
+                Record Payment
+              </Button>
+            </div>
             {payments.length === 0 ? (
               <div className="py-8 text-center bg-gray-50/50 rounded-lg border border-dashed border-gray-200">
                 <CreditCard size={22} className="mx-auto mb-2 text-gray-400" />
-                <p className="text-xs text-gray-500">No payments recorded yet.</p>
+                <p className="text-xs text-gray-500">No payments recorded yet for this project.</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-2.5"
+                  icon={<Plus size={13} />}
+                  onClick={() => setShowRecordPaymentModal(true)}
+                >
+                  Record Initial Deposit
+                </Button>
               </div>
             ) : (
               <div className="space-y-2">
-                {payments.map((pmt) => (
-                  <div key={pmt.id} className="flex items-center justify-between p-3.5 rounded-lg border border-gray-200/80 hover:bg-gray-50/60 transition-colors">
-                    <div>
-                      <p className="font-mono text-xs text-gray-700">{pmt.paystackReference}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{formatDate(pmt.paidAt)}</p>
+                {payments.map((pmt) => {
+                  const isDeposit = pmt.paymentType === 'deposit' || pmt.isDeposit
+                  return (
+                    <div
+                      key={pmt.id}
+                      onClick={() => setSelectedPaymentForDetails(pmt)}
+                      className="flex items-center justify-between p-3.5 rounded-lg border border-gray-200/80 hover:bg-gray-50/70 transition-colors cursor-pointer"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              isDeposit
+                                ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            }`}
+                          >
+                            {isDeposit ? 'Deposit' : 'Payment'}
+                          </span>
+                          <p className="font-mono text-xs text-gray-700 truncate">{pmt.paystackReference}</p>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          <span className="capitalize">{pmt.paymentMethod || pmt.channel || 'Manual'}</span>
+                          {' · '}
+                          {formatDate(pmt.paidAt)}
+                        </p>
+                        {pmt.notes && (
+                          <p className="text-xs text-gray-500 italic mt-0.5 truncate">
+                            &ldquo;{pmt.notes}&rdquo;
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2.5 ml-3 shrink-0">
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-emerald-600">{formatCurrency(pmt.amount)}</p>
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${getStatusColor(pmt.status)}`}>
+                            {pmt.status}
+                          </span>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelectedPaymentForDetails(pmt)
+                          }}
+                          className="p-1 rounded-md text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                          title="View Details"
+                        >
+                          <Eye size={15} />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <p className="text-sm font-bold text-emerald-600">{formatCurrency(pmt.amount)}</p>
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${getStatusColor(pmt.status)}`}>
-                        {pmt.status}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -449,6 +530,31 @@ export default function ProjectDetailPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Record Payment / Deposit Modal */}
+      {project && (
+        <RecordPaymentModal
+          isOpen={showRecordPaymentModal}
+          onClose={() => setShowRecordPaymentModal(false)}
+          preselectedProjectId={project.id}
+          preselectedClientId={project.clientId}
+          preselectedInvoiceId={project.invoiceId}
+          onSuccess={() => {
+            reloadProjectData()
+            toast.success('Payment recorded successfully')
+          }}
+        />
+      )}
+
+      {/* Payment Details Modal */}
+      <PaymentDetailsModal
+        isOpen={!!selectedPaymentForDetails}
+        onClose={() => setSelectedPaymentForDetails(null)}
+        payment={selectedPaymentForDetails}
+        onPaymentDeleted={() => {
+          reloadProjectData()
+        }}
+      />
     </div>
   )
 }

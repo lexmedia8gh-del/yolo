@@ -205,13 +205,20 @@ export interface Payment {
   clientId: string
   clientName: string
   projectId?: string
+  projectName?: string
   paystackReference: string
+  reference?: string
   amount: number
   currency: string
+  paymentType?: 'deposit' | 'payment' | 'part_payment' | 'milestone'
+  isDeposit?: boolean
   paymentMethod?: string
-  channel?: string // card, bank, ussd, etc.
+  channel?: string // card, bank, momo, cash, ussd, etc.
   paidAt: Timestamp
-  status: 'success' | 'failed' | 'abandoned'
+  status: 'success' | 'failed' | 'abandoned' | 'pending'
+  notes?: string
+  recordedBy?: string
+  source?: 'manual' | 'paystack' | 'link' | 'verify'
   metadata?: Record<string, unknown>
   createdAt: Timestamp
 }
@@ -230,6 +237,12 @@ export interface ClientLink {
   invoiceNumber?: string
   amount?: number
   currency?: string
+  title?: string
+  notes?: string
+  customUrl?: string // for user-supplied payment links
+  url?: string
+  linkType?: 'system' | 'custom'
+  isCustom?: boolean
   status: 'Pending Payment' | 'Payment Processing' | 'Paid' | 'Failed' | 'Expired' | 'Cancelled' | 'active' | 'disabled' | 'archived'
   paymentStatus: PaymentStatus
   expiresAt?: Timestamp
@@ -282,6 +295,10 @@ export interface Delivery {
   requiresFullPayment: boolean
   releasedAt?: Timestamp | null
   releasedBy?: string
+  adminOverride?: boolean
+  adminOverrideReason?: string | null
+  adminOverrideAt?: Timestamp | null
+  adminOverrideBy?: string | null
   firstAccessedAt?: Timestamp | null
   lastAccessedAt?: Timestamp | null
   accessCount: number

@@ -26,6 +26,8 @@ import {
   X,
   Check,
   AlertTriangle,
+  ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -102,6 +104,13 @@ export function ProjectDeliveryManager({
   const [sendingWA, setSendingWA] = useState(false)
   const [waSent, setWaSent] = useState(false)
   const [canonicalUrl, setCanonicalUrl] = useState('')
+
+  // Admin Release & Confirmation Modal States
+  const [showAdminReleaseModal, setShowAdminReleaseModal] = useState(false)
+  const [showRevokeReleaseModal, setShowRevokeReleaseModal] = useState(false)
+  const [adminReleaseReason, setAdminReleaseReason] = useState('')
+  const [adminReleaseConfirmed, setAdminReleaseConfirmed] = useState(false)
+  const [revokeConfirmed, setRevokeConfirmed] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -321,25 +330,25 @@ export function ProjectDeliveryManager({
     }
   }
 
-  // 6. Toggle Release Delivery (Manual Admin Override)
-  const handleToggleRelease = async () => {
+  // 6. Release Delivery Operations
+  const executeAdminRelease = async () => {
     if (!delivery) return
     setIsReleasing(true)
     try {
-      const willRelease = !delivery.isReleased
       const res = await fetch('/api/delivery/release', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           deliveryId: delivery.id,
-          release: willRelease,
+          release: true,
+          adminOverride: true,
+          reason: adminReleaseReason.trim() || 'Manual administrator override',
         }),
       })
 
       const data = await res.json()
-
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to update release status')
+        throw new Error(data.error || 'Failed to release delivery')
       }
 
       setCanonicalUrl(data.publicUrl || '')
@@ -347,29 +356,106 @@ export function ProjectDeliveryManager({
         prev
           ? {
               ...prev,
-              isReleased: willRelease,
+              isReleased: true,
+              adminOverride: true,
+              adminOverrideReason: adminReleaseReason.trim() || 'Manual administrator override',
+              adminOverrideAt: Timestamp.now() as any,
               accessToken: data.accessToken || prev.accessToken,
-              status: data.status || prev.status,
-              releasedAt: willRelease ? (Timestamp.now() as any) : null,
+              status: data.status || 'Ready for Delivery',
+              releasedAt: Timestamp.now() as any,
             }
           : null
       )
-      if (willRelease) {
-        if (data.emailNotification?.sent) {
-          toast.success('Delivery released & Brevo transactional email sent!')
-        } else if (data.emailNotification?.skipped) {
-          toast.success('Delivery released to client (Email already sent previously).')
-        } else if (data.emailNotification?.error) {
-          toast.success(`Delivery released, but email warning: ${data.emailNotification.error}`)
-        } else {
-          toast.success('Delivery successfully released to client!')
-        }
-      } else {
-        toast.success('Release revoked.')
-      }
+
+      toast.success('Admin Release Override Activated! Delivery unlocked for client.')
+      setShowAdminReleaseModal(false)
+      setAdminReleaseReason('')
+      setAdminReleaseConfirmed(false)
     } catch (err: any) {
-      console.error('Release toggle error:', err)
-      toast.error(err?.message || 'Failed to update release status.')
+      console.error('Admin release error:', err)
+      toast.error(err?.message || 'Failed to execute admin release.')
+    } finally {
+      setIsReleasing(false)
+    }
+  }
+
+  const executeRevokeRelease = async () => {
+    if (!delivery) return
+    setIsReleasing(true)
+    try {
+      const res = await fetch('/api/delivery/release', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deliveryId: delivery.id,
+          release: false,
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to revoke release')
+      }
+
+      setDelivery((prev) =>
+        prev
+          ? {
+              ...prev,
+              isReleased: false,
+              adminOverride: false,
+              adminOverrideReason: undefined,
+              adminOverrideAt: undefined,
+              status: 'Ready for Delivery',
+            }
+          : null
+      )
+
+      toast.success('Delivery release revoked. Files are now locked.')
+      setShowRevokeReleaseModal(false)
+      setRevokeConfirmed(false)
+    } catch (err: any) {
+      console.error('Revoke release error:', err)
+      toast.error(err?.message || 'Failed to revoke release.')
+    } finally {
+      setIsReleasing(false)
+    }
+  }
+
+  const handleDirectRelease = async () => {
+    if (!delivery) return
+    setIsReleasing(true)
+    try {
+      const res = await fetch('/api/delivery/release', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deliveryId: delivery.id,
+          release: true,
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to release delivery')
+      }
+
+      setCanonicalUrl(data.publicUrl || '')
+      setDelivery((prev) =>
+        prev
+          ? {
+              ...prev,
+              isReleased: true,
+              accessToken: data.accessToken || prev.accessToken,
+              status: data.status || 'Ready for Delivery',
+              releasedAt: Timestamp.now() as any,
+            }
+          : null
+      )
+
+      toast.success('Delivery released! Files are now accessible by client.')
+    } catch (err: any) {
+      console.error('Direct release error:', err)
+      toast.error(err?.message || 'Failed to release delivery.')
     } finally {
       setIsReleasing(false)
     }
@@ -489,7 +575,30 @@ export function ProjectDeliveryManager({
 
   const appUrl = typeof window !== 'undefined' ? window.location.origin : ''
   const deliveryUrl = delivery ? `${appUrl}/delivery/${delivery.accessToken}` : ''
-  const isPaymentLocked = !delivery?.isReleased && (invoice?.status !== 'Paid' && project.paymentStatus !== 'Paid')
+
+  // Delivery Locking & Financial Status Calculation
+  const isFullyPaid =
+    invoice?.status === 'Paid' ||
+    (invoice?.balanceDue !== undefined && invoice.balanceDue <= 0) ||
+    project.paymentStatus === 'Paid' ||
+    (project.outstandingBalance !== undefined && project.outstandingBalance <= 0)
+
+  const isReleased = Boolean(delivery?.isReleased || delivery?.status === 'Delivered' || delivery?.status === 'Downloaded')
+  const hasFiles = files.length > 0
+
+  // The 3-state delivery status system: Locked | Ready | Released
+  let deliveryStatus: 'Locked' | 'Ready' | 'Released' = 'Locked'
+  if (isReleased) {
+    deliveryStatus = 'Released'
+  } else if (hasFiles && (isFullyPaid || delivery?.requiresFullPayment === false)) {
+    deliveryStatus = 'Ready'
+  } else {
+    deliveryStatus = 'Locked'
+  }
+
+  const isPaymentLocked = deliveryStatus === 'Locked'
+  const isAdminOverride = Boolean(delivery?.isReleased && (delivery?.adminOverride || !isFullyPaid))
+  const outstandingAmount = invoice?.balanceDue ?? project.outstandingBalance ?? 0
 
   const renderFileIcon = (fileName: string, mimeType?: string) => {
     const cat = getFileCategory(fileName, mimeType)
@@ -523,24 +632,34 @@ export function ProjectDeliveryManager({
       {/* Header Banner */}
       <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-gradient-to-r from-gray-50/80 to-white">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h3 className="font-semibold text-gray-900 text-sm">Client Delivery File System</h3>
+            {/* Delivery System Status: Locked | Ready | Released */}
             <span
-              className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border ${
-                delivery?.status === 'Downloaded'
-                  ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                  : delivery?.status === 'Delivered'
-                  ? 'text-blue-700 bg-blue-50 border-blue-200'
-                  : delivery?.status === 'Ready for Delivery'
-                  ? 'text-indigo-700 bg-indigo-50 border-indigo-200'
-                  : 'text-gray-600 bg-gray-50 border-gray-200'
+              className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                deliveryStatus === 'Released'
+                  ? 'text-emerald-700 bg-emerald-50 border-emerald-300'
+                  : deliveryStatus === 'Ready'
+                  ? 'text-indigo-700 bg-indigo-50 border-indigo-300'
+                  : 'text-amber-800 bg-amber-50 border-amber-300'
               }`}
             >
-              {delivery?.status || 'Not Ready'}
+              {deliveryStatus === 'Released' && <Unlock size={11} />}
+              {deliveryStatus === 'Ready' && <Sparkles size={11} />}
+              {deliveryStatus === 'Locked' && <Lock size={11} />}
+              Delivery: {deliveryStatus}
             </span>
+
+            {/* Admin Override Badge */}
+            {isAdminOverride && (
+              <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full border bg-purple-50 text-purple-700 border-purple-300 flex items-center gap-1">
+                <ShieldAlert size={11} />
+                Admin Override
+              </span>
+            )}
           </div>
           <p className="text-xs text-gray-500 mt-0.5">
-            Upload final assets, generate secure public links, and dispatch deliveries via WhatsApp.
+            Manage client download access, payment gate locks, and manual administrative releases.
           </p>
         </div>
 
@@ -608,39 +727,131 @@ export function ProjectDeliveryManager({
           </div>
         </div>
 
-        {/* Payment Gate Banner */}
-        <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-          isPaymentLocked ? 'bg-amber-50/70 border-amber-200' : 'bg-emerald-50/70 border-emerald-200'
-        }`}>
-          <div className="flex items-start gap-2.5">
-            {isPaymentLocked ? (
-              <Lock size={18} className="text-amber-600 shrink-0 mt-0.5" />
-            ) : (
-              <Unlock size={18} className="text-emerald-600 shrink-0 mt-0.5" />
-            )}
-            <div>
-              <p className={`text-xs font-bold ${isPaymentLocked ? 'text-amber-900' : 'text-emerald-900'}`}>
-                {isPaymentLocked ? 'Delivery Locked (Payment Outstanding)' : 'Delivery Unlocked for Client'}
-              </p>
-              <p className={`text-xs mt-0.5 ${isPaymentLocked ? 'text-amber-700' : 'text-emerald-700'}`}>
-                {isPaymentLocked
-                  ? 'Client will be shown a pending release screen until payment is completed or you manually release.'
-                  : delivery?.isReleased
-                  ? 'Manually released by admin (bypasses invoice balance requirements).'
-                  : 'Invoice is fully paid. Client can download all files immediately.'}
+        {/* Delivery Locking & Admin Release Status System */}
+        <div
+          className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${
+            deliveryStatus === 'Released'
+              ? isAdminOverride
+                ? 'bg-purple-50/70 border-purple-200'
+                : 'bg-emerald-50/70 border-emerald-200'
+              : deliveryStatus === 'Ready'
+              ? 'bg-indigo-50/70 border-indigo-200'
+              : 'bg-amber-50/70 border-amber-200'
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 shrink-0">
+              {deliveryStatus === 'Released' ? (
+                isAdminOverride ? (
+                  <ShieldAlert size={20} className="text-purple-600" />
+                ) : (
+                  <Unlock size={20} className="text-emerald-600" />
+                )
+              ) : deliveryStatus === 'Ready' ? (
+                <Sparkles size={20} className="text-indigo-600" />
+              ) : (
+                <Lock size={20} className="text-amber-600" />
+              )}
+            </div>
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p
+                  className={`text-xs font-bold uppercase tracking-wider ${
+                    deliveryStatus === 'Released'
+                      ? isAdminOverride
+                        ? 'text-purple-900'
+                        : 'text-emerald-900'
+                      : deliveryStatus === 'Ready'
+                      ? 'text-indigo-900'
+                      : 'text-amber-900'
+                  }`}
+                >
+                  Delivery Status: {deliveryStatus.toUpperCase()}
+                </p>
+                {isAdminOverride && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-300">
+                    Admin Override Active
+                  </span>
+                )}
+                {deliveryStatus === 'Locked' && outstandingAmount > 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
+                    Bal Due: {formatCurrency(outstandingAmount)}
+                  </span>
+                )}
+              </div>
+
+              <p
+                className={`text-xs ${
+                  deliveryStatus === 'Released'
+                    ? isAdminOverride
+                      ? 'text-purple-700'
+                      : 'text-emerald-700'
+                    : deliveryStatus === 'Ready'
+                    ? 'text-indigo-700'
+                    : 'text-amber-800'
+                }`}
+              >
+                {deliveryStatus === 'Released'
+                  ? isAdminOverride
+                    ? `Manually released by ${delivery?.adminOverrideBy || 'Administrator'} ${
+                        delivery?.adminOverrideAt ? `on ${formatDate(delivery.adminOverrideAt)}` : ''
+                      } overriding invoice balance.${
+                        delivery?.adminOverrideReason ? ` Reason: "${delivery.adminOverrideReason}"` : ''
+                      }`
+                    : 'Delivery is unlocked and accessible to the client for immediate download.'
+                  : deliveryStatus === 'Ready'
+                  ? 'All deliverables uploaded and payment cleared. Click Release Delivery to unlock client downloads.'
+                  : 'Delivery is locked because payment requirements have not been met. Client sees a payment gate upon viewing the delivery link.'}
               </p>
             </div>
           </div>
 
-          <Button
-            size="sm"
-            variant="outline"
-            loading={isReleasing}
-            onClick={handleToggleRelease}
-            className={isPaymentLocked ? 'border-amber-300 text-amber-900 bg-white hover:bg-amber-100' : 'border-emerald-300 text-emerald-900 bg-white hover:bg-emerald-100'}
-          >
-            {delivery?.isReleased ? 'Revoke Manual Release' : 'Release Delivery'}
-          </Button>
+          {/* Action Control: Admin Release, Release Delivery, or Revoke Release */}
+          <div className="flex items-center gap-2 shrink-0">
+            {deliveryStatus === 'Locked' && (
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => {
+                  setAdminReleaseReason('')
+                  setAdminReleaseConfirmed(false)
+                  setShowAdminReleaseModal(true)
+                }}
+                icon={<Unlock size={14} />}
+                className="bg-amber-600 hover:bg-amber-700 border-amber-600 text-white font-medium"
+              >
+                Admin Release
+              </Button>
+            )}
+
+            {deliveryStatus === 'Ready' && (
+              <Button
+                size="sm"
+                variant="primary"
+                loading={isReleasing}
+                onClick={handleDirectRelease}
+                icon={<Unlock size={14} />}
+              >
+                Release Delivery
+              </Button>
+            )}
+
+            {deliveryStatus === 'Released' && (
+              <Button
+                size="sm"
+                variant="outline"
+                loading={isReleasing}
+                onClick={() => {
+                  setRevokeConfirmed(false)
+                  setShowRevokeReleaseModal(true)
+                }}
+                icon={<Lock size={14} />}
+                className="border-gray-300 text-gray-700 bg-white hover:bg-gray-100"
+              >
+                Revoke Release
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* STAGED FILES SECTION (Shows selected files before upload) */}
@@ -916,6 +1127,153 @@ export function ProjectDeliveryManager({
             </Button>
             <Button variant="primary" size="sm" onClick={handleSaveExpiration}>
               Save Settings
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ADMIN RELEASE CONFIRMATION MODAL */}
+      <Modal
+        isOpen={showAdminReleaseModal}
+        onClose={() => setShowAdminReleaseModal(false)}
+        title="Confirm Admin Release (Payment Override)"
+        subtitle="Manually release delivery files to the client bypassing normal payment requirements."
+        size="md"
+      >
+        <div className="space-y-4">
+          {/* Warning Banner */}
+          <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs space-y-2">
+            <div className="flex items-start gap-2 text-amber-900 font-bold">
+              <AlertTriangle size={17} className="text-amber-600 shrink-0 mt-0.5" />
+              <span>Payment Requirements Not Satisfied</span>
+            </div>
+            <p className="text-amber-800 leading-relaxed">
+              This project currently has an unpaid balance of{' '}
+              <strong className="text-amber-950 font-bold">{formatCurrency(outstandingAmount)}</strong>.
+              Releasing this delivery will allow the client (
+              <strong>{project.clientName || client?.fullName || 'Client'}</strong>) to immediately view and
+              download all final deliverables before full payment is recorded.
+            </p>
+          </div>
+
+          {/* Project & Client Details */}
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs divide-y divide-gray-200/80">
+            <div className="pb-2 flex justify-between">
+              <span className="text-gray-500">Project:</span>
+              <span className="font-semibold text-gray-900">{project.name}</span>
+            </div>
+            <div className="py-2 flex justify-between">
+              <span className="text-gray-500">Client:</span>
+              <span className="font-semibold text-gray-900">{project.clientName || client?.fullName}</span>
+            </div>
+            <div className="py-2 flex justify-between">
+              <span className="text-gray-500">Current Payment Status:</span>
+              <span className="font-semibold text-rose-600">{invoice?.status || project.paymentStatus || 'Unpaid'}</span>
+            </div>
+            <div className="pt-2 flex justify-between">
+              <span className="text-gray-500">Outstanding Balance:</span>
+              <span className="font-bold text-rose-600">{formatCurrency(outstandingAmount)}</span>
+            </div>
+          </div>
+
+          {/* Reason Input */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-semibold text-gray-700">
+              Reason for Admin Release (Audit Trail) <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={adminReleaseReason}
+              onChange={(e) => setAdminReleaseReason(e.target.value)}
+              placeholder="e.g. Offline cash payment received, VIP client exception, partial milestone agreement"
+              className="w-full h-9 px-3 rounded-lg border border-gray-300 text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 outline-none"
+            />
+          </div>
+
+          {/* Anti-Accidental Release Checkbox */}
+          <label className="flex items-start gap-2.5 p-3 rounded-xl border border-amber-300 bg-amber-50/50 cursor-pointer text-xs select-none">
+            <input
+              type="checkbox"
+              checked={adminReleaseConfirmed}
+              onChange={(e) => setAdminReleaseConfirmed(e.target.checked)}
+              className="mt-0.5 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+            />
+            <span className="text-amber-950 font-medium leading-tight">
+              I understand payment requirements have not been met and explicitly authorize this manual delivery release.
+            </span>
+          </label>
+
+          {/* Actions */}
+          <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowAdminReleaseModal(false)}
+              disabled={isReleasing}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              loading={isReleasing}
+              disabled={!adminReleaseConfirmed || !adminReleaseReason.trim()}
+              onClick={executeAdminRelease}
+              icon={<Unlock size={14} />}
+              className="bg-amber-600 hover:bg-amber-700 border-amber-600 text-white disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+            >
+              Confirm Admin Release
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* REVOKE RELEASE CONFIRMATION MODAL */}
+      <Modal
+        isOpen={showRevokeReleaseModal}
+        onClose={() => setShowRevokeReleaseModal(false)}
+        title="Revoke Delivery Release"
+        subtitle="Lock delivery files and restore payment gate for the client."
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="p-3.5 rounded-xl bg-gray-50 border border-gray-200 text-xs text-gray-700 space-y-1.5">
+            <p className="font-semibold text-gray-900">Are you sure you want to revoke release?</p>
+            <p className="text-gray-600 leading-relaxed">
+              The client will no longer be able to download deliverables from the public delivery link. They will be presented with the payment gate until released again.
+            </p>
+          </div>
+
+          <label className="flex items-start gap-2 p-2.5 rounded-lg border border-gray-200 text-xs cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={revokeConfirmed}
+              onChange={(e) => setRevokeConfirmed(e.target.checked)}
+              className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+            />
+            <span className="text-gray-700 font-medium">
+              Confirm re-locking delivery downloads for this client.
+            </span>
+          </label>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowRevokeReleaseModal(false)}
+              disabled={isReleasing}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              loading={isReleasing}
+              disabled={!revokeConfirmed}
+              onClick={executeRevokeRelease}
+              icon={<Lock size={14} />}
+            >
+              Confirm Revocation
             </Button>
           </div>
         </div>

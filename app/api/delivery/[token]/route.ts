@@ -53,24 +53,37 @@ export async function GET(
 
     // Check payment lock
     // If admin has manually released → ALWAYS allow access
-    // If requiresFullPayment AND not released AND has invoiceId → check invoice
+    // If requiresFullPayment AND not released → check invoice and project payment status
     let isLocked = false
     let lockReason = ''
 
-    if (deliveryData.requiresFullPayment && !deliveryData.isReleased && deliveryData.invoiceId) {
-      try {
-        const invoiceSnap = await adminDb.collection(COLLECTIONS.INVOICES).doc(deliveryData.invoiceId).get()
-        if (invoiceSnap.exists) {
-          const invData = invoiceSnap.data()
-          if (invData && invData.status !== 'Paid') {
-            isLocked = true
-            lockReason = 'Delivery files will become available once the project payment is completed. Please contact LexMedia if you believe this is an error.'
+    if (deliveryData.requiresFullPayment && !deliveryData.isReleased) {
+      if (deliveryData.invoiceId) {
+        try {
+          const invoiceSnap = await adminDb.collection(COLLECTIONS.INVOICES).doc(deliveryData.invoiceId).get()
+          if (invoiceSnap.exists) {
+            const invData = invoiceSnap.data()
+            if (invData && invData.status !== 'Paid' && (invData.balanceDue === undefined || invData.balanceDue > 0)) {
+              isLocked = true
+              lockReason = 'Delivery files will become available once the project payment is completed. Please contact LexMedia if you believe this is an error.'
+            }
           }
+        } catch (invErr) {
+          console.warn('[Delivery] Could not fetch invoice for lock check:', invErr)
         }
-        // If invoice doesn't exist → don't lock
-      } catch (invErr) {
-        console.warn('[Delivery] Could not fetch invoice for lock check:', invErr)
-        // On invoice fetch error, allow access (don't block client)
+      } else if (deliveryData.projectId) {
+        try {
+          const projectSnap = await adminDb.collection(COLLECTIONS.PROJECTS).doc(deliveryData.projectId).get()
+          if (projectSnap.exists) {
+            const projData = projectSnap.data()
+            if (projData && projData.paymentStatus !== 'Paid' && (projData.outstandingBalance === undefined || projData.outstandingBalance > 0)) {
+              isLocked = true
+              lockReason = 'Delivery files will become available once the project payment is completed. Please contact LexMedia if you believe this is an error.'
+            }
+          }
+        } catch (projErr) {
+          console.warn('[Delivery] Could not fetch project for lock check:', projErr)
+        }
       }
     }
 
@@ -82,6 +95,8 @@ export async function GET(
           title: deliveryData.title,
           projectName: deliveryData.projectName,
           clientName: deliveryData.clientName,
+          projectId: deliveryData.projectId,
+          invoiceId: deliveryData.invoiceId,
         }
       }, { status: 403 })
     }
