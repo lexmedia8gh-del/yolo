@@ -135,6 +135,7 @@ export interface Package {
   includedServices?: string[]
   price: number
   discount?: number
+  depositAmount?: number
   currency: string
   whatsIncluded: PackageItem[]
   deliveryTimeline?: string

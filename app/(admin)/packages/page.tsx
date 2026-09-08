@@ -54,6 +54,7 @@ export default function PackagesPage() {
     description: '',
     price: 0,
     discount: 0,
+    depositAmount: 0,
     currency: 'GHS',
     status: 'active' as 'active' | 'inactive',
     includedServices: [] as string[],
@@ -91,6 +92,7 @@ export default function PackagesPage() {
       description: '',
       price: 0,
       discount: 0,
+      depositAmount: 0,
       currency: 'GHS',
       status: 'active',
       includedServices: [],
@@ -112,6 +114,7 @@ export default function PackagesPage() {
       description: pkg.description || '',
       price: pkg.price || 0,
       discount: pkg.discount || 0,
+      depositAmount: pkg.depositAmount || (pkg.discount && pkg.discount < pkg.price ? pkg.discount : 0),
       currency: pkg.currency || 'GHS',
       status: pkg.status === 'inactive' ? 'inactive' : 'active',
       includedServices: pkg.includedServices || [],
@@ -171,6 +174,7 @@ export default function PackagesPage() {
           description: formData.description,
           price: Number(formData.price) || 0,
           discount: Number(formData.discount) || 0,
+          depositAmount: Number(formData.depositAmount) || 0,
           currency: formData.currency,
           status: formData.status,
           includedServices: formData.includedServices,
@@ -183,6 +187,7 @@ export default function PackagesPage() {
           description: formData.description,
           price: Number(formData.price) || 0,
           discount: Number(formData.discount) || 0,
+          depositAmount: Number(formData.depositAmount) || 0,
           currency: formData.currency,
           status: 'active',
           includedServices: formData.includedServices,
@@ -439,13 +444,13 @@ export default function PackagesPage() {
               required
             />
             <Input
-              label="Discount Amount (Optional GH₵)"
+              label="Default Required Deposit (GH₵)"
               type="number"
               min="0"
               step="0.01"
-              placeholder="200.00"
-              value={formData.discount}
-              onChange={(e) => setFormData({ ...formData, discount: Number(e.target.value) })}
+              placeholder="500.00"
+              value={formData.depositAmount}
+              onChange={(e) => setFormData({ ...formData, depositAmount: Number(e.target.value) })}
             />
           </div>
 

@@ -130,10 +130,23 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
   // Project config (editable in confirm step)
   const [projectName, setProjectName] = useState('')
   const [projectNotes, setProjectNotes] = useState('')
+  const [customDeposit, setCustomDeposit] = useState('')
+  const [depositError, setDepositError] = useState<string | null>(null)
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0])
   const [dueDate, setDueDate] = useState(
     new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   )
+
+  // Helper to calculate default deposit for a package
+  const getDefaultDeposit = useCallback((pkg: Package): number => {
+    if (pkg.depositAmount && pkg.depositAmount > 0 && pkg.depositAmount <= pkg.price) {
+      return pkg.depositAmount
+    }
+    if (pkg.discount && pkg.discount > 0 && pkg.discount < pkg.price) {
+      return pkg.discount
+    }
+    return Math.round(pkg.price * 0.4)
+  }, [])
 
   // Submission
   const [submitting, setSubmitting] = useState(false)
@@ -190,12 +203,46 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
 
   const handleSelectPackage = (pkg: Package) => {
     setSelectedPackage(pkg)
+    const defaultDep = getDefaultDeposit(pkg)
+    setCustomDeposit(defaultDep.toString())
+    setDepositError(null)
     setStep('confirm')
   }
+
+  const getValidatedDeposit = useCallback((): { isValid: boolean; depositAmount: number; error: string | null } => {
+    if (!selectedPackage) return { isValid: false, depositAmount: 0, error: 'No package selected' }
+    const trimmed = customDeposit.trim()
+    if (trimmed === '') {
+      return { isValid: false, depositAmount: 0, error: 'Deposit amount is required.' }
+    }
+    const parsed = parseFloat(trimmed)
+    if (isNaN(parsed)) {
+      return { isValid: false, depositAmount: 0, error: 'Please enter a valid numeric deposit amount.' }
+    }
+    if (parsed < 0) {
+      return { isValid: false, depositAmount: 0, error: 'Deposit amount cannot be negative.' }
+    }
+    if (parsed > selectedPackage.price) {
+      return {
+        isValid: false,
+        depositAmount: 0,
+        error: `Deposit amount cannot exceed project total price (${formatCurrency(selectedPackage.price, selectedPackage.currency)}).`,
+      }
+    }
+    return { isValid: true, depositAmount: parsed, error: null }
+  }, [selectedPackage, customDeposit])
 
   // ─── Atomic Project + Invoice + ClientLink creation ──────────
   const handleConfirm = useCallback(async () => {
     if (!selectedService || !selectedPackage) return
+
+    const depositValidation = getValidatedDeposit()
+    if (!depositValidation.isValid) {
+      setDepositError(depositValidation.error)
+      toast.error(depositValidation.error || 'Please correct the deposit amount before creating the project.')
+      return
+    }
+
     setSubmitting(true)
 
     try {
@@ -204,10 +251,7 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
       const invoiceNumber = generateLxmInvoiceNumber(existingInvoices.length)
 
       const totalAmount = selectedPackage.price
-      const depositAmount =
-        selectedPackage.discount && selectedPackage.discount > 0 && selectedPackage.discount < totalAmount
-          ? selectedPackage.discount // treat discount field as deposit amount if set
-          : Math.round(totalAmount * 0.4) // default 40% deposit
+      const depositAmount = depositValidation.depositAmount
       const outstandingBalance = totalAmount
 
       // 2. Prepare refs
@@ -353,6 +397,7 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
     client,
     projectName,
     projectNotes,
+    getValidatedDeposit,
     startDate,
     dueDate,
     onSuccess,
@@ -522,9 +567,7 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
               ) : (
                 <div className="space-y-3">
                   {packages.map((pkg) => {
-                    const deposit = pkg.discount && pkg.discount > 0 && pkg.discount < pkg.price
-                      ? pkg.discount
-                      : Math.round(pkg.price * 0.4)
+                    const deposit = getDefaultDeposit(pkg)
                     return (
                       <button
                         key={pkg.id}
@@ -572,137 +615,169 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
           )}
 
           {/* ── STEP 3: Confirm ── */}
-          {step === 'confirm' && selectedService && selectedPackage && (
-            <div className="space-y-5">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setStep('package')}
-                  className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+          {step === 'confirm' && selectedService && selectedPackage && (() => {
+            const parsedDep = parseFloat(customDeposit)
+            const liveDeposit = !isNaN(parsedDep) && parsedDep >= 0 ? parsedDep : 0
+            const liveBalance = Math.max(0, selectedPackage.price - liveDeposit)
+
+            return (
+              <div className="space-y-5">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setStep('package')}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900">Confirm Project</h3>
+                    <p className="text-sm text-muted">Review details before creating.</p>
+                  </div>
+                </div>
+
+                {/* Summary box */}
+                <div className="p-5 rounded-2xl bg-gray-50 border border-border space-y-4">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-xs text-muted font-semibold uppercase tracking-wide">Client</p>
+                      <p className="font-semibold text-gray-900 mt-0.5">{client.fullName}</p>
+                      {client.company && <p className="text-xs text-muted">{client.company}</p>}
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted font-semibold uppercase tracking-wide">Service</p>
+                      <p className="font-semibold text-gray-900 mt-0.5">{selectedService.name}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted font-semibold uppercase tracking-wide">Package</p>
+                      <p className="font-semibold text-gray-900 mt-0.5">{selectedPackage.title}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted font-semibold uppercase tracking-wide">Duration</p>
+                      <p className="font-semibold text-gray-900 mt-0.5">{selectedPackage.deliveryTimeline || 'TBD'}</p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-border pt-4 grid grid-cols-3 gap-3 text-center">
+                    <div className="p-3 rounded-xl bg-white border border-border">
+                      <p className="text-xs text-muted">Total</p>
+                      <p className="font-bold text-gray-900 text-lg">{formatCurrency(selectedPackage.price, selectedPackage.currency)}</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-accent-50 border border-accent-200">
+                      <p className="text-xs text-accent-700">Deposit</p>
+                      <p className="font-bold text-accent-800 text-lg">
+                        {formatCurrency(liveDeposit, selectedPackage.currency)}
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-orange-50 border border-orange-200">
+                      <p className="text-xs text-orange-700">Balance</p>
+                      <p className="font-bold text-orange-800 text-lg">
+                        {formatCurrency(liveBalance, selectedPackage.currency)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Editable fields */}
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-gray-700">Project Name</label>
+                    <input
+                      type="text"
+                      value={projectName}
+                      onChange={(e) => setProjectName(e.target.value)}
+                      className="w-full h-9 px-3 rounded-lg border border-gray-300 bg-white text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-colors"
+                      placeholder="e.g. John Mensah — Premium Wedding Package"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-semibold text-gray-700">
+                        Required Deposit Amount ({selectedPackage.currency || 'GHS'}) <span className="text-rose-500">*</span>
+                      </label>
+                      <span className="text-[11px] text-gray-500 font-medium">
+                        Package Default: {formatCurrency(getDefaultDeposit(selectedPackage), selectedPackage.currency)}
+                      </span>
+                    </div>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max={selectedPackage.price}
+                      value={customDeposit}
+                      onChange={(e) => {
+                        setCustomDeposit(e.target.value)
+                        setDepositError(null)
+                      }}
+                      placeholder={`e.g. ${getDefaultDeposit(selectedPackage)}`}
+                      className={`w-full h-9 px-3 rounded-lg border bg-white text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-colors ${
+                        depositError ? 'border-rose-500 bg-rose-50/20 text-rose-900 font-medium' : 'border-gray-300'
+                      }`}
+                    />
+                    {depositError ? (
+                      <p className="text-xs text-rose-600 font-medium flex items-center gap-1 mt-0.5">
+                        <AlertCircle size={12} />
+                        {depositError}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-gray-500">
+                        Customize the deposit required for this specific project. This will not change the default package deposit.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-semibold text-gray-700">Start Date</label>
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="w-full h-9 px-3 rounded-lg border border-gray-300 bg-white text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-colors"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-semibold text-gray-700">Due Date</label>
+                      <input
+                        type="date"
+                        value={dueDate}
+                        onChange={(e) => setDueDate(e.target.value)}
+                        className="w-full h-9 px-3 rounded-lg border border-gray-300 bg-white text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-colors"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-gray-700">Project Notes</label>
+                    <textarea
+                      rows={2}
+                      value={projectNotes}
+                      onChange={(e) => setProjectNotes(e.target.value)}
+                      placeholder="Any special requirements or notes…"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none resize-none transition-colors"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-lg bg-indigo-50/60 border border-indigo-100 flex items-start gap-2 text-xs text-indigo-900">
+                  <FileText size={14} className="shrink-0 mt-0.5 text-indigo-600" />
+                  <span>Clicking <strong>Confirm & Create Project</strong> will atomically create the project and invoice in Firestore, then generate a payment link for the deposit amount.</span>
+                </div>
+
+                <Button
+                  variant="primary"
+                  fullWidth
+                  size="md"
+                  onClick={handleConfirm}
+                  loading={submitting}
+                  disabled={submitting || !projectName.trim() || !customDeposit.trim() || !!depositError}
+                  icon={submitting ? undefined : <Sparkles size={16} />}
                 >
-                  <ChevronLeft size={18} />
-                </button>
-                <div>
-                  <h3 className="text-base font-bold text-gray-900">Confirm Project</h3>
-                  <p className="text-sm text-muted">Review details before creating.</p>
-                </div>
+                  {submitting ? 'Creating Project…' : 'Confirm & Create Project'}
+                </Button>
               </div>
-
-              {/* Summary box */}
-              <div className="p-5 rounded-2xl bg-gray-50 border border-border space-y-4">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-xs text-muted font-semibold uppercase tracking-wide">Client</p>
-                    <p className="font-semibold text-gray-900 mt-0.5">{client.fullName}</p>
-                    {client.company && <p className="text-xs text-muted">{client.company}</p>}
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted font-semibold uppercase tracking-wide">Service</p>
-                    <p className="font-semibold text-gray-900 mt-0.5">{selectedService.name}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted font-semibold uppercase tracking-wide">Package</p>
-                    <p className="font-semibold text-gray-900 mt-0.5">{selectedPackage.title}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted font-semibold uppercase tracking-wide">Duration</p>
-                    <p className="font-semibold text-gray-900 mt-0.5">{selectedPackage.deliveryTimeline || 'TBD'}</p>
-                  </div>
-                </div>
-
-                <div className="border-t border-border pt-4 grid grid-cols-3 gap-3 text-center">
-                  <div className="p-3 rounded-xl bg-white border border-border">
-                    <p className="text-xs text-muted">Total</p>
-                    <p className="font-bold text-gray-900 text-lg">{formatCurrency(selectedPackage.price)}</p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-accent-50 border border-accent-200">
-                    <p className="text-xs text-accent-700">Deposit</p>
-                    <p className="font-bold text-accent-800 text-lg">
-                      {formatCurrency(
-                        selectedPackage.discount && selectedPackage.discount > 0 && selectedPackage.discount < selectedPackage.price
-                          ? selectedPackage.discount
-                          : Math.round(selectedPackage.price * 0.4)
-                      )}
-                    </p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-orange-50 border border-orange-200">
-                    <p className="text-xs text-orange-700">Balance</p>
-                    <p className="font-bold text-orange-800 text-lg">
-                      {formatCurrency(
-                        selectedPackage.price - (
-                          selectedPackage.discount && selectedPackage.discount > 0 && selectedPackage.discount < selectedPackage.price
-                            ? selectedPackage.discount
-                            : Math.round(selectedPackage.price * 0.4)
-                        )
-                      )}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Editable fields */}
-              <div className="space-y-3">
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold text-gray-700">Project Name</label>
-                  <input
-                    type="text"
-                    value={projectName}
-                    onChange={(e) => setProjectName(e.target.value)}
-                    className="w-full h-9 px-3 rounded-lg border border-gray-300 bg-white text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-colors"
-                    placeholder="e.g. John Mensah — Premium Wedding Package"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-gray-700">Start Date</label>
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      className="w-full h-9 px-3 rounded-lg border border-gray-300 bg-white text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-colors"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-gray-700">Due Date</label>
-                    <input
-                      type="date"
-                      value={dueDate}
-                      onChange={(e) => setDueDate(e.target.value)}
-                      className="w-full h-9 px-3 rounded-lg border border-gray-300 bg-white text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-colors"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold text-gray-700">Project Notes</label>
-                  <textarea
-                    rows={2}
-                    value={projectNotes}
-                    onChange={(e) => setProjectNotes(e.target.value)}
-                    placeholder="Any special requirements or notes…"
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none resize-none transition-colors"
-                  />
-                </div>
-              </div>
-
-              <div className="p-3 rounded-lg bg-indigo-50/60 border border-indigo-100 flex items-start gap-2 text-xs text-indigo-900">
-                <FileText size={14} className="shrink-0 mt-0.5 text-indigo-600" />
-                <span>Clicking <strong>Confirm & Create Project</strong> will atomically create the project and invoice in Firestore, then generate a payment link for the deposit amount.</span>
-              </div>
-
-              <Button
-                variant="primary"
-                fullWidth
-                size="md"
-                onClick={handleConfirm}
-                loading={submitting}
-                disabled={submitting || !projectName.trim()}
-                icon={submitting ? undefined : <Sparkles size={16} />}
-              >
-                {submitting ? 'Creating Project…' : 'Confirm & Create Project'}
-              </Button>
-            </div>
-          )}
+            )
+          })()}
 
           {/* ── STEP 4: Success ── */}
           {step === 'success' && result && (
