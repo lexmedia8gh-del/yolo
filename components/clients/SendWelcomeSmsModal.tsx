@@ -73,13 +73,14 @@ export function SendWelcomeSmsModal({
       const data = await res.json()
 
       if (res.ok && data.success === true) {
+        const msg = data.message || 'SMS request accepted by provider'
         setLastResult({
           success: true,
-          message: 'Welcome SMS dispatched successfully via Textbelt!',
+          message: msg,
           quotaRemaining: data.quotaRemaining,
           phone: data.phone || validation.normalized,
         })
-        toast.success('Welcome SMS sent successfully!')
+        toast.success(msg)
         if (onSmsSent) onSmsSent()
       } else {
         const errorMsg = data?.error || 'Provider rejected the SMS request.'
@@ -203,7 +204,7 @@ export function SendWelcomeSmsModal({
             )}
             <div className="space-y-0.5">
               <p className="font-semibold">
-                {lastResult.success ? 'Message Delivered' : 'SMS Delivery Status'}
+                {lastResult.success ? 'SMS Request Accepted' : 'SMS Delivery Status'}
               </p>
               <p className="text-[11px] leading-relaxed">
                 {lastResult.success ? lastResult.message : lastResult.error}

@@ -36,9 +36,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: result.error || 'Failed to send SMS',
+          error: result.error || 'Failed to submit SMS',
           provider: result.provider,
           quotaRemaining: result.quotaRemaining,
+          isTestKey: result.isTestKey,
         },
         { status: 200 }
       )
@@ -48,7 +49,9 @@ export async function POST(req: NextRequest) {
       success: true,
       provider: result.provider,
       messageId: result.messageId,
+      message: result.statusMessage || 'SMS request accepted by provider',
       quotaRemaining: result.quotaRemaining,
+      isTestKey: result.isTestKey,
       sentAt: result.sentAt,
       to: validation.normalized,
     })

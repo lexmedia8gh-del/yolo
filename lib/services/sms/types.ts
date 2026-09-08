@@ -18,6 +18,8 @@ export interface SmsSendResponse {
   messageId?: string
   quotaRemaining?: number
   error?: string
+  statusMessage?: string
+  isTestKey?: boolean
   rawResponse?: any
   sentAt?: string
   to?: string

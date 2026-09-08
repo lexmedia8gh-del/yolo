@@ -42,12 +42,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: result.error || 'SMS provider failed to deliver the message.',
+          error: result.error || 'SMS provider rejected the request.',
           provider: result.provider,
           quotaRemaining: result.quotaRemaining,
           phone: validation.normalized,
+          isTestKey: result.isTestKey,
         },
-        { status: 200 } // Return 200 so frontend client handles provider failure gracefully without crashing
+        { status: 200 } // Return 200 so frontend handles provider response gracefully without interrupting client creation
       )
     }
 
@@ -55,8 +56,10 @@ export async function POST(req: NextRequest) {
       success: true,
       provider: result.provider,
       messageId: result.messageId,
+      message: result.statusMessage || 'SMS request accepted by provider',
       quotaRemaining: result.quotaRemaining,
       phone: validation.normalized,
+      isTestKey: result.isTestKey,
       sentAt: result.sentAt,
     })
   } catch (error: any) {

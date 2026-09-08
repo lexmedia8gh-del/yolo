@@ -197,7 +197,7 @@ export default function ClientsPage() {
             const smsData = await smsRes.json()
 
             if (smsRes.ok && smsData.success === true) {
-              toast.success('Welcome SMS delivered successfully!', { id: smsToastId })
+              toast.success(smsData.message || 'Welcome SMS request accepted by provider', { id: smsToastId })
             } else {
               const errMsg = smsData?.error || 'Failed to deliver SMS'
               toast.error(`Welcome SMS notice: ${errMsg}`, { id: smsToastId, duration: 5000 })

@@ -206,7 +206,7 @@ export function QuickClientCreationModal({
           })
           const smsData = await smsRes.json()
           if (smsRes.ok && smsData.success === true) {
-            toast.success('Welcome SMS sent to client!')
+            toast.success(smsData.message || 'Welcome SMS request accepted by provider')
           } else if (smsData?.error) {
             toast.error(`Welcome SMS notice: ${smsData.error}`, { duration: 5000 })
           }
