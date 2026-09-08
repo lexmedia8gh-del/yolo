@@ -15,11 +15,13 @@ import {
   Image as ImageIcon,
   CheckCircle2,
   AlertCircle,
+  RotateCcw,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input, Textarea, Select } from '@/components/ui/Input'
+import { DataResetManager } from '@/components/settings/DataResetManager'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { getDocument, setDocument, COLLECTIONS } from '@/lib/firebase/firestore'
 import { changePassword } from '@/lib/firebase/auth'
@@ -28,7 +30,7 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
 import type { BusinessSettings, BrandingSettings } from '@/lib/types'
 import toast from 'react-hot-toast'
 
-type SettingsTab = 'business' | 'invoice' | 'payment' | 'messages' | 'account' | 'branding'
+type SettingsTab = 'business' | 'invoice' | 'payment' | 'messages' | 'account' | 'branding' | 'data_reset'
 
 const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
   { id: 'business', label: 'Business Info', icon: Building2 },
@@ -37,6 +39,7 @@ const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
   { id: 'messages', label: 'Messages & Terms', icon: MessageSquare },
   { id: 'branding', label: 'Branding', icon: Palette },
   { id: 'account', label: 'My Account', icon: User },
+  { id: 'data_reset', label: 'Data & Reset', icon: RotateCcw },
 ]
 
 const DEFAULT_SETTINGS: Partial<BusinessSettings> = {
@@ -367,7 +370,7 @@ export default function SettingsPage() {
             icon={<Save size={16} />}
             onClick={activeTab === 'branding' ? handleSaveBranding : handleSave}
             loading={saving}
-            disabled={activeTab === 'account'}
+            disabled={activeTab === 'account' || activeTab === 'data_reset'}
           >
             Save Changes
           </Button>
@@ -560,6 +563,8 @@ export default function SettingsPage() {
                   </Card>
                 </div>
               )}
+
+              {activeTab === 'data_reset' && <DataResetManager />}
             </>
           )}
         </div>
