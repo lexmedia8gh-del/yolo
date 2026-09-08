@@ -39,7 +39,7 @@ import {
 } from '@/lib/firebase/firestore'
 import { where, orderBy } from '@/lib/firebase/firestore'
 import type { Client, Project, Invoice, Payment, ClientLink } from '@/lib/types'
-import { formatCurrency, formatDate, getStatusColor, copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone } from '@/lib/utils'
+import { formatCurrency, formatDate, getStatusColor, copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone, appUrl } from '@/lib/utils'
 import { NewProjectWizard } from '@/components/projects/NewProjectWizard'
 import { ClientInformationTemplatesModal } from '@/components/clients/ClientInformationTemplatesModal'
 import { RecordPaymentModal } from '@/components/payments/RecordPaymentModal'
@@ -1068,7 +1068,7 @@ export default function ClientProfilePage() {
           client={client}
           paymentUrl={
             selectedLinkForMessage.url ||
-            `${typeof window !== 'undefined' ? window.location.origin : ''}/pay/${selectedLinkForMessage.token}`
+            appUrl(`/pay/${selectedLinkForMessage.token}`)
           }
           amount={selectedLinkForMessage.amount}
           invoiceNumber={selectedLinkForMessage.invoiceNumber}
