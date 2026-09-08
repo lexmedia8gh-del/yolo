@@ -332,10 +332,10 @@ export async function sendDeliveryReadyEmail({
     statusText: 'Files Ready for Download',
     statusBadgeBg: '#dcfce7',
     statusBadgeColor: '#15803d',
-    primaryButtonText: 'View My Delivery',
+    primaryButtonText: 'View Your Deliverables',
     primaryButtonUrl: deliveryUrl,
     primaryButtonBg: '#2563eb',
-    introText: `Great news! Your final project files for <strong>${escapeHtml(projectName)}</strong> have been unlocked and are ready for download in your secure client delivery portal.`,
+    introText: `Your project deliverables for <strong>${escapeHtml(projectName)}</strong> are now ready.<br><br>You can access your completed files using the button below.`,
     lexmediaLogoUrl,
     clientLogoUrl,
   })
@@ -343,7 +343,7 @@ export async function sendDeliveryReadyEmail({
   return sendBrevoEmail({
     toEmail,
     clientName,
-    subject: `Your LEXMEDIA.GH Delivery Is Ready — ${projectName}`,
+    subject: `Your Deliverables — LEXMEDIA.GH`,
     htmlContent,
     apiKey,
     senderEmail,
@@ -383,21 +383,21 @@ export async function sendDeliveryPaymentRequiredEmail({
     statusBadgeColor: hasBalance ? '#be123c' : '#15803d',
     amountDue: hasBalance ? amountDue : undefined,
     currencySymbol,
-    primaryButtonText: hasBalance ? 'Complete Payment & View Files' : 'View My Delivery',
+    primaryButtonText: hasBalance ? 'Complete Payment & View Deliverables' : 'View Your Deliverables',
     primaryButtonUrl: paymentUrl,
     primaryButtonBg: hasBalance ? '#16a34a' : '#2563eb',
-    secondaryButtonText: (hasBalance && deliveryUrl) ? 'View Delivery Portal (Locked)' : undefined,
+    secondaryButtonText: (hasBalance && deliveryUrl) ? 'View Deliverables Portal (Locked)' : undefined,
     secondaryButtonUrl: (hasBalance && deliveryUrl) ? deliveryUrl : undefined,
     introText: hasBalance
-      ? `Your final deliverables for <strong>${escapeHtml(projectName)}</strong> have been prepared. Complete your remaining balance to immediately unlock high-resolution file downloads.`
-      : `Your final project files for <strong>${escapeHtml(projectName)}</strong> are ready for download in your secure client portal.`,
+      ? `Your deliverables for <strong>${escapeHtml(projectName)}</strong> have been prepared. Complete your remaining balance to immediately unlock high-resolution file downloads.`
+      : `Your project deliverables for <strong>${escapeHtml(projectName)}</strong> are now ready. You can access your completed files using the button below.`,
     lexmediaLogoUrl,
     clientLogoUrl,
   })
 
   const subject = hasBalance
-    ? `Your LEXMEDIA.GH Delivery Is Ready — Balance Due: ${formattedAmount}`
-    : `Your LEXMEDIA.GH Delivery Is Ready — ${projectName}`
+    ? `Your Deliverables — Balance Due: ${formattedAmount}`
+    : `Your Deliverables — LEXMEDIA.GH`
 
   return sendBrevoEmail({
     toEmail,
