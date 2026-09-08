@@ -168,10 +168,27 @@ export async function uploadDeliveryFile(
 }
 
 /**
- * Delete a delivery file from Firebase Storage
+ * Delete a delivery file from Supabase Storage (with fallback to Firebase Storage)
  */
 export async function deleteDeliveryFile(storagePath: string): Promise<void> {
   if (!storagePath) return
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getSupabaseClient()
+      const { error } = await supabase.storage
+        .from(STORAGE_BUCKETS.DELIVERY_FILES)
+        .remove([storagePath])
+      if (error) {
+        console.warn('Supabase storage delete error:', error.message)
+      } else {
+        console.log('[Storage] Successfully deleted from Supabase Storage:', storagePath)
+      }
+      return
+    } catch (err: any) {
+      console.warn('Supabase delete warning:', err?.message)
+    }
+  }
+
   try {
     const fileRef = ref(storage, storagePath)
     await deleteObject(fileRef)

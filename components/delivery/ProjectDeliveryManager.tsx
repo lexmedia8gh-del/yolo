@@ -65,6 +65,7 @@ import {
 } from '@/lib/utils'
 import { Timestamp } from 'firebase/firestore'
 import toast from 'react-hot-toast'
+import { optimizeImageFile } from '@/lib/utils/image-optimizer'
 
 interface ProjectDeliveryManagerProps {
   project: Project
@@ -78,6 +79,9 @@ interface StagedFile {
   name: string
   size: number
   type: string
+  originalSize?: number
+  isOptimized?: boolean
+  previewUrl?: string
 }
 
 export function ProjectDeliveryManager({
@@ -92,7 +96,7 @@ export function ProjectDeliveryManager({
   // Staged files (selected before upload)
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([])
   const [isUploading, setIsUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState<{ [key: string]: { percent: number; status: 'uploading' | 'saving' | 'done' | 'error'; error?: string } }>({})
+  const [uploadProgress, setUploadProgress] = useState<{ [key: string]: { percent: number; status: 'preparing' | 'optimizing' | 'uploading' | 'saving' | 'done' | 'error'; error?: string } }>({})
   
   // Modals & action states
   const [showExpireModal, setShowExpireModal] = useState(false)
@@ -113,6 +117,9 @@ export function ProjectDeliveryManager({
   const [revokeConfirmed, setRevokeConfirmed] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const replaceFileInputRef = useRef<HTMLInputElement>(null)
+  const [fileToReplace, setFileToReplace] = useState<DeliveryFile | null>(null)
+  const [isReplacingFile, setIsReplacingFile] = useState(false)
 
   // 1. Fetch or create Delivery record for this Project
   useEffect(() => {
@@ -154,120 +161,297 @@ export function ProjectDeliveryManager({
   }
 
   // 2. Stage Files Selected
-  const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedList = e.target.files
-    if (!selectedList || selectedList.length === 0) return
+    if (!selectedList || selectedList.length === 0 || !delivery) return
 
-    const newStaged: StagedFile[] = Array.from(selectedList).map((f) => ({
-      id: generateSecureToken(12),
-      file: f,
-      name: f.name,
-      size: f.size,
-      type: f.type || f.name.split('.').pop() || 'unknown',
-    }))
+    const newStaged: StagedFile[] = Array.from(selectedList).map((f) => {
+      const isImage = f.type.startsWith('image/')
+      return {
+        id: generateSecureToken(12),
+        file: f,
+        name: f.name,
+        size: f.size,
+        type: f.type || f.name.split('.').pop() || 'unknown',
+        previewUrl: isImage ? URL.createObjectURL(f) : undefined,
+      }
+    })
 
     setStagedFiles((prev) => [...prev, ...newStaged])
     if (fileInputRef.current) fileInputRef.current.value = ''
+
+    // Trigger immediate upload of these files for smooth UX
+    await startUploadForFiles(newStaged)
   }
 
   const handleRemoveStaged = (id: string) => {
     if (isUploading) return
+    const fileToRemove = stagedFiles.find((f) => f.id === id)
+    if (fileToRemove?.previewUrl) {
+      URL.revokeObjectURL(fileToRemove.previewUrl)
+    }
     setStagedFiles((prev) => prev.filter((f) => f.id !== id))
+    setUploadProgress((prev) => {
+      const copy = { ...prev }
+      delete copy[id]
+      return copy
+    })
   }
 
   const handleClearStaged = () => {
     if (isUploading) return
+    stagedFiles.forEach((f) => {
+      if (f.previewUrl) URL.revokeObjectURL(f.previewUrl)
+    })
     setStagedFiles([])
     setUploadProgress({})
   }
 
   // 3. Process Upload of Staged Files
   const handleStartUpload = async () => {
-    if (stagedFiles.length === 0 || !delivery || isUploading) return
+    await startUploadForFiles(stagedFiles)
+  }
+
+  const startUploadForFiles = async (filesToUpload: StagedFile[]) => {
+    if (filesToUpload.length === 0 || !delivery) return
 
     setIsUploading(true)
-    const initialProgress: typeof uploadProgress = {}
-    stagedFiles.forEach((sf) => {
-      initialProgress[sf.id] = { percent: 0, status: 'uploading' }
-    })
-    setUploadProgress(initialProgress)
 
-    let successCount = 0
-    let addedSize = 0
-    const newlyUploaded: DeliveryFile[] = []
+    for (const staged of filesToUpload) {
+      // Skip if already completed or currently uploading
+      const currentProgress = uploadProgress[staged.id]
+      if (currentProgress?.status === 'done') continue
+
+      try {
+        // 1. Preparing & Optimizing Stage
+        setUploadProgress((prev) => ({
+          ...prev,
+          [staged.id]: { percent: 0, status: 'preparing' }
+        }))
+
+        let uploadFile = staged.file
+        let originalSize = staged.size
+        let isOptimized = false
+        let finalSize = staged.size
+
+        if (staged.file.type.startsWith('image/')) {
+          setUploadProgress((prev) => ({
+            ...prev,
+            [staged.id]: { percent: 0, status: 'optimizing' }
+          }))
+
+          const optResult = await optimizeImageFile(staged.file)
+          if (optResult.optimized) {
+            uploadFile = optResult.file
+            isOptimized = true
+            finalSize = optResult.optimizedSize
+            originalSize = optResult.originalSize
+
+            // Update staged files state with optimized metadata & file
+            setStagedFiles((prev) =>
+              prev.map((f) =>
+                f.id === staged.id
+                  ? {
+                      ...f,
+                      file: optResult.file,
+                      size: optResult.optimizedSize,
+                      originalSize: optResult.originalSize,
+                      isOptimized: true,
+                    }
+                  : f
+              )
+            )
+          }
+        }
+
+        // 2. Upload to Storage Stage
+        setUploadProgress((prev) => ({
+          ...prev,
+          [staged.id]: { percent: 0, status: 'uploading' }
+        }))
+
+        const fileDocId = generateSecureToken(16)
+        
+        const { downloadUrl, storagePath } = await uploadDeliveryFile(
+          project.id,
+          delivery.id,
+          fileDocId,
+          uploadFile,
+          (progress) => {
+            setUploadProgress((prev) => ({
+              ...prev,
+              [staged.id]: { percent: Math.round(progress), status: progress >= 100 ? 'saving' : 'uploading' },
+            }))
+          },
+          project.clientId
+        )
+
+        const fullFileRecord: DeliveryFile = {
+          id: fileDocId,
+          deliveryId: delivery.id,
+          projectId: project.id,
+          clientId: project.clientId,
+          fileName: staged.name,
+          originalName: staged.name,
+          fileType: uploadFile.type,
+          fileSize: finalSize,
+          storagePath,
+          downloadUrl,
+          downloadCount: 0,
+          uploadedAt: new Date() as any,
+          uploadedBy: 'admin',
+        }
+
+        // Verify successful save and refresh list
+        setUploadProgress((prev) => ({
+          ...prev,
+          [staged.id]: { percent: 100, status: 'done' },
+        }))
+
+        toast.success(`"${staged.name}" uploaded successfully!`)
+        await loadDeliveryData()
+
+        // Clean up completed file from staged list after a slight delay
+        setTimeout(() => {
+          if (staged.previewUrl) URL.revokeObjectURL(staged.previewUrl)
+          setStagedFiles((prev) => prev.filter((f) => f.id !== staged.id))
+          setUploadProgress((prev) => {
+            const copy = { ...prev }
+            delete copy[staged.id]
+            return copy
+          })
+        }, 1200)
+
+      } catch (err: any) {
+        console.error(`Failed to upload ${staged.name}:`, err)
+        
+        // Handle precise user-facing error mapping
+        let userErrMsg = 'Upload failed. Please try again.'
+        const errStr = String(err?.message || err || '').toLowerCase()
+        const errStatus = err?.status || 0
+
+        if (errStatus === 413 || errStr.includes('413') || errStr.includes('too large') || errStr.includes('payload')) {
+          userErrMsg = 'This file is too large. Ctrl Room will optimize the image before uploading.'
+        } else if (errStatus === 401 || errStr.includes('401') || errStr.includes('unauthorized') || errStr.includes('session') || errStr.includes('sign in')) {
+          userErrMsg = 'Your session has expired. Please sign in again.'
+        } else if (errStatus === 403 || errStr.includes('403') || errStr.includes('permission') || errStr.includes('not allowed')) {
+          userErrMsg = "You don't have permission to upload this file."
+        } else if (errStr.includes('unavailable') || errStr.includes('storage')) {
+          userErrMsg = 'File storage is temporarily unavailable. Please try again.'
+        } else if (errStr.includes('network') || errStr.includes('timeout') || errStr.includes('connection') || !navigator.onLine) {
+          userErrMsg = 'Upload interrupted. Check your internet connection and try again.'
+        } else {
+          userErrMsg = err?.message || 'File storage failed. Please check connection and retry.'
+        }
+
+        setUploadProgress((prev) => ({
+          ...prev,
+          [staged.id]: {
+            percent: 0,
+            status: 'error',
+            error: userErrMsg,
+          },
+        }))
+        toast.error(`Error uploading "${staged.name}": ${userErrMsg}`)
+      }
+    }
+
+    setIsUploading(false)
+  }
+
+  const handleRetryUpload = async (stagedId: string) => {
+    const fileToRetry = stagedFiles.find((f) => f.id === stagedId)
+    if (!fileToRetry) return
+    
+    // Clear the error status
+    setUploadProgress((prev) => ({
+      ...prev,
+      [stagedId]: { percent: 0, status: 'preparing' }
+    }))
+
+    await startUploadForFiles([fileToRetry])
+  }
+
+  // File replacement actions for step 14
+  const handleReplaceClick = (file: DeliveryFile) => {
+    if (isUploading || isReplacingFile) return
+    setFileToReplace(file)
+    setTimeout(() => {
+      replaceFileInputRef.current?.click()
+    }, 50)
+  }
+
+  const handleReplaceFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedList = e.target.files
+    if (!selectedList || selectedList.length === 0 || !delivery || !fileToReplace) return
+
+    const rawFile = selectedList[0]
+    setIsReplacingFile(true)
+    const toastId = toast.loading(`Replacing "${fileToReplace.fileName}"...`)
 
     try {
-      for (const staged of stagedFiles) {
-        try {
-          const fileDocId = generateSecureToken(16)
-          
-          // 1. Upload to Storage: deliveries/{projectId}/{deliveryId}/{fileId}/{sanitizedFilename}
-          const { downloadUrl, storagePath } = await uploadDeliveryFile(
-            project.id,
-            delivery.id,
-            fileDocId,
-            staged.file,
-            (progress) => {
-              setUploadProgress((prev) => ({
-                ...prev,
-                [staged.id]: { percent: Math.round(progress), status: progress >= 100 ? 'saving' : 'uploading' },
-              }))
-            },
-            project.clientId
-          )
+      let uploadFile = rawFile
+      let finalSize = rawFile.size
 
-          const fullFileRecord: DeliveryFile = {
-            id: fileDocId,
-            deliveryId: delivery.id,
-            projectId: project.id,
-            clientId: project.clientId,
-            fileName: staged.name,
-            originalName: staged.name,
-            fileType: staged.type,
-            fileSize: staged.size,
-            storagePath,
-            downloadUrl,
-            downloadCount: 0,
-            uploadedAt: new Date() as any,
-            uploadedBy: 'admin',
-          }
-
-          newlyUploaded.push(fullFileRecord)
-          successCount++
-          addedSize += staged.size
-
-          setUploadProgress((prev) => ({
-            ...prev,
-            [staged.id]: { percent: 100, status: 'done' },
-          }))
-        } catch (err: any) {
-          console.error(`Failed to upload ${staged.name}:`, err)
-          const errMsg = err?.message || 'Unable to upload this file. Please check your connection and try again.'
-          setUploadProgress((prev) => ({
-            ...prev,
-            [staged.id]: {
-              percent: 0,
-              status: 'error',
-              error: errMsg,
-            },
-          }))
-          toast.error(`Error uploading ${staged.name}: ${errMsg}`)
+      // 1. Image Optimization if necessary
+      if (rawFile.type.startsWith('image/')) {
+        toast.loading(`Optimizing image...`, { id: toastId })
+        const optResult = await optimizeImageFile(rawFile)
+        if (optResult.optimized) {
+          uploadFile = optResult.file
+          finalSize = optResult.optimizedSize
         }
       }
 
-      // Refresh list & delivery container from server truth
-      if (successCount > 0 && delivery) {
-        toast.success(`${successCount} file(s) uploaded successfully!`)
-        await loadDeliveryData()
+      toast.loading(`Uploading to storage...`, { id: toastId })
+      const newFileId = generateSecureToken(16)
 
-        // Remove successful uploads from staged list
-        setTimeout(() => {
-          setStagedFiles([])
-          setUploadProgress({})
-        }, 1000)
+      // 2. Upload the new file to Supabase Storage
+      const { downloadUrl, storagePath: newStoragePath } = await uploadDeliveryFile(
+        project.id,
+        delivery.id,
+        newFileId,
+        uploadFile,
+        undefined,
+        project.clientId
+      )
+
+      toast.loading(`Updating database...`, { id: toastId })
+
+      // Keep track of the old storage path to delete later
+      const oldStoragePath = fileToReplace.storagePath
+
+      // 3. Update Firebase/Firestore with the new file reference
+      await updateDocument(COLLECTIONS.DELIVERY_FILES, fileToReplace.id, {
+        fileName: rawFile.name,
+        originalName: rawFile.name,
+        fileType: uploadFile.type,
+        fileSize: finalSize,
+        storagePath: newStoragePath,
+        downloadUrl,
+        uploadedAt: new Date() as any, // fallback
+      })
+
+      // Refresh list from database truth
+      await loadDeliveryData()
+      toast.success('File replaced successfully!', { id: toastId })
+
+      // 4. Safely delete the old file from Supabase Storage only after new database record is verified
+      if (oldStoragePath) {
+        try {
+          await deleteDeliveryFile(oldStoragePath)
+        } catch (delErr) {
+          console.warn('Failed to delete old file after replacement:', delErr)
+        }
       }
+
+    } catch (err: any) {
+      console.error('File replacement failed:', err)
+      toast.error(`Replacement failed: ${err?.message || 'Unable to replace file.'}`, { id: toastId })
     } finally {
-      setIsUploading(false)
+      setIsReplacingFile(false)
+      setFileToReplace(null)
+      if (replaceFileInputRef.current) replaceFileInputRef.current.value = ''
     }
   }
 
@@ -675,15 +859,25 @@ export function ProjectDeliveryManager({
             disabled={isUploading}
             className="sr-only"
           />
-          <label
-            htmlFor="delivery-file-input"
+          <input
+            id="replace-delivery-file-input"
+            type="file"
+            ref={replaceFileInputRef}
+            onChange={handleReplaceFileSelected}
+            disabled={isReplacingFile || isUploading}
+            className="sr-only"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
             className={`inline-flex items-center justify-center font-medium transition-all duration-150 rounded-lg gap-1.5 h-8 px-3 text-xs shadow-sm select-none cursor-pointer bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800 ${
               isUploading ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''
             }`}
           >
             <Upload size={14} />
             <span>Upload Final Files</span>
-          </label>
+          </button>
 
           <Button
             size="sm"
@@ -864,7 +1058,7 @@ export function ProjectDeliveryManager({
                   Files Selected for Upload ({stagedFiles.length})
                 </h4>
                 <p className="text-xs text-indigo-700 mt-0.5">
-                  Review selected files below and click &quot;Upload Now&quot; to upload to Firebase Storage.
+                  Review selected files below. Images are optimized automatically to save storage and prevent timeout.
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -875,7 +1069,7 @@ export function ProjectDeliveryManager({
                   onClick={handleClearStaged}
                   className="bg-white text-xs border-indigo-200 text-indigo-700 hover:bg-indigo-50"
                 >
-                  Clear
+                  Clear All
                 </Button>
                 <Button
                   size="sm"
@@ -893,23 +1087,46 @@ export function ProjectDeliveryManager({
               {stagedFiles.map((sf) => {
                 const prog = uploadProgress[sf.id]
                 return (
-                  <div key={sf.id} className="p-3 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
-                        {renderFileIcon(sf.name, sf.type)}
-                      </div>
+                  <div key={sf.id} className="p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      {/* Image Preview or File Icon */}
+                      {sf.previewUrl ? (
+                        <div className="w-12 h-12 rounded-lg border border-indigo-100 overflow-hidden shrink-0 relative bg-gray-50 flex items-center justify-center">
+                          <img
+                            src={sf.previewUrl}
+                            alt={sf.name}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-12 h-12 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
+                          {renderFileIcon(sf.name, sf.type)}
+                        </div>
+                      )}
+
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-semibold text-gray-900 truncate">{sf.name}</p>
-                        <p className="text-[11px] text-gray-400">{formatFileSize(sf.size)}</p>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          {sf.isOptimized && sf.originalSize ? (
+                            <p className="text-[11px] text-gray-400">
+                              <span className="line-through">{formatFileSize(sf.originalSize)}</span>
+                              <span className="text-emerald-600 font-semibold ml-1">→ {formatFileSize(sf.size)} (Optimized)</span>
+                            </p>
+                          ) : (
+                            <p className="text-[11px] text-gray-400">{formatFileSize(sf.size)}</p>
+                          )}
+                        </div>
 
                         {/* Progress bar */}
                         {prog && (
-                          <div className="mt-1.5 space-y-1">
+                          <div className="mt-2 space-y-1">
                             <div className="flex items-center justify-between text-[10px] text-indigo-700">
-                              <span>
+                              <span className="font-semibold">
+                                {prog.status === 'preparing' && 'Preparing...'}
+                                {prog.status === 'optimizing' && 'Optimizing Image...'}
                                 {prog.status === 'uploading' && `Uploading... ${prog.percent}%`}
                                 {prog.status === 'saving' && 'Saving metadata...'}
-                                {prog.status === 'done' && 'Uploaded ✓'}
+                                {prog.status === 'done' && 'Complete ✓'}
                                 {prog.status === 'error' && (
                                   <span className="text-rose-600 font-medium">{prog.error || 'Upload error'}</span>
                                 )}
@@ -920,7 +1137,7 @@ export function ProjectDeliveryManager({
                                 className={`h-1.5 rounded-full transition-all duration-300 ${
                                   prog.status === 'error' ? 'bg-rose-500' : prog.status === 'done' ? 'bg-emerald-500' : 'bg-indigo-600'
                                 }`}
-                                style={{ width: `${prog.percent}%` }}
+                                style={{ width: `${prog.status === 'done' ? 100 : prog.status === 'error' ? 100 : prog.percent}%` }}
                               />
                             </div>
                           </div>
@@ -928,15 +1145,27 @@ export function ProjectDeliveryManager({
                       </div>
                     </div>
 
-                    {!isUploading && (
-                      <button
-                        onClick={() => handleRemoveStaged(sf.id)}
-                        className="p-1 rounded-md text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
-                        title="Remove file"
-                      >
-                        <X size={15} />
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                      {prog?.status === 'error' && (
+                        <button
+                          type="button"
+                          onClick={() => handleRetryUpload(sf.id)}
+                          className="px-2 py-1 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition-colors text-xs font-semibold"
+                        >
+                          Retry
+                        </button>
+                      )}
+                      {!isUploading && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveStaged(sf.id)}
+                          className="p-1 rounded-md text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
+                          title="Remove file"
+                        >
+                          <X size={15} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )
               })}
@@ -1043,6 +1272,14 @@ export function ProjectDeliveryManager({
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => handleReplaceClick(file)}
+                      disabled={isReplacingFile || isUploading}
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors disabled:opacity-50"
+                      title="Replace file (safety first)"
+                    >
+                      <RefreshCw size={13} className={isReplacingFile && fileToReplace?.id === file.id ? "animate-spin" : ""} />
+                    </button>
                     <button
                       onClick={() => window.open(file.downloadUrl, '_blank')}
                       className="p-1.5 rounded-lg text-gray-500 hover:text-indigo-600 hover:bg-gray-100 transition-colors text-xs font-medium flex items-center gap-1"
