@@ -42,6 +42,8 @@ export const COLLECTIONS = {
   WHATSAPP_MESSAGES: 'whatsappMessages',
   DELIVERIES: 'deliveries',
   DELIVERY_FILES: 'deliveryFiles',
+  REMINDERS: 'reminders',
+  TASKS: 'tasks',
 } as const
 
 // Helper for local storage persistence fallback

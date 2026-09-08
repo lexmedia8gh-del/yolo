@@ -491,3 +491,72 @@ export interface DashboardStats {
   outstandingPayments: number
   overdueInvoices: number
 }
+
+// ─── Smart Reminders & Tasks ─────────────────────────────────
+export type ReminderStatus = 'pending' | 'completed' | 'snoozed' | 'cancelled'
+export type ReminderCategory = 'field' | 'event' | 'payment' | 'milestone' | 'client' | 'general'
+export type ReminderPriority = 'low' | 'medium' | 'high' | 'urgent'
+
+export interface SmartReminder {
+  id: string
+  title: string
+  notes?: string
+  status: ReminderStatus
+  category: ReminderCategory
+  priority: ReminderPriority
+  dueDate: string // YYYY-MM-DD
+  dueTime?: string // HH:MM (e.g. 09:30 or 14:00)
+  isFieldOriented?: boolean // Flag for on-site shoots, equipment prep, field visits, delivery drops
+  fieldLocation?: string // On-site shoot location, client venue, studio, etc.
+  isImportantEvent?: boolean // Flag for high priority major events / deadlines
+  clientId?: string
+  clientName?: string
+  projectId?: string
+  projectName?: string
+  invoiceId?: string
+  invoiceNumber?: string
+  whatsappNotification?: boolean
+  whatsappPhone?: string
+  completedAt?: Timestamp | string | null
+  completedBy?: string
+  createdAt: Timestamp | string
+  updatedAt: Timestamp | string
+  createdBy?: string
+}
+
+export type TaskStatus = 'todo' | 'in_progress' | 'completed' | 'blocked'
+export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
+export type TaskCategory = 'creative' | 'field_work' | 'client_followup' | 'finance' | 'admin' | 'delivery'
+
+export interface TaskChecklistItem {
+  id: string
+  text: string
+  completed: boolean
+}
+
+export interface TaskItem {
+  id: string
+  title: string
+  description?: string
+  status: TaskStatus
+  priority: TaskPriority
+  category: TaskCategory
+  dueDate: string // YYYY-MM-DD
+  dueTime?: string // HH:MM
+  isFieldOriented?: boolean
+  fieldLocation?: string
+  isImportantEvent?: boolean
+  clientId?: string
+  clientName?: string
+  projectId?: string
+  projectName?: string
+  checklist?: TaskChecklistItem[]
+  tags?: string[]
+  estimatedHours?: number
+  completedAt?: Timestamp | string | null
+  completedBy?: string
+  createdAt: Timestamp | string
+  updatedAt: Timestamp | string
+  createdBy?: string
+}
+

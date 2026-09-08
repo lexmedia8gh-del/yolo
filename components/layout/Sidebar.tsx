@@ -14,6 +14,7 @@ import {
   Link2,
   Globe,
   MessageSquare,
+  BellRing,
   Settings,
   ChevronRight,
 } from 'lucide-react'
@@ -26,6 +27,11 @@ const navItems = [
     label: 'Dashboard',
     href: '/dashboard',
     icon: LayoutDashboard,
+  },
+  {
+    label: 'Smart Reminders',
+    href: '/reminders',
+    icon: BellRing,
   },
   {
     label: 'Clients',
@@ -71,6 +77,11 @@ const navItems = [
     label: 'WhatsApp',
     href: '/whatsapp',
     icon: MessageSquare,
+  },
+  {
+    label: 'Templates',
+    href: '/templates',
+    icon: FileText,
   },
   {
     label: 'Settings',
