@@ -15,35 +15,49 @@ export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData()
     const file = formData.get('file') as File | null
+    const directUrl = (formData.get('directUrl') as string) || ''
+    const directStoragePath = (formData.get('storagePath') as string) || ''
+    const directFileName = (formData.get('fileName') as string) || ''
+    const directFileSize = (formData.get('fileSize') as string) || ''
+    const directFileType = (formData.get('fileType') as string) || ''
+
     const projectId = (formData.get('projectId') as string) || ''
     const deliveryId = (formData.get('deliveryId') as string) || ''
     const clientId = (formData.get('clientId') as string) || ''
     const fileDocId = (formData.get('fileDocId') as string) || ''
 
-    if (!file || !projectId || !deliveryId) {
+    if (!projectId || !deliveryId) {
       return NextResponse.json(
-        { error: 'Missing file, projectId, or deliveryId' },
+        { error: 'Missing projectId or deliveryId' },
         { status: 400 }
       )
     }
 
-    const bytes = await file.arrayBuffer()
-    const buffer = Buffer.from(bytes)
+    const bytes = file ? await file.arrayBuffer() : null
+    const buffer = bytes ? Buffer.from(bytes) : null
 
-    const sanitizedName = file.name.replace(/[^a-zA-Z0-9._\- ]/g, '_').trim() || 'file'
+    const sanitizedName = file ? file.name.replace(/[^a-zA-Z0-9._\- ]/g, '_').trim() || 'file' : 'file'
     const id = fileDocId || Math.random().toString(36).substring(2, 15)
 
     // Save to local public storage directory: public/uploads/deliveries/{projectId}/{deliveryId}/{id}/{sanitizedName}
     const relativeStorageDir = path.join('uploads', 'deliveries', projectId, deliveryId, id)
     const absoluteTargetDir = path.join(process.cwd(), 'public', relativeStorageDir)
 
-    await fs.promises.mkdir(absoluteTargetDir, { recursive: true })
-    const absoluteFilePath = path.join(absoluteTargetDir, sanitizedName)
-    await fs.promises.writeFile(absoluteFilePath, buffer)
+    if (!directUrl) {
+      if (!buffer) {
+        return NextResponse.json({ error: 'Missing file upload buffer' }, { status: 400 })
+      }
+      await fs.promises.mkdir(absoluteTargetDir, { recursive: true })
+      const absoluteFilePath = path.join(absoluteTargetDir, sanitizedName)
+      await fs.promises.writeFile(absoluteFilePath, buffer)
+    }
 
     // Web-accessible download URL via streaming endpoint
-    const downloadUrl = `/api/files?id=${id}`
-    const storagePath = `deliveries/${projectId}/${deliveryId}/${id}/${sanitizedName}`
+    const downloadUrl = directUrl || `/api/files?id=${id}`
+    const storagePath = directStoragePath || `deliveries/${projectId}/${deliveryId}/${id}/${sanitizedName}`
+    const fileName = directUrl ? directFileName : (file ? file.name : '')
+    const fileSize = directUrl ? (parseInt(directFileSize, 10) || 0) : (file ? file.size : 0)
+    const fileType = directUrl ? directFileType : (file ? (file.type || file.name.split('.').pop() || 'application/octet-stream') : 'application/octet-stream')
 
     // Save metadata to Firestore using Admin SDK
     const adminDb = getAdminDb()
@@ -51,10 +65,10 @@ export async function POST(req: NextRequest) {
       deliveryId,
       projectId,
       clientId,
-      fileName: file.name,
-      originalName: file.name,
-      fileType: file.type || file.name.split('.').pop() || 'application/octet-stream',
-      fileSize: file.size,
+      fileName,
+      originalName: fileName,
+      fileType,
+      fileSize,
       storagePath,
       downloadUrl,
       downloadCount: 0,
@@ -76,7 +90,7 @@ export async function POST(req: NextRequest) {
 
       const updates: any = {
         fileCount: FieldValue.increment(1),
-        totalSize: FieldValue.increment(file.size),
+        totalSize: FieldValue.increment(fileSize),
         status: nextStatus,
         updatedAt: FieldValue.serverTimestamp(),
       }
@@ -156,8 +170,8 @@ export async function POST(req: NextRequest) {
       fileId: id,
       downloadUrl,
       storagePath,
-      fileName: file.name,
-      fileSize: file.size,
+      fileName,
+      fileSize,
       fileType: fileRecord.fileType,
     })
   } catch (error: any) {
