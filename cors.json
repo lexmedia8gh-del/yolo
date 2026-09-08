@@ -1,0 +1,8 @@
+﻿[
+  {
+    "origin": ["http://localhost:3000", "https://lexmedia-client-system.web.app", "https://lexmedia-client-system.firebaseapp.com"],
+    "method": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+    "responseHeader": ["Content-Type", "Content-Length", "Content-Disposition", "Access-Control-Allow-Origin"],
+    "maxAgeSeconds": 3600
+  }
+]

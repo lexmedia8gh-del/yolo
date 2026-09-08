@@ -1,0 +1,33 @@
+﻿rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ─── Admin authorization ──────────────────────────────────────────────────
+    // Only the Firebase user with custom claim admin:true can write to storage.
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    // ─── Delivery files ───────────────────────────────────────────────────────
+    // Clients access delivery files via the /api/files streaming endpoint which
+    // validates the access token server-side. Firebase Storage direct reads are
+    // only used as a fallback; write is admin-only.
+    match /deliveries/{allPaths=**} {
+      allow read: if true;      // Direct URL reads OK; real gate is the API token check
+      allow write: if isAdmin();
+    }
+
+    // ─── Branding assets (logos, favicon) ─────────────────────────────────────
+    // Admin-only upload. Public read so logos can be served to client portal pages.
+    match /branding/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── Default: deny everything else ────────────────────────────────────────
+    match /{allPaths=**} {
+      allow read: if false;
+      allow write: if isAdmin();
+    }
+  }
+}

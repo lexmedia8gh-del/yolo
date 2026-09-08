@@ -1,0 +1,62 @@
+﻿rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Admin authorization ─────────────────────────────────────────────────
+    // Checks for the Firebase Custom Claim set by /api/admin/grant-claim.
+    // This is server-verified and tamper-proof — cannot be faked from the client.
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    // ─── Default: deny everything ────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ─── User profiles ───────────────────────────────────────────────────────
+    // Admin can manage all; user can read only their own profile.
+    match /users/{uid} {
+      allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // ─── Core Business Data (Admin Only) ─────────────────────────────────────
+    // IMPORTANT: These were previously open to ALL authenticated users.
+    // Now only the token with admin:true custom claim can access them.
+    match /clients/{docId}        { allow read, write: if isAdmin(); }
+    match /services/{docId}       { allow read, write: if isAdmin(); }
+    match /projects/{docId}       { allow read, write: if isAdmin(); }
+    match /packages/{docId}       { allow read, write: if isAdmin(); }
+    match /invoices/{docId}       { allow read, write: if isAdmin(); }
+    match /invoiceItems/{docId}   { allow read, write: if isAdmin(); }
+    match /payments/{docId}       { allow read, write: if isAdmin(); }
+    match /activityLogs/{docId}   { allow read, write: if isAdmin(); }
+    match /settings/{docId}       { allow read, write: if isAdmin(); }
+    match /whatsappMessages/{docId} { allow read, write: if isAdmin(); }
+    match /notifications/{docId}  { allow read, write: if isAdmin(); }
+
+    // ─── Delivery System ─────────────────────────────────────────────────────
+    // Delivery metadata is read by the server-side API routes using the Admin SDK
+    // (which bypasses rules). The client delivery portal reads via server API only.
+    // Admin reads/writes are protected by the admin claim.
+    // Public reads here are required for the client portal token validation flow.
+    match /deliveries/{docId} {
+      allow read: if true;              // Token-gated server-side; public read needed for client portal
+      allow write: if isAdmin();        // Only admin can create/update/delete deliveries
+    }
+
+    match /deliveryFiles/{docId} {
+      allow read: if true;              // Client portal reads file metadata via token
+      allow write: if isAdmin();        // Only admin can upload/delete delivery files
+    }
+
+    // ─── Client Payment Links (Public Access for Paystack flow) ──────────────
+    // Clients receive a link with a unique token; the link data is public.
+    // Only admin can create or delete payment links.
+    match /clientLinks/{linkId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}
