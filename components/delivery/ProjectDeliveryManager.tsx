@@ -62,6 +62,7 @@ import {
   getFileCategory,
   generateSecureToken,
   copyToClipboard,
+  getDeliveryLink,
 } from '@/lib/utils'
 import { Timestamp } from 'firebase/firestore'
 import toast from 'react-hot-toast'
@@ -723,8 +724,7 @@ export function ProjectDeliveryManager({
 
     setSendingWA(true)
     try {
-      const appUrl = typeof window !== 'undefined' ? window.location.origin : ''
-      const deliveryUrl = `${appUrl}/delivery/${delivery.accessToken}`
+      const deliveryUrl = getDeliveryLink(delivery.accessToken)
 
       const messageBody = `Hi ${delivery.clientName}, your LexMedia project is ready! 🎉\n\nYour final files are now available for download.\n\nProject: ${delivery.projectName}\n\n📁 Download your files:\n${deliveryUrl}\n\nThank you for choosing LexMedia.`
 
@@ -758,8 +758,7 @@ export function ProjectDeliveryManager({
     }
   }
 
-  const appUrl = typeof window !== 'undefined' ? window.location.origin : ''
-  const deliveryUrl = delivery ? `${appUrl}/delivery/${delivery.accessToken}` : ''
+  const deliveryUrl = delivery ? getDeliveryLink(delivery.accessToken) : ''
 
   // Delivery Locking & Financial Status Calculation
   const isFullyPaid =

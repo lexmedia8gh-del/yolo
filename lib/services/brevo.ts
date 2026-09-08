@@ -23,6 +23,7 @@ interface SendPaymentReminderEmailParams {
   amountDue: number
   currencySymbol?: string
   paymentUrl: string
+  deliveryUrl?: string
   lexmediaLogoUrl?: string
   clientLogoUrl?: string
 }
@@ -39,7 +40,8 @@ function getProductionUrl(urlStr: string): string {
     if (
       urlObj.hostname === 'localhost' ||
       urlObj.hostname === '127.0.0.1' ||
-      urlObj.hostname.startsWith('192.168.')
+      urlObj.hostname.startsWith('192.168.') ||
+      urlObj.hostname.includes('vercel.app')
     ) {
       const normalizedBase = prodBase.startsWith('http') ? prodBase : `https://${prodBase}`
       const baseObj = new URL(normalizedBase)
@@ -356,6 +358,7 @@ export async function sendDeliveryPaymentRequiredEmail({
   amountDue,
   currencySymbol = 'GH₵',
   paymentUrl,
+  deliveryUrl,
   lexmediaLogoUrl,
   clientLogoUrl,
 }: SendPaymentReminderEmailParams): Promise<{ success: boolean; messageId?: string; error?: string }> {
@@ -383,6 +386,8 @@ export async function sendDeliveryPaymentRequiredEmail({
     primaryButtonText: hasBalance ? 'Complete Payment & View Files' : 'View My Delivery',
     primaryButtonUrl: paymentUrl,
     primaryButtonBg: hasBalance ? '#16a34a' : '#2563eb',
+    secondaryButtonText: (hasBalance && deliveryUrl) ? 'View Delivery Portal (Locked)' : undefined,
+    secondaryButtonUrl: (hasBalance && deliveryUrl) ? deliveryUrl : undefined,
     introText: hasBalance
       ? `Your final deliverables for <strong>${escapeHtml(projectName)}</strong> have been prepared. Complete your remaining balance to immediately unlock high-resolution file downloads.`
       : `Your final project files for <strong>${escapeHtml(projectName)}</strong> are ready for download in your secure client portal.`,

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb, requireAdmin } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 import { FieldValue, Timestamp, type DocumentData } from 'firebase-admin/firestore'
-import { appUrl } from '@/lib/utils'
+import { appUrl, getDeliveryLink } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -104,7 +104,7 @@ async function ensureCanonicalDelivery(input: {
 }
 
 function publicUrl(req: NextRequest, token: string) {
-  return appUrl(`/delivery/${encodeURIComponent(token)}`)
+  return getDeliveryLink(token)
 }
 
 export async function GET(req: NextRequest) {

@@ -4,7 +4,7 @@ import { COLLECTIONS } from '@/lib/firebase/firestore'
 import { FieldValue } from 'firebase-admin/firestore'
 import { sendDeliveryPaymentRequiredEmail } from '@/lib/services/brevo'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
-import { appUrl } from '@/lib/utils'
+import { appUrl, getPaymentLink, getDeliveryLink } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -154,7 +154,93 @@ export async function POST(req: NextRequest) {
         }
 
         if (clientEmail) {
-          const paymentUrl = appUrl(`/delivery/${encodeURIComponent(deliveryData.accessToken || deliveryId)}`)
+          const deliveryUrl = getDeliveryLink(deliveryData.accessToken || deliveryId)
+          let finalPaymentUrl = ''
+
+          if (amountDue > 0) {
+            let paymentToken = ''
+
+            // 1. Check if a clientLink already exists for this invoiceId
+            if (invoiceId) {
+              const linkSnap = await adminDb.collection(COLLECTIONS.CLIENT_LINKS)
+                .where('invoiceId', '==', invoiceId)
+                .limit(1)
+                .get()
+              if (!linkSnap.empty) {
+                const linkData = linkSnap.docs[0].data()
+                paymentToken = linkData.token
+              }
+            }
+
+            // 2. Check if a clientLink already exists for this projectId
+            if (!paymentToken && projectId) {
+              const linkSnap = await adminDb.collection(COLLECTIONS.CLIENT_LINKS)
+                .where('projectId', '==', projectId)
+                .limit(1)
+                .get()
+              if (!linkSnap.empty) {
+                const linkData = linkSnap.docs[0].data()
+                paymentToken = linkData.token
+              }
+            }
+
+            // 3. If no link exists, create a new system-generated payment link
+            if (!paymentToken) {
+              paymentToken = `pay_${Math.random().toString(36).substring(2, 10)}${Date.now().toString(36)}`
+
+              let currency = 'GHS'
+              let invoiceNum = ''
+
+              if (invoiceId) {
+                try {
+                  const invDoc = await adminDb.collection(COLLECTIONS.INVOICES).doc(invoiceId).get()
+                  if (invDoc.exists) {
+                    const invData = invDoc.data()!
+                    invoiceNum = invData.invoiceNumber || ''
+                    currency = invData.currency || 'GHS'
+                  }
+                } catch (e) {
+                  console.warn('Error fetching invoice details during auto clientLink creation:', e)
+                }
+              }
+
+              if (!currency && projectId) {
+                try {
+                  const projDoc = await adminDb.collection(COLLECTIONS.PROJECTS).doc(projectId).get()
+                  if (projDoc.exists) {
+                    const projData = projDoc.data()!
+                    currency = projData.currency || 'GHS'
+                  }
+                } catch (e) {
+                  console.warn('Error fetching project details during auto clientLink creation:', e)
+                }
+              }
+
+              const newLinkPayload = {
+                token: paymentToken,
+                clientId: targetClientId,
+                clientName: clientName,
+                projectId: projectId || null,
+                projectName: deliveryData.projectName || 'Your Project',
+                invoiceId: invoiceId || null,
+                invoiceNumber: invoiceNum || null,
+                amount: amountDue,
+                currency,
+                status: 'Pending Payment',
+                createdBy: 'system_delivery_upload',
+                createdAt: FieldValue.serverTimestamp(),
+                updatedAt: FieldValue.serverTimestamp(),
+                viewCount: 0,
+              }
+
+              await adminDb.collection(COLLECTIONS.CLIENT_LINKS).add(newLinkPayload)
+            }
+
+            finalPaymentUrl = getPaymentLink(paymentToken)
+          } else {
+            // If there's no balance due, point directly to the delivery portal
+            finalPaymentUrl = deliveryUrl
+          }
 
           const emailRes = await sendDeliveryPaymentRequiredEmail({
             toEmail: clientEmail,
@@ -162,7 +248,8 @@ export async function POST(req: NextRequest) {
             projectName: deliveryData.projectName || 'Your Project',
             amountDue,
             currencySymbol: 'GH₵',
-            paymentUrl,
+            paymentUrl: finalPaymentUrl,
+            deliveryUrl,
             lexmediaLogoUrl,
             clientLogoUrl,
           })

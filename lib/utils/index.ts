@@ -372,3 +372,13 @@ export function getPaymentLink(tokenOrId: string): string {
   return appUrl(`/pay/${cleanToken}`)
 }
 
+/**
+ * Centralized delivery-link generator for Ctrl Room.
+ * Generates the authoritative customer-facing delivery portal URL across the app:
+ * Client delivery portal, emails, and admin copy/share actions.
+ */
+export function getDeliveryLink(accessToken: string): string {
+  const cleanToken = (accessToken || '').trim()
+  return appUrl(`/delivery/${encodeURIComponent(cleanToken)}`)
+}
+
