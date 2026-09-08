@@ -148,7 +148,7 @@ export function Sidebar({ isOpen = true, onClose }: SidebarProps) {
               const Icon = item.icon
               const isActive =
                 pathname === item.href ||
-                (item.href !== '/dashboard' && pathname.startsWith(item.href))
+                (item.href !== '/dashboard' && pathname?.startsWith(item.href) === true)
 
               return (
                 <li key={item.href}>

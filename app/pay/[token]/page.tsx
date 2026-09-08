@@ -44,8 +44,8 @@ function PublicPaymentPageInner() {
   const params = useParams()
   const searchParams = useSearchParams()
   const token = (params?.token as string) || ''
-  const refQuery = searchParams.get('reference')
-  const isMockParam = searchParams.get('mock')
+  const refQuery = searchParams?.get('reference')
+  const isMockParam = searchParams?.get('mock')
   const { branding } = useBranding()
 
   const [linkData, setLinkData] = useState<ClientLink | null>(null)

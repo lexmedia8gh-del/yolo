@@ -29,7 +29,8 @@ export function TopBar({ onMenuClick }: TopBarProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
-  const getPageTitle = (path: string) => {
+  const getPageTitle = (path: string | null) => {
+    if (!path) return 'Dashboard'
     if (path.startsWith('/dashboard')) return 'Dashboard'
     if (path.startsWith('/clients/')) return 'Clients / Profile'
     if (path.startsWith('/clients')) return 'Clients'

@@ -16,14 +16,15 @@ export default function AdminLayout({
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  // Show loader while checking auth
-  if (loading) {
-    return <PageLoader />
-  }
-
   // Client-side guard (middleware handles server-side)
-  if (!user) {
-    router.push('/login')
+  React.useEffect(() => {
+    if (!loading && !user) {
+      router.push('/login')
+    }
+  }, [loading, user, router])
+
+  // Show loader while checking auth or redirecting
+  if (loading || !user) {
     return <PageLoader />
   }
 

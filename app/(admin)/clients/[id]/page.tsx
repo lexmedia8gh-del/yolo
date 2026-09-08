@@ -108,7 +108,7 @@ export default function ClientProfilePage() {
   }, [id])
 
   useEffect(() => {
-    if (searchParams.get('action') === 'new-project') {
+    if (searchParams?.get('action') === 'new-project') {
       setShowWizard(true)
     }
   }, [searchParams])

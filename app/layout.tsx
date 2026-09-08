@@ -4,6 +4,8 @@ import { ThemeProvider } from '@/lib/contexts/ThemeContext'
 import { ToasterWrapper } from '@/components/ui/ToasterWrapper'
 import '@/app/globals.css'
 
+export const dynamic = 'force-dynamic'
+
 export const metadata: Metadata = {
   title: {
     default: 'Lexmedia — Client & Payment Management',
