@@ -167,3 +167,6 @@ export function formatTemplateForClient(
 
   return result
 }
+
+export const CLIENT_TEMPLATES = DEFAULT_CLIENT_TEMPLATES
+

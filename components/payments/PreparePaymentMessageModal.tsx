@@ -17,7 +17,7 @@ import {
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import type { Client, Project, Invoice } from '@/lib/types'
-import { formatCurrency, copyToClipboard } from '@/lib/utils'
+import { formatCurrency, copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface PreparePaymentMessageModalProps {
@@ -59,6 +59,8 @@ export function PreparePaymentMessageModal({
   const [customMessage, setCustomMessage] = useState<string>('')
   const [copiedMessage, setCopiedMessage] = useState(false)
   const [copiedLink, setCopiedLink] = useState(false)
+
+  const phoneValidation = formatWhatsAppPhone(recipientPhone)
 
   // Initialize recipient phone
   useEffect(() => {
@@ -102,6 +104,10 @@ export function PreparePaymentMessageModal({
   }, [template, client, project, invoice, effectiveUrl, invoiceNumber, linkTitle, amount, currency, isOpen])
 
   const handleCopyMessage = async () => {
+    if (!customMessage.trim()) {
+      toast.error('Message is empty')
+      return
+    }
     await copyToClipboard(customMessage)
     setCopiedMessage(true)
     toast.success('Message copied to clipboard!')
@@ -120,15 +126,26 @@ export function PreparePaymentMessageModal({
   }
 
   const handleOpenWhatsApp = () => {
-    const rawNumber = recipientPhone.replace(/[^\d+]/g, '')
-    const cleanNumber = rawNumber.startsWith('+') ? rawNumber.slice(1) : rawNumber
-    const encoded = encodeURIComponent(customMessage)
-
-    if (cleanNumber) {
-      window.open(`https://wa.me/${cleanNumber}?text=${encoded}`, '_blank')
-    } else {
-      window.open(`https://wa.me/?text=${encoded}`, '_blank')
+    if (!customMessage.trim()) {
+      toast.error('Payment message is empty. Please enter message text.')
+      return
     }
+
+    const phoneToUse = recipientPhone.trim()
+    const url = generateWhatsAppLink(phoneToUse, customMessage)
+
+    if (phoneToUse && !phoneValidation.isValid) {
+      toast(
+        `Note: "${phoneToUse}" might be an invalid number format. Opening WhatsApp...`,
+        { icon: '⚠️' }
+      )
+    } else if (phoneToUse && phoneValidation.isValid) {
+      toast.success(`Opening WhatsApp chat with ${phoneValidation.displayFormatted}...`)
+    } else {
+      toast('Opening WhatsApp with contact picker...', { icon: '💬' })
+    }
+
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   return (
@@ -178,16 +195,33 @@ export function PreparePaymentMessageModal({
                 type="text"
                 value={recipientPhone}
                 onChange={(e) => setRecipientPhone(e.target.value)}
-                placeholder="+233XXXXXXXXX"
+                placeholder="+233XXXXXXXXX or 024XXXXXXX"
                 className="w-full h-8 pl-8 pr-3 rounded-lg border border-gray-300 bg-white text-xs text-gray-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none"
               />
             </div>
+            {recipientPhone ? (
+              <div className="text-[11px] flex items-center gap-1.5 pt-0.5">
+                {phoneValidation.isValid ? (
+                  <span className="text-emerald-700 font-medium">
+                    ✓ Valid: {phoneValidation.displayFormatted}
+                  </span>
+                ) : (
+                  <span className="text-amber-700">
+                    ⚠️ {phoneValidation.error || 'Check number format'}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <p className="text-[11px] text-gray-500 pt-0.5">
+                No phone provided (will open WhatsApp contact picker).
+              </p>
+            )}
           </div>
 
           <div className="space-y-1">
             <div className="flex items-center justify-between">
               <label className="block text-[11px] font-semibold text-gray-600">Payment Link</label>
-              {paymentLinkUrl && (
+              {effectiveUrl && (
                 <button
                   type="button"
                   onClick={handleCopyLinkOnly}
@@ -200,7 +234,7 @@ export function PreparePaymentMessageModal({
             <div className="flex items-center gap-1.5 h-8 px-2.5 bg-gray-50 rounded-lg border border-gray-200 text-xs">
               <Link2 size={12} className="text-gray-400 shrink-0" />
               <span className="truncate font-mono text-gray-700 text-[11px]">
-                {paymentLinkUrl || 'No link associated yet'}
+                {effectiveUrl || 'No link associated yet'}
               </span>
             </div>
           </div>
@@ -220,38 +254,38 @@ export function PreparePaymentMessageModal({
           />
         </div>
 
-        {/* Quick preview notice */}
-        <p className="text-[11px] text-gray-500 italic">
-          💡 You can customize any line of text above before copying or launching WhatsApp.
-        </p>
-
         {/* Action Buttons */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-gray-100">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleCopyMessage}
-              icon={copiedMessage ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />}
-              className="flex-1 sm:flex-initial"
-            >
-              {copiedMessage ? 'Copied Message!' : 'Copy Message'}
+        <div className="space-y-2 pt-3 border-t border-gray-100">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <Button variant="outline" size="sm" onClick={onClose}>
+              Cancel
             </Button>
 
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={handleOpenWhatsApp}
-              icon={<MessageSquare size={14} />}
-              className="flex-1 sm:flex-initial bg-emerald-600 hover:bg-emerald-700 border-emerald-600 text-white"
-            >
-              Open in WhatsApp
-            </Button>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCopyMessage}
+                icon={copiedMessage ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                className="flex-1 sm:flex-initial"
+              >
+                {copiedMessage ? 'Copied Message!' : 'Copy Message'}
+              </Button>
+
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleOpenWhatsApp}
+                icon={<MessageSquare size={14} />}
+                className="flex-1 sm:flex-initial bg-emerald-600 hover:bg-emerald-700 border-emerald-600 text-white"
+              >
+                Open in WhatsApp
+              </Button>
+            </div>
           </div>
+          <p className="text-[10px] text-gray-400 italic text-center sm:text-right">
+            * Clicking &quot;Open in WhatsApp&quot; launches WhatsApp with this pre-filled message for you to review and send manually.
+          </p>
         </div>
       </div>
     </Modal>

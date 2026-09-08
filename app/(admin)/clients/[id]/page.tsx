@@ -39,7 +39,7 @@ import {
 } from '@/lib/firebase/firestore'
 import { where, orderBy } from '@/lib/firebase/firestore'
 import type { Client, Project, Invoice, Payment, ClientLink } from '@/lib/types'
-import { formatCurrency, formatDate, getStatusColor, copyToClipboard } from '@/lib/utils'
+import { formatCurrency, formatDate, getStatusColor, copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone } from '@/lib/utils'
 import { NewProjectWizard } from '@/components/projects/NewProjectWizard'
 import { ClientInformationTemplatesModal } from '@/components/clients/ClientInformationTemplatesModal'
 import { RecordPaymentModal } from '@/components/payments/RecordPaymentModal'
@@ -380,7 +380,7 @@ export default function ClientProfilePage() {
                   <div>
                     <p className="text-xs text-gray-500">WhatsApp</p>
                     <a
-                      href={`https://wa.me/${client.whatsappNumber.replace(/[^0-9]/g, '')}`}
+                      href={generateWhatsAppLink(client.whatsappNumber)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="font-medium text-emerald-600 hover:underline flex items-center gap-1"
@@ -442,12 +442,23 @@ export default function ClientProfilePage() {
                 <Link2 size={14} className="text-indigo-600" />
                 Create Payment Link
               </Link>
-              {client.whatsappNumber && (
+              <button
+                type="button"
+                onClick={() => setIsTemplatesModalOpen(true)}
+                className="w-full flex items-center gap-2.5 p-2.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 hover:border-gray-300 transition-colors text-xs font-medium text-gray-700"
+              >
+                <FileText size={14} className="text-indigo-600" />
+                Intake & Info Templates
+              </button>
+              {(client.whatsappNumber || client.phone) && (
                 <a
-                  href={`https://wa.me/${client.whatsappNumber.replace(/[^0-9]/g, '')}`}
+                  href={generateWhatsAppLink(
+                    client.whatsappNumber || client.phone,
+                    `Hello ${client.fullName}! 👋 Reaching out from LexMedia regarding your project.`
+                  )}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2.5 p-2.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 hover:border-gray-300 transition-colors text-xs font-medium text-gray-700"
+                  className="w-full flex items-center gap-2.5 p-2.5 rounded-lg border border-emerald-200 bg-emerald-50/50 hover:bg-emerald-100/60 hover:border-emerald-300 transition-colors text-xs font-medium text-emerald-800"
                 >
                   <MessageSquare size={14} className="text-emerald-600" />
                   Message on WhatsApp
@@ -812,9 +823,110 @@ export default function ClientProfilePage() {
 
                   {/* Communication/WhatsApp Tab */}
                   {activeTab === 'communication' && (
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-bold text-gray-900 text-sm">WhatsApp History ({whatsappMessages.length})</h4>
+                    <div className="space-y-5">
+                      {/* WhatsApp Direct Outreach Panel */}
+                      <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-50/70 to-teal-50/40 border border-emerald-200/80 space-y-3">
+                        <div className="flex items-start justify-between gap-3 flex-wrap">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                              <MessageSquare size={16} />
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-gray-900 text-sm">WhatsApp Communication & Templates</h4>
+                              <p className="text-xs text-gray-600">
+                                Send pre-filled intake questionnaires, payment links, and milestone updates directly via WhatsApp.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Phone Status Badge */}
+                          <div>
+                            {(() => {
+                              const phoneToTest = client.whatsappNumber || client.phone
+                              const validation = formatWhatsAppPhone(phoneToTest)
+                              if (!phoneToTest) {
+                                return (
+                                  <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                                    No Phone Configured
+                                  </span>
+                                )
+                              }
+                              return validation.isValid ? (
+                                <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                  ✓ WhatsApp Ready: {validation.displayFormatted}
+                                </span>
+                              ) : (
+                                <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                                  ⚠️ {validation.error}
+                                </span>
+                              )
+                            })()}
+                          </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setIsTemplatesModalOpen(true)}
+                            className="p-3 bg-white hover:bg-emerald-50/50 rounded-xl border border-emerald-200/70 shadow-2xs text-left transition-all group"
+                          >
+                            <div className="flex items-center gap-2 font-semibold text-xs text-gray-900 group-hover:text-emerald-700">
+                              <FileText size={14} className="text-emerald-600" />
+                              Intake & Briefs
+                            </div>
+                            <p className="text-[11px] text-gray-500 mt-1">
+                              Client intake questionnaires & missing info follow-ups
+                            </p>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (links.length > 0) {
+                                setSelectedLinkForMessage(links[0])
+                              } else {
+                                setShowPaymentLinkModal(true)
+                              }
+                            }}
+                            className="p-3 bg-white hover:bg-emerald-50/50 rounded-xl border border-emerald-200/70 shadow-2xs text-left transition-all group"
+                          >
+                            <div className="flex items-center gap-2 font-semibold text-xs text-gray-900 group-hover:text-emerald-700">
+                              <Link2 size={14} className="text-emerald-600" />
+                              Payment Message
+                            </div>
+                            <p className="text-[11px] text-gray-500 mt-1">
+                              Deposit requests, invoices, and bank / MoMo details
+                            </p>
+                          </button>
+
+                          <a
+                            href={generateWhatsAppLink(
+                              client.whatsappNumber || client.phone,
+                              `Hello ${client.fullName}! 👋 Reaching out from LexMedia regarding your project.`
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-3 bg-white hover:bg-emerald-50/50 rounded-xl border border-emerald-200/70 shadow-2xs text-left transition-all group block"
+                          >
+                            <div className="flex items-center gap-2 font-semibold text-xs text-gray-900 group-hover:text-emerald-700">
+                              <ExternalLink size={14} className="text-emerald-600" />
+                              Open Direct Chat
+                            </div>
+                            <p className="text-[11px] text-gray-500 mt-1">
+                              Launch WhatsApp with greeting ready to send
+                            </p>
+                          </a>
+                        </div>
+
+                        <p className="text-[11px] text-gray-500 italic">
+                          ℹ️ All WhatsApp links open WhatsApp or WhatsApp Web with pre-formatted text. You remain in full control to review and send each message manually.
+                        </p>
+                      </div>
+
+                      {/* History Header */}
+                      <div className="flex items-center justify-between pt-2">
+                        <h4 className="font-bold text-gray-900 text-sm">Dispatched Link Activity ({whatsappMessages.length})</h4>
                         {client.lastMessageStatus && (
                           <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
                             client.lastMessageStatus === 'sent' || client.lastMessageStatus === 'delivered' || client.lastMessageStatus === 'read'
@@ -827,14 +939,6 @@ export default function ClientProfilePage() {
                           </span>
                         )}
                       </div>
-                      {!client.whatsappNumber && (
-                        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-2">
-                          <AlertCircle size={15} className="text-amber-600 mt-0.5 shrink-0" />
-                          <p className="text-xs text-amber-800">
-                            This client does not have a WhatsApp number. Add one to enable WhatsApp messaging.
-                          </p>
-                        </div>
-                      )}
                       {whatsappMessages.length === 0 ? (
                         <div className="py-10 text-center bg-gray-50 rounded-xl border border-dashed border-border">
                           <MessageSquare size={22} className="mx-auto mb-2 text-gray-300" />

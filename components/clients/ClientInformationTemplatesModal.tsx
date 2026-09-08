@@ -18,7 +18,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
-import { copyToClipboard, generateWhatsAppLink } from '@/lib/utils'
+import { copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone } from '@/lib/utils'
 import {
   ClientTemplate,
   getStoredClientTemplates,
@@ -57,6 +57,9 @@ export function ClientInformationTemplatesModal({
   const [newCategory, setNewCategory] = useState<'intake' | 'followup' | 'brief' | 'billing'>('intake')
   const [newDescription, setNewDescription] = useState('')
   const [newBody, setNewBody] = useState('')
+
+  // Live phone validation
+  const phoneValidation = formatWhatsAppPhone(recipientPhone)
 
   // Sync recipient props
   useEffect(() => {
@@ -101,7 +104,10 @@ export function ClientInformationTemplatesModal({
 
   // Copy template text
   const handleCopy = async () => {
-    if (!customText.trim()) return
+    if (!customText.trim()) {
+      toast.error('Message text is empty.')
+      return
+    }
     const ok = await copyToClipboard(customText)
     if (ok) {
       setCopied(true)
@@ -115,14 +121,25 @@ export function ClientInformationTemplatesModal({
   // Open WhatsApp with prefilled message
   const handleSendWhatsApp = () => {
     if (!customText.trim()) {
-      toast.error('Template message is empty')
+      toast.error('Template message is empty. Please enter some text.')
       return
     }
 
     const phoneToUse = recipientPhone.trim()
     const url = generateWhatsAppLink(phoneToUse, customText)
+    
+    if (phoneToUse && !phoneValidation.isValid) {
+      toast(
+        `Note: "${phoneToUse}" might be an incomplete phone number. Opening WhatsApp...`,
+        { icon: '⚠️' }
+      )
+    } else if (phoneToUse && phoneValidation.isValid) {
+      toast.success(`Opening WhatsApp chat with ${phoneValidation.displayFormatted}...`)
+    } else {
+      toast('Opening WhatsApp with contact picker...', { icon: '💬' })
+    }
+
     window.open(url, '_blank', 'noopener,noreferrer')
-    toast.success(phoneToUse ? `Opening WhatsApp chat with ${phoneToUse}...` : 'Opening WhatsApp with pre-filled message...')
   }
 
   // Save new custom template
@@ -201,13 +218,32 @@ export function ClientInformationTemplatesModal({
             }}
             leftIcon={<User size={15} className="text-gray-400" />}
           />
-          <Input
-            label="Recipient Phone / WhatsApp"
-            placeholder="e.g. +233 24 123 4567"
-            value={recipientPhone}
-            onChange={(e) => setRecipientPhone(e.target.value)}
-            leftIcon={<Phone size={15} className="text-gray-400" />}
-          />
+          <div className="space-y-1">
+            <Input
+              label="Recipient Phone / WhatsApp"
+              placeholder="e.g. +233 24 123 4567 or 0241234567"
+              value={recipientPhone}
+              onChange={(e) => setRecipientPhone(e.target.value)}
+              leftIcon={<Phone size={15} className="text-gray-400" />}
+            />
+            {recipientPhone ? (
+              <div className="text-[11px] flex items-center gap-1.5 pt-0.5">
+                {phoneValidation.isValid ? (
+                  <span className="text-emerald-700 font-medium">
+                    ✓ Valid: {phoneValidation.displayFormatted}
+                  </span>
+                ) : (
+                  <span className="text-amber-700">
+                    ⚠️ {phoneValidation.error || 'Check country code prefix'}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <p className="text-[11px] text-gray-500 pt-0.5">
+                Leave blank to choose recipient directly in WhatsApp.
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Category Tabs */}
@@ -391,32 +427,45 @@ export function ClientInformationTemplatesModal({
             />
 
             {/* Actions Bar */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2 border-t border-border">
-              <span className="text-[11px] text-muted truncate">
-                {recipientPhone ? `Target: ${recipientPhone}` : 'No phone specified (will open blank chat)'}
-              </span>
+            <div className="space-y-2 pt-2 border-t border-border">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+                <span className="text-[11px] text-muted truncate">
+                  {recipientPhone ? (
+                    phoneValidation.isValid ? (
+                      <span className="text-emerald-700 font-medium">To: {phoneValidation.displayFormatted}</span>
+                    ) : (
+                      <span className="text-amber-700">To: {recipientPhone}</span>
+                    )
+                  ) : (
+                    'No phone specified (WhatsApp contact selector will open)'
+                  )}
+                </span>
 
-              <div className="flex items-center gap-2 justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCopy}
-                  icon={copied ? <Check size={14} className="text-success-600" /> : <Copy size={14} />}
-                >
-                  {copied ? 'Copied!' : 'Copy Template'}
-                </Button>
+                <div className="flex items-center gap-2 justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCopy}
+                    icon={copied ? <Check size={14} className="text-success-600" /> : <Copy size={14} />}
+                  >
+                    {copied ? 'Copied!' : 'Copy Text'}
+                  </Button>
 
-                <Button
-                  type="button"
-                  variant="success"
-                  size="sm"
-                  onClick={handleSendWhatsApp}
-                  icon={<MessageCircle size={15} />}
-                >
-                  Send via WhatsApp
-                </Button>
+                  <Button
+                    type="button"
+                    variant="success"
+                    size="sm"
+                    onClick={handleSendWhatsApp}
+                    icon={<MessageCircle size={15} />}
+                  >
+                    Open in WhatsApp
+                  </Button>
+                </div>
               </div>
+              <p className="text-[10px] text-gray-400 italic">
+                * Clicking &quot;Open in WhatsApp&quot; launches WhatsApp with this pre-filled message for you to review and send manually.
+              </p>
             </div>
           </div>
         </div>

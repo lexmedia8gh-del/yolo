@@ -197,11 +197,74 @@ export function getFirebaseErrorMessage(code: string): string {
   return messages[code] ?? 'An unexpected error occurred. Please try again.'
 }
 
-// ─── WhatsApp Link Generation ────────────────────────────────
-export function generateWhatsAppLink(phone: string, message: string): string {
-  const cleanPhone = phone.replace(/\D/g, '')
+// ─── WhatsApp Link Generation & Phone Formatting ──────────────
+export interface WhatsAppPhoneResult {
+  formatted: string
+  isValid: boolean
+  displayFormatted: string
+  error?: string
+}
+
+export function formatWhatsAppPhone(phone?: string | null): WhatsAppPhoneResult {
+  if (!phone || typeof phone !== 'string' || !phone.trim()) {
+    return {
+      formatted: '',
+      isValid: false,
+      displayFormatted: '',
+      error: 'No phone number provided',
+    }
+  }
+
+  const trimmed = phone.trim()
+  let clean = trimmed.replace(/[^\d+]/g, '')
+
+  if (clean.startsWith('+')) {
+    clean = clean.slice(1)
+  }
+
+  if (clean.startsWith('00')) {
+    clean = clean.slice(2)
+  }
+
+  // Convert Ghana local 10-digit format (024XXXXXXX -> 23324XXXXXXX)
+  if (clean.startsWith('0') && clean.length === 10) {
+    clean = '233' + clean.slice(1)
+  }
+
+  clean = clean.replace(/\D/g, '')
+
+  if (clean.length < 7) {
+    return {
+      formatted: clean,
+      isValid: false,
+      displayFormatted: trimmed,
+      error: 'Phone number is too short (min 7 digits required).',
+    }
+  }
+
+  if (clean.length > 15) {
+    return {
+      formatted: clean,
+      isValid: false,
+      displayFormatted: trimmed,
+      error: 'Phone number exceeds maximum length (max 15 digits).',
+    }
+  }
+
+  return {
+    formatted: clean,
+    isValid: true,
+    displayFormatted: `+${clean}`,
+  }
+}
+
+export function generateWhatsAppLink(phone?: string | null, message = ''): string {
   const encodedMessage = encodeURIComponent(message)
-  return `https://wa.me/${cleanPhone}?text=${encodedMessage}`
+  const phoneRes = formatWhatsAppPhone(phone)
+  if (phoneRes.isValid && phoneRes.formatted) {
+    return `https://wa.me/${phoneRes.formatted}?text=${encodedMessage}`
+  }
+  return `https://wa.me/?text=${encodedMessage}`
 }
 
 // ─── File Formatting & Helpers ───────────────────────────────
