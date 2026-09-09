@@ -80,13 +80,18 @@ export async function POST(req: NextRequest) {
       createdAt: FieldValue.serverTimestamp(),
     })
 
+    const downloadUrl = `/api/files?id=${fileId}`
+
     return NextResponse.json({
       success: true,
-      downloadUrl: fileData.downloadUrl,
+      downloadUrl,
       fileName: fileData.fileName || fileData.originalName,
     })
   } catch (error: any) {
     console.error('Error in POST /api/delivery/download:', error)
-    return NextResponse.json({ error: 'Failed to process file download' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Unable to download this delivery file. The file may no longer be available.' },
+      { status: 500 }
+    )
   }
 }
