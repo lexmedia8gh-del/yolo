@@ -41,7 +41,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
     if (path.startsWith('/invoices')) return 'Invoices'
     if (path.startsWith('/payments')) return 'Payments'
     if (path.startsWith('/links')) return 'Payment Links'
-    if (path.startsWith('/website')) return 'Website Content'
+    if (path.startsWith('/website')) return 'Invoices'
     if (path.startsWith('/whatsapp')) return 'WhatsApp'
     if (path.startsWith('/settings')) return 'Settings'
     return 'Dashboard'

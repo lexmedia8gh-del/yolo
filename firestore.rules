@@ -33,6 +33,7 @@ service cloud.firestore {
     match /payments/{docId}       { allow read, write: if isAdmin(); }
     match /activityLogs/{docId}   { allow read, write: if isAdmin(); }
     match /settings/{docId}       { allow read, write: if isAdmin(); }
+    match /brands/{docId}         { allow read, write: if isAdmin(); }
     match /whatsappMessages/{docId} { allow read, write: if isAdmin(); }
     match /notifications/{docId}  { allow read, write: if isAdmin(); }
     match /reminders/{docId}      { allow read, write: if isAdmin(); }

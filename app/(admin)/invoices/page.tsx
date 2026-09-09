@@ -1,7 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import Link from 'next/link'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   FileText,
   Plus,
@@ -9,7 +8,6 @@ import {
   Filter,
   Edit2,
   Eye,
-  Power,
   DollarSign,
   Calendar,
   AlertCircle,
@@ -18,23 +16,36 @@ import {
   Copy,
   ExternalLink,
   Send,
-  X,
   Printer,
   Trash2,
+  CopyPlus,
+  Download,
+  CreditCard,
+  ChevronDown,
+  ArrowUpDown,
+  Share2,
+  Check,
+  RefreshCw,
+  Clock,
+  XCircle,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { Modal } from '@/components/ui/Modal'
 import { Badge } from '@/components/ui/Badge'
 import { Spinner } from '@/components/ui/Spinner'
+import { Modal } from '@/components/ui/Modal'
+import { InvoiceBuilderModal } from '@/components/invoices/InvoiceBuilderModal'
+import { InvoicePreviewModal } from '@/components/invoices/InvoicePreviewModal'
+import { SendInvoiceEmailModal } from '@/components/invoices/SendInvoiceEmailModal'
+import { RecordPaymentModal } from '@/components/invoices/RecordPaymentModal'
 import {
   COLLECTIONS,
   getDocuments,
-  addDocument,
-  updateDocument,
   deleteDocument,
   subscribeToCollection,
+  addDocument,
+  updateDocument,
 } from '@/lib/firebase/firestore'
 import type { Invoice, InvoiceStatus, Client, Service, Package, ClientLink } from '@/lib/types'
 import {
@@ -42,11 +53,10 @@ import {
   formatDate,
   generateLxmInvoiceNumber,
   generateSecureToken,
-  copyToClipboard,
-  calculateInvoiceTotals,
-  appUrl,
   getPaymentLink,
+  copyToClipboard,
 } from '@/lib/utils'
+import { downloadInvoicePdf } from '@/lib/utils/pdfGenerator'
 import toast from 'react-hot-toast'
 
 export default function InvoicesPage() {
@@ -54,37 +64,28 @@ export default function InvoicesPage() {
   const [clients, setClients] = useState<Client[]>([])
   const [services, setServices] = useState<Service[]>([])
   const [packages, setPackages] = useState<Package[]>([])
-
   const [loading, setLoading] = useState(true)
+
+  // Filter & Search States
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [dateFilter, setDateFilter] = useState<string>('all')
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'amount_high' | 'amount_low' | 'due_date'>('newest')
 
-  // Modal States
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  // Modal Controls
+  const [isBuilderOpen, setIsBuilderOpen] = useState(false)
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null)
+  const [duplicatedDraft, setDuplicatedDraft] = useState<Partial<Invoice> | null>(null)
   const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null)
-  const [generatedLinkData, setGeneratedLinkData] = useState<{ url: string; token: string } | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [deletingInvoiceId, setDeletingInvoiceId] = useState<string | null>(null)
-  const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null)
+  const [emailingInvoice, setEmailingInvoice] = useState<Invoice | null>(null)
+  const [paymentRecordingInvoice, setPaymentRecordingInvoice] = useState<Invoice | null>(null)
+  const [deletingInvoice, setDeletingInvoice] = useState<Invoice | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
 
-  // Form State
-  const [formData, setFormData] = useState({
-    clientId: '',
-    clientName: '',
-    clientEmail: '',
-    itemType: 'service' as 'service' | 'package' | 'custom',
-    selectedId: '',
-    description: '',
-    quantity: 1,
-    unitPrice: 0,
-    discountValue: 0,
-    dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    notes: '',
-    status: 'Pending' as InvoiceStatus,
-  })
+  // Copied link toast feedback tracker
+  const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null)
 
-  // Load Firestore collections
+  // Real-time listener for Invoices
   useEffect(() => {
     setLoading(true)
     const unsubscribe = subscribeToCollection<Invoice>(
@@ -96,698 +97,766 @@ export default function InvoicesPage() {
       }
     )
 
-    getDocuments<Invoice>(COLLECTIONS.INVOICES).then((invs) => {
-      if (invs && invs.length > 0) setInvoices(invs)
-      setLoading(false)
-    })
-
-    getDocuments<Client>(COLLECTIONS.CLIENTS).then((c) => setClients(c))
-    getDocuments<Service>(COLLECTIONS.SERVICES).then((s) => setServices(s))
-    getDocuments<Package>(COLLECTIONS.PACKAGES).then((p) => setPackages(p))
+    getDocuments<Client>(COLLECTIONS.CLIENTS).then((c) => setClients(c)).catch(() => {})
+    getDocuments<Service>(COLLECTIONS.SERVICES).then((s) => setServices(s)).catch(() => {})
+    getDocuments<Package>(COLLECTIONS.PACKAGES).then((p) => setPackages(p)).catch(() => {})
 
     return () => unsubscribe()
   }, [])
 
-  const resetForm = () => {
-    const firstClient = clients[0]
-    setFormData({
-      clientId: firstClient?.id || '',
-      clientName: firstClient?.fullName || '',
-      clientEmail: firstClient?.email || '',
-      itemType: 'service',
-      selectedId: '',
-      description: '',
-      quantity: 1,
-      unitPrice: 0,
-      discountValue: 0,
-      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      notes: '',
-      status: 'Pending',
+  // KPI Calculations
+  const metrics = useMemo(() => {
+    const totalCount = invoices.length
+    let totalRevenue = 0
+    let draftCount = 0
+    let sentCount = 0
+    let partiallyPaidCount = 0
+    let paidCount = 0
+    let overdueCount = 0
+    let cancelledCount = 0
+
+    const now = new Date()
+
+    invoices.forEach((inv) => {
+      totalRevenue += Number(inv.total) || 0
+      const st = inv.status || 'Draft'
+
+      if (st === 'Draft') draftCount++
+      else if (st === 'Sent' || st === 'Pending') sentCount++
+      else if (st === 'Partially Paid') partiallyPaidCount++
+      else if (st === 'Paid') paidCount++
+      else if (st === 'Cancelled') cancelledCount++
+
+      // Check if overdue: status not paid/cancelled and dueDate is past
+      if (st !== 'Paid' && st !== 'Cancelled' && inv.dueDate) {
+        try {
+          const due = typeof inv.dueDate === 'string' ? new Date(inv.dueDate) : (inv.dueDate as any).toDate()
+          if (due < now) overdueCount++
+        } catch {}
+      }
     })
+
+    return {
+      totalCount,
+      totalRevenue,
+      draftCount,
+      sentCount,
+      partiallyPaidCount,
+      paidCount,
+      overdueCount,
+      cancelledCount,
+    }
+  }, [invoices])
+
+  // Filter & Sort Logic
+  const filteredInvoices = useMemo(() => {
+    return invoices
+      .filter((inv) => {
+        // Search
+        if (search.trim()) {
+          const q = search.toLowerCase()
+          const invNum = (inv.invoiceNumber || '').toLowerCase()
+          const clientName = (inv.clientName || '').toLowerCase()
+          const clientEmail = (inv.clientEmail || '').toLowerCase()
+          const clientCompany = (inv.clientCompany || '').toLowerCase()
+          const matchItems = inv.items?.some(
+            (it) =>
+              (it.title || '').toLowerCase().includes(q) ||
+              (it.description || '').toLowerCase().includes(q)
+          )
+
+          if (
+            !invNum.includes(q) &&
+            !clientName.includes(q) &&
+            !clientEmail.includes(q) &&
+            !clientCompany.includes(q) &&
+            !matchItems
+          ) {
+            return false
+          }
+        }
+
+        // Status Filter
+        if (statusFilter !== 'all') {
+          if (statusFilter === 'Overdue') {
+            const now = new Date()
+            if (inv.status === 'Paid' || inv.status === 'Cancelled' || !inv.dueDate) return false
+            const due = typeof inv.dueDate === 'string' ? new Date(inv.dueDate) : (inv.dueDate as any).toDate()
+            if (due >= now) return false
+          } else if (statusFilter === 'Sent') {
+            if (inv.status !== 'Sent' && inv.status !== 'Pending') return false
+          } else if (inv.status !== statusFilter) {
+            return false
+          }
+        }
+
+        // Date Filter
+        if (dateFilter !== 'all') {
+          const invDate = inv.invoiceDate
+            ? typeof inv.invoiceDate === 'string'
+              ? new Date(inv.invoiceDate)
+              : (inv.invoiceDate as any).toDate()
+            : null
+
+          if (!invDate) return true
+          const now = new Date()
+
+          if (dateFilter === 'today') {
+            return invDate.toDateString() === now.toDateString()
+          } else if (dateFilter === 'this_week') {
+            const weekAgo = new Date()
+            weekAgo.setDate(now.getDate() - 7)
+            return invDate >= weekAgo && invDate <= now
+          } else if (dateFilter === 'this_month') {
+            return (
+              invDate.getMonth() === now.getMonth() &&
+              invDate.getFullYear() === now.getFullYear()
+            )
+          } else if (dateFilter === 'this_year') {
+            return invDate.getFullYear() === now.getFullYear()
+          }
+        }
+
+        return true
+      })
+      .sort((a, b) => {
+        if (sortBy === 'newest') {
+          const dateA = a.createdAt ? new Date(a.createdAt as any).getTime() : 0
+          const dateB = b.createdAt ? new Date(b.createdAt as any).getTime() : 0
+          return dateB - dateA
+        } else if (sortBy === 'oldest') {
+          const dateA = a.createdAt ? new Date(a.createdAt as any).getTime() : 0
+          const dateB = b.createdAt ? new Date(b.createdAt as any).getTime() : 0
+          return dateA - dateB
+        } else if (sortBy === 'amount_high') {
+          return (Number(b.total) || 0) - (Number(a.total) || 0)
+        } else if (sortBy === 'amount_low') {
+          return (Number(a.total) || 0) - (Number(b.total) || 0)
+        } else if (sortBy === 'due_date') {
+          const dueA = a.dueDate ? new Date(a.dueDate as any).getTime() : Infinity
+          const dueB = b.dueDate ? new Date(b.dueDate as any).getTime() : Infinity
+          return dueA - dueB
+        }
+        return 0
+      })
+  }, [invoices, search, statusFilter, dateFilter, sortBy])
+
+  // Actions
+  const handleOpenCreateModal = () => {
     setEditingInvoice(null)
+    setDuplicatedDraft(null)
+    setIsBuilderOpen(true)
   }
 
-  const openAddModal = () => {
-    resetForm()
-    setIsAddModalOpen(true)
+  const handleEdit = (inv: Invoice) => {
+    setEditingInvoice(inv)
+    setDuplicatedDraft(null)
+    setIsBuilderOpen(true)
   }
 
-  const handleClientChange = (cId: string) => {
-    const selectedClient = clients.find((c) => c.id === cId)
-    if (selectedClient) {
-      setFormData({
-        ...formData,
-        clientId: selectedClient.id,
-        clientName: selectedClient.fullName,
-        clientEmail: selectedClient.email,
-      })
+  const handleDuplicate = (inv: Invoice) => {
+    const newNumber = generateLxmInvoiceNumber(invoices.length)
+    const clonedDraft: Partial<Invoice> = {
+      invoiceNumber: newNumber,
+      clientId: inv.clientId,
+      clientName: inv.clientName,
+      clientCompany: inv.clientCompany,
+      clientEmail: inv.clientEmail,
+      clientPhone: inv.clientPhone,
+      clientAddress: inv.clientAddress,
+      businessInfo: inv.businessInfo,
+      items: inv.items ? JSON.parse(JSON.stringify(inv.items)) : [],
+      subtotal: inv.subtotal,
+      discountType: inv.discountType,
+      discountValue: inv.discountValue,
+      discountAmount: inv.discountAmount,
+      taxRate: inv.taxRate,
+      taxAmount: inv.taxAmount,
+      total: inv.total,
+      amountPaid: 0,
+      balanceDue: inv.total,
+      currency: inv.currency,
+      currencySymbol: inv.currencySymbol,
+      status: 'Draft',
+      paymentTerms: inv.paymentTerms,
+      notes: inv.notes,
+      terms: inv.terms,
+      paymentInstructions: inv.paymentInstructions,
+      thankYouMessage: inv.thankYouMessage,
     }
+    setEditingInvoice(null)
+    setDuplicatedDraft(clonedDraft)
+    setIsBuilderOpen(true)
+    toast.success(`Cloned invoice as draft: ${newNumber}`)
   }
 
-  const handleItemSelect = (id: string) => {
-    if (formData.itemType === 'service') {
-      const s = services.find((serv) => serv.id === id)
-      if (s) {
-        setFormData({
-          ...formData,
-          selectedId: s.id,
-          description: s.name,
-          unitPrice: s.defaultPrice || 0,
-        })
-      }
-    } else if (formData.itemType === 'package') {
-      const pkg = packages.find((p) => p.id === id)
-      if (pkg) {
-        setFormData({
-          ...formData,
-          selectedId: pkg.id,
-          description: pkg.title,
-          unitPrice: pkg.price || 0,
-        })
-      }
-    }
-  }
+  const handleCopyPaymentLink = async (inv: Invoice) => {
+    let link = inv.paymentLinkUrl
 
-  // Calculate totals
-  const subtotal = Math.max(0, (formData.quantity || 1) * (formData.unitPrice || 0))
-  const discountAmount = Math.max(0, formData.discountValue || 0)
-  const totalAmount = Math.max(0, subtotal - discountAmount)
+    if (!link) {
+      // Generate one on the fly and persist
+      try {
+        const token = generateSecureToken('pay_')
+        link = getPaymentLink(token)
 
-  const handleSaveInvoice = async (e: React.FormEvent) => {
-    e.preventDefault()
-
-    if (!formData.clientId) {
-      toast.error('Please select a client for this invoice')
-      return
-    }
-    if (!formData.description.trim()) {
-      toast.error('Please enter a description or select a service/package')
-      return
-    }
-    if (totalAmount <= 0) {
-      toast.error('Total invoice amount must be greater than zero')
-      return
-    }
-
-    setIsSubmitting(true)
-    try {
-      if (editingInvoice) {
-        await updateDocument(COLLECTIONS.INVOICES, editingInvoice.id, {
-          clientId: formData.clientId || '',
-          clientName: formData.clientName || '',
-          clientEmail: formData.clientEmail || '',
-          items: [
-            {
-              id: 'item_1',
-              description: formData.description || '',
-              quantity: formData.quantity || 1,
-              unitPrice: formData.unitPrice || 0,
-              total: subtotal,
-            },
-          ],
-          subtotal,
-          discountAmount,
-          total: totalAmount,
-          balanceDue: totalAmount - (editingInvoice.amountPaid || 0),
-          dueDate: formData.dueDate || '',
-          notes: formData.notes || '',
-          status: formData.status || 'Pending',
-        })
-        toast.success('Invoice updated successfully.')
-      } else {
-        const autoNum = generateLxmInvoiceNumber(invoices.length)
-        await addDocument(COLLECTIONS.INVOICES, {
-          invoiceNumber: autoNum,
-          clientId: formData.clientId || '',
-          clientName: formData.clientName || '',
-          clientEmail: formData.clientEmail || '',
-          items: [
-            {
-              id: 'item_1',
-              description: formData.description || '',
-              quantity: formData.quantity || 1,
-              unitPrice: formData.unitPrice || 0,
-              total: subtotal,
-            },
-          ],
-          subtotal,
-          discountAmount,
-          total: totalAmount,
-          amountPaid: 0,
-          balanceDue: totalAmount,
-          currency: 'GHS',
-          status: 'Pending',
-          invoiceDate: new Date().toISOString(),
-          dueDate: formData.dueDate || '',
-          notes: formData.notes || '',
+        const linkDocId = await addDocument(COLLECTIONS.CLIENT_LINKS, {
+          token,
+          clientId: inv.clientId || '',
+          clientName: inv.clientName,
+          clientEmail: inv.clientEmail,
+          invoiceNumber: inv.invoiceNumber,
+          amount: inv.balanceDue || inv.total,
+          currency: inv.currency || 'GHS',
+          status: inv.status === 'Paid' ? 'Paid' : 'Pending Payment',
           createdBy: 'admin',
+          createdAt: new Date().toISOString(),
         })
-        toast.success(`Invoice ${autoNum} created successfully.`)
+
+        await updateDocument(COLLECTIONS.INVOICES, inv.id, {
+          paymentLinkId: linkDocId,
+          paymentLinkToken: token,
+          paymentLinkUrl: link,
+        })
+      } catch (err) {
+        console.warn('Could not generate payment link:', err)
       }
-      setIsAddModalOpen(false)
-      resetForm()
+    }
+
+    if (link) {
+      const success = await copyToClipboard(link)
+      if (success) {
+        setCopiedLinkId(inv.id)
+        toast.success(`Payment link copied for ${inv.invoiceNumber}!`)
+        setTimeout(() => setCopiedLinkId(null), 2500)
+      }
+    } else {
+      toast.error('Could not generate payment link.')
+    }
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!deletingInvoice) return
+    setIsDeleting(true)
+    const toastId = toast.loading('Deleting invoice...')
+    try {
+      await deleteDocument(COLLECTIONS.INVOICES, deletingInvoice.id)
+      toast.success(`Invoice ${deletingInvoice.invoiceNumber} deleted!`, { id: toastId })
+      setDeletingInvoice(null)
     } catch (err: any) {
-      console.error('Error saving invoice:', err)
-      toast.error(err?.message || 'Failed to save invoice.')
+      toast.error(err.message || 'Failed to delete invoice', { id: toastId })
     } finally {
-      setIsSubmitting(false)
+      setIsDeleting(false)
     }
   }
 
-  // Generate Payment Link
-  const handleGeneratePaymentLink = async (inv: Invoice) => {
-    setIsSubmitting(true)
-    try {
-      const token = generateSecureToken('pay_')
-      await addDocument(COLLECTIONS.CLIENT_LINKS, {
-        token,
-        clientId: inv.clientId,
-        clientName: inv.clientName,
-        invoiceId: inv.id,
-        invoiceNumber: inv.invoiceNumber,
-        amount: inv.balanceDue || inv.total,
-        currency: inv.currency || 'GHS',
-        status: 'Pending Payment',
-        createdBy: 'admin',
-      })
+  const getStatusBadge = (inv: Invoice) => {
+    const s = inv.status || 'Draft'
+    const now = new Date()
+    const isOverdue = s !== 'Paid' && s !== 'Cancelled' && inv.dueDate && new Date(inv.dueDate as any) < now
 
-      const publicUrl = getPaymentLink(token)
-
-      setGeneratedLinkData({ url: publicUrl, token })
-      toast.success(`Payment link generated for ${inv.invoiceNumber}`)
-    } catch (err) {
-      console.error('Error generating link:', err)
-      toast.error('Failed to generate payment link')
-    } finally {
-      setIsSubmitting(false)
+    if (isOverdue) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+          <AlertCircle size={11} />
+          Overdue
+        </span>
+      )
     }
-  }
 
-  // Filter Invoices
-  const filteredInvoices = invoices.filter((inv) => {
-    const matchesSearch =
-      inv.invoiceNumber.toLowerCase().includes(search.toLowerCase()) ||
-      inv.clientName.toLowerCase().includes(search.toLowerCase()) ||
-      (inv.clientEmail && inv.clientEmail.toLowerCase().includes(search.toLowerCase()))
-
-    const matchesStatus =
-      statusFilter === 'all' ? true : inv.status === statusFilter
-
-    return matchesSearch && matchesStatus
-  })
-
-  const handleDeleteInvoice = async () => {
-    if (!invoiceToDelete) return
-    setDeletingInvoiceId(invoiceToDelete.id)
-    try {
-      await deleteDocument(COLLECTIONS.INVOICES, invoiceToDelete.id)
-      setInvoices((prev) => prev.filter((i) => i.id !== invoiceToDelete.id))
-      toast.success('Invoice deleted successfully')
-    } catch (err) {
-      console.error('Delete invoice error:', err)
-      toast.error('Failed to delete invoice. Please try again.')
-    } finally {
-      setDeletingInvoiceId(null)
-      setInvoiceToDelete(null)
+    switch (s) {
+      case 'Paid':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <CheckCircle2 size={11} />
+            Paid
+          </span>
+        )
+      case 'Partially Paid':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+            <Clock size={11} />
+            Partially Paid
+          </span>
+        )
+      case 'Sent':
+      case 'Pending':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+            <Send size={11} />
+            {s === 'Sent' ? 'Sent' : 'Pending'}
+          </span>
+        )
+      case 'Cancelled':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600 border border-gray-200">
+            <XCircle size={11} />
+            Cancelled
+          </span>
+        )
+      default:
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+            Draft
+          </span>
+        )
     }
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Header */}
+    <div className="space-y-6 max-w-7xl mx-auto">
+      {/* ─── Page Header ─── */}
       <PageHeader
         title="Invoices"
-        subtitle="Issue professional invoices (LXM-INV-XXXX), track payment balances, and generate client payment links."
+        subtitle="Create, customize, track, and dispatch professional invoices for any client, service, or product."
         action={
-          <Button onClick={openAddModal} variant="primary" icon={<Plus size={18} />}>
+          <Button
+            variant="primary"
+            icon={<Plus size={16} />}
+            onClick={handleOpenCreateModal}
+          >
             Create Invoice
           </Button>
         }
       />
 
-      {/* Controls & Filters */}
-      <div className="flex flex-col sm:flex-row gap-4 justify-between items-stretch sm:items-center bg-white p-4 rounded-2xl border border-border shadow-sm">
-        <div className="relative flex-1 max-w-md">
-          <Input
-            placeholder="Search by LXM-INV-0001, client name or email..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            leftIcon={<Search size={18} className="text-gray-400" />}
-          />
+      {/* ─── Metric KPI Cards ─── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div className="bg-white border border-gray-200 rounded-xl p-3.5 space-y-1">
+          <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">
+            Total Invoices
+          </span>
+          <p className="text-xl font-bold text-gray-900">{metrics.totalCount}</p>
+          <span className="text-[10px] text-gray-500 font-mono">
+            {formatCurrency(metrics.totalRevenue, 'GHS')}
+          </span>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <Filter size={16} />
-            <span>Status:</span>
-          </div>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3.5 py-2 rounded-xl border border-border bg-white text-sm font-medium focus:ring-2 focus:ring-accent-500 outline-none"
-          >
-            <option value="all">All Invoices</option>
-            <option value="Draft">Draft</option>
-            <option value="Pending">Pending</option>
-            <option value="Partially Paid">Partially Paid</option>
-            <option value="Paid">Paid</option>
-            <option value="Overdue">Overdue</option>
-            <option value="Cancelled">Cancelled</option>
-          </select>
+        <div className="bg-white border border-gray-200 rounded-xl p-3.5 space-y-1">
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+            Draft
+          </span>
+          <p className="text-xl font-bold text-slate-700">{metrics.draftCount}</p>
+          <span className="text-[10px] text-slate-400">Unsent</span>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl p-3.5 space-y-1">
+          <span className="text-[11px] font-semibold text-blue-600 uppercase tracking-wider block">
+            Sent / Pending
+          </span>
+          <p className="text-xl font-bold text-blue-700">{metrics.sentCount}</p>
+          <span className="text-[10px] text-blue-500">Awaiting payment</span>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl p-3.5 space-y-1">
+          <span className="text-[11px] font-semibold text-amber-600 uppercase tracking-wider block">
+            Partially Paid
+          </span>
+          <p className="text-xl font-bold text-amber-700">{metrics.partiallyPaidCount}</p>
+          <span className="text-[10px] text-amber-500">Balance remaining</span>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl p-3.5 space-y-1">
+          <span className="text-[11px] font-semibold text-emerald-600 uppercase tracking-wider block">
+            Paid
+          </span>
+          <p className="text-xl font-bold text-emerald-700">{metrics.paidCount}</p>
+          <span className="text-[10px] text-emerald-500">Fully settled</span>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl p-3.5 space-y-1">
+          <span className="text-[11px] font-semibold text-rose-600 uppercase tracking-wider block">
+            Overdue
+          </span>
+          <p className="text-xl font-bold text-rose-700">{metrics.overdueCount}</p>
+          <span className="text-[10px] text-rose-500">Action needed</span>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl p-3.5 space-y-1 col-span-2 sm:col-span-1">
+          <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block">
+            Cancelled
+          </span>
+          <p className="text-xl font-bold text-gray-600">{metrics.cancelledCount}</p>
+          <span className="text-[10px] text-gray-400">Voided</span>
         </div>
       </div>
 
-      {/* Invoices Table */}
-      <div className="bg-white rounded-2xl border border-border shadow-card overflow-hidden">
+      {/* ─── Search, Filters & Sorting Toolbar ─── */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
+        <div className="flex flex-col md:flex-row items-center gap-3">
+          {/* Search Input */}
+          <div className="relative flex-1 w-full">
+            <Search
+              size={15}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+            />
+            <input
+              type="text"
+              placeholder="Search by invoice #, client name, email, company, or item..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 text-xs rounded-lg border border-gray-300 focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-white"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          {/* Date Filter Dropdown */}
+          <div className="w-full md:w-auto">
+            <select
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              className="w-full md:w-40 px-3 py-2 text-xs rounded-lg border border-gray-300 bg-white text-gray-700 focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">Date: All Time</option>
+              <option value="today">Today</option>
+              <option value="this_week">This Week</option>
+              <option value="this_month">This Month</option>
+              <option value="this_year">This Year</option>
+            </select>
+          </div>
+
+          {/* Sort Dropdown */}
+          <div className="w-full md:w-auto">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="w-full md:w-48 px-3 py-2 text-xs rounded-lg border border-gray-300 bg-white text-gray-700 focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="newest">Sort: Newest First</option>
+              <option value="oldest">Sort: Oldest First</option>
+              <option value="amount_high">Sort: Highest Total</option>
+              <option value="amount_low">Sort: Lowest Total</option>
+              <option value="due_date">Sort: Due Date (Soonest)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Status Filter Pills */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-gray-100">
+          <span className="text-[11px] font-semibold text-gray-400 mr-1 flex items-center gap-1">
+            <Filter size={12} /> Status:
+          </span>
+          {[
+            { id: 'all', label: 'All Invoices' },
+            { id: 'Draft', label: 'Draft' },
+            { id: 'Sent', label: 'Sent' },
+            { id: 'Partially Paid', label: 'Partially Paid' },
+            { id: 'Paid', label: 'Paid' },
+            { id: 'Overdue', label: 'Overdue' },
+            { id: 'Cancelled', label: 'Cancelled' },
+          ].map((pill) => (
+            <button
+              key={pill.id}
+              type="button"
+              onClick={() => setStatusFilter(pill.id)}
+              className={`px-3 py-1 rounded-full text-xs font-semibold transition-all ${
+                statusFilter === pill.id
+                  ? 'bg-gray-900 text-white shadow-xs'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {pill.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ─── Invoices Table ─── */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-xs">
         {loading ? (
-          <div className="py-16 flex flex-col items-center justify-center gap-3">
+          <div className="p-12 flex flex-col items-center justify-center space-y-3">
             <Spinner size="lg" />
-            <p className="text-sm text-muted">Loading invoices ledger...</p>
+            <p className="text-xs text-gray-500">Loading invoices...</p>
           </div>
         ) : filteredInvoices.length === 0 ? (
-          <div className="py-16 px-4 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-accent-50 text-accent-600 flex items-center justify-center mx-auto mb-3">
-              <FileText size={24} />
+          <div className="p-12 text-center space-y-3">
+            <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
+              <FileText size={22} />
             </div>
-            <h3 className="text-lg font-bold text-gray-900 mb-1">
-              {search || statusFilter !== 'all' ? 'No invoices match your filter' : 'No invoices created yet'}
-            </h3>
-            <p className="text-sm text-muted max-w-sm mx-auto mb-6">
-              {search || statusFilter !== 'all'
-                ? 'Try adjusting your search query or status filter.'
-                : 'Create your first LXM-INV invoice to start receiving online client payments.'}
+            <h3 className="text-base font-bold text-gray-900">No invoices found</h3>
+            <p className="text-xs text-gray-500 max-w-sm mx-auto">
+              {search || statusFilter !== 'all' || dateFilter !== 'all'
+                ? 'Try adjusting your search query or filters to find what you are looking for.'
+                : 'You have not created any custom invoices yet. Click below to create your first invoice.'}
             </p>
-            {!search && statusFilter === 'all' && (
-              <Button onClick={openAddModal} variant="primary" icon={<Plus size={18} />}>
-                Create First Invoice
-              </Button>
-            )}
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<Plus size={14} />}
+              onClick={handleOpenCreateModal}
+            >
+              Create First Invoice
+            </Button>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-border bg-gray-50/50 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  <th className="py-4 px-6">Invoice #</th>
-                  <th className="py-4 px-6">Client</th>
-                  <th className="py-4 px-6">Due Date</th>
-                  <th className="py-4 px-6">Status</th>
-                  <th className="py-4 px-6">Total Amount</th>
-                  <th className="py-4 px-6">Amount Paid</th>
-                  <th className="py-4 px-6">Balance Due</th>
-                  <th className="py-4 px-6 text-right">Actions</th>
+                <tr className="bg-gray-50/80 border-b border-gray-200 text-[11px] font-bold uppercase tracking-wider text-gray-500">
+                  <th className="py-3 px-4">Invoice #</th>
+                  <th className="py-3 px-4">Client</th>
+                  <th className="py-3 px-4">Invoice Date</th>
+                  <th className="py-3 px-4">Due Date</th>
+                  <th className="py-3 px-4 text-right">Total</th>
+                  <th className="py-3 px-4 text-right">Amount Paid</th>
+                  <th className="py-3 px-4 text-right">Balance Due</th>
+                  <th className="py-3 px-4 text-center">Status</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border text-sm">
-                {filteredInvoices.map((inv) => (
-                  <tr key={inv.id} className="hover:bg-gray-50/60 transition-colors">
-                    <td className="py-4 px-6 font-mono font-bold text-accent-700">
-                      {inv.invoiceNumber}
-                    </td>
+              <tbody className="divide-y divide-gray-100 text-xs">
+                {filteredInvoices.map((inv) => {
+                  const currency = inv.currency || 'GHS'
+                  const symbol = inv.currencySymbol || (currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : 'GH₵')
+                  const total = Number(inv.total) || 0
+                  const paid = Number(inv.amountPaid) || 0
+                  const balance = Number(inv.balanceDue) !== undefined ? Number(inv.balanceDue) : Math.max(0, total - paid)
 
-                    <td className="py-4 px-6">
-                      <div className="font-semibold text-gray-900">{inv.clientName}</div>
-                      <div className="text-xs text-muted">{inv.clientEmail}</div>
-                    </td>
+                  const now = new Date()
+                  const isOverdue = inv.status !== 'Paid' && inv.status !== 'Cancelled' && inv.dueDate && new Date(inv.dueDate as any) < now
 
-                    <td className="py-4 px-6 text-xs text-gray-600">
-                      {inv.dueDate ? formatDate(inv.dueDate) : 'No due date'}
-                    </td>
-
-                    <td className="py-4 px-6">
-                      <Badge
-                        variant={
-                          inv.status === 'Paid'
-                            ? 'success'
-                            : inv.status === 'Overdue'
-                            ? 'danger'
-                            : inv.status === 'Partially Paid'
-                            ? 'accent'
-                            : 'muted'
-                        }
-                        size="sm"
-                      >
-                        {inv.status}
-                      </Badge>
-                    </td>
-
-                    <td className="py-4 px-6 font-semibold text-gray-900">
-                      {formatCurrency(inv.total)}
-                    </td>
-
-                    <td className="py-4 px-6 font-semibold text-success-600">
-                      {formatCurrency(inv.amountPaid || 0)}
-                    </td>
-
-                    <td className="py-4 px-6 font-semibold text-danger-600">
-                      {formatCurrency(inv.balanceDue ?? inv.total)}
-                    </td>
-
-                    <td className="py-4 px-6 text-right">
-                      <div className="flex items-center justify-end gap-1">
+                  return (
+                    <tr
+                      key={inv.id}
+                      className="hover:bg-gray-50/70 transition-colors group"
+                    >
+                      {/* Invoice # */}
+                      <td className="py-3 px-4 font-mono font-bold text-gray-900">
                         <button
+                          type="button"
                           onClick={() => setViewingInvoice(inv)}
-                          className="p-2 rounded-xl text-gray-500 hover:text-accent-600 hover:bg-accent-50 transition-colors"
-                          title="View Invoice Details"
+                          className="hover:text-blue-600 hover:underline flex items-center gap-1.5"
                         >
-                          <Eye size={16} />
+                          <FileText size={13} className="text-gray-400" />
+                          <span>{inv.invoiceNumber}</span>
                         </button>
-                        <button
-                          onClick={() => handleGeneratePaymentLink(inv)}
-                          className="p-2 rounded-xl text-purple-600 hover:bg-purple-50 transition-colors"
-                          title="Generate Payment Link"
-                        >
-                          <Send size={16} />
-                        </button>
-                        <button
-                          onClick={() => setInvoiceToDelete(inv)}
-                          className="p-2 rounded-xl text-danger-500 hover:bg-danger-50 transition-colors"
-                          title="Delete Invoice"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+
+                      {/* Client */}
+                      <td className="py-3 px-4">
+                        <p className="font-semibold text-gray-900">{inv.clientName || 'Valued Client'}</p>
+                        {inv.clientCompany && (
+                          <p className="text-[11px] text-gray-500">{inv.clientCompany}</p>
+                        )}
+                        {inv.clientEmail && (
+                          <p className="text-[10px] text-gray-400 truncate max-w-[160px]">
+                            {inv.clientEmail}
+                          </p>
+                        )}
+                      </td>
+
+                      {/* Invoice Date */}
+                      <td className="py-3 px-4 text-gray-600 whitespace-nowrap">
+                        {formatDate(inv.invoiceDate)}
+                      </td>
+
+                      {/* Due Date */}
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <span className={isOverdue ? 'text-rose-600 font-bold' : 'text-gray-600'}>
+                          {formatDate(inv.dueDate)}
+                        </span>
+                      </td>
+
+                      {/* Total */}
+                      <td className="py-3 px-4 text-right font-mono font-bold text-gray-900 whitespace-nowrap">
+                        {formatCurrency(total, currency, symbol)}
+                      </td>
+
+                      {/* Amount Paid */}
+                      <td className="py-3 px-4 text-right font-mono text-emerald-600 whitespace-nowrap">
+                        {paid > 0 ? formatCurrency(paid, currency, symbol) : '—'}
+                      </td>
+
+                      {/* Balance Due */}
+                      <td className="py-3 px-4 text-right font-mono font-black whitespace-nowrap">
+                        <span className={balance > 0 ? 'text-blue-700' : 'text-emerald-600'}>
+                          {formatCurrency(balance, currency, symbol)}
+                        </span>
+                      </td>
+
+                      {/* Status */}
+                      <td className="py-3 px-4 text-center whitespace-nowrap">
+                        {getStatusBadge(inv)}
+                      </td>
+
+                      {/* Actions */}
+                      <td className="py-3 px-4 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1">
+                          {/* View Preview */}
+                          <button
+                            type="button"
+                            title="View Invoice Document"
+                            onClick={() => setViewingInvoice(inv)}
+                            className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-blue-600 transition-colors"
+                          >
+                            <Eye size={14} />
+                          </button>
+
+                          {/* Edit */}
+                          <button
+                            type="button"
+                            title="Edit Invoice"
+                            onClick={() => handleEdit(inv)}
+                            className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-gray-900 transition-colors"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+
+                          {/* Record Payment */}
+                          {balance > 0 && inv.status !== 'Cancelled' && (
+                            <button
+                              type="button"
+                              title="Record Payment"
+                              onClick={() => setPaymentRecordingInvoice(inv)}
+                              className="p-1.5 rounded-md hover:bg-emerald-50 text-emerald-600 transition-colors"
+                            >
+                              <CreditCard size={14} />
+                            </button>
+                          )}
+
+                          {/* Send Email */}
+                          <button
+                            type="button"
+                            title="Send via Email"
+                            onClick={() => setEmailingInvoice(inv)}
+                            className="p-1.5 rounded-md hover:bg-blue-50 text-blue-600 transition-colors"
+                          >
+                            <Send size={14} />
+                          </button>
+
+                          {/* Copy Payment Link */}
+                          <button
+                            type="button"
+                            title="Copy Payment Link"
+                            onClick={() => handleCopyPaymentLink(inv)}
+                            className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-blue-600 transition-colors"
+                          >
+                            {copiedLinkId === inv.id ? (
+                              <Check size={14} className="text-emerald-600" />
+                            ) : (
+                              <Link2 size={14} />
+                            )}
+                          </button>
+
+                          {/* Duplicate */}
+                          <button
+                            type="button"
+                            title="Duplicate Invoice"
+                            onClick={() => handleDuplicate(inv)}
+                            className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-amber-600 transition-colors"
+                          >
+                            <CopyPlus size={14} />
+                          </button>
+
+                          {/* Delete */}
+                          <button
+                            type="button"
+                            title="Delete Invoice"
+                            onClick={() => setDeletingInvoice(inv)}
+                            className="p-1.5 rounded-md hover:bg-rose-50 text-gray-400 hover:text-rose-600 transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
 
-      {/* Create / Edit Invoice Modal */}
-      <Modal
-        isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
-        title={editingInvoice ? 'Edit Invoice' : 'Create New Invoice'}
-        size="lg"
-      >
-        <form onSubmit={handleSaveInvoice} className="space-y-4">
-          <div className="p-3 bg-accent-50/60 rounded-xl border border-accent-100 flex items-center justify-between text-xs text-accent-800">
-            <span className="font-semibold">Invoice Number:</span>
-            <span className="font-mono font-bold text-sm">
-              {editingInvoice ? editingInvoice.invoiceNumber : generateLxmInvoiceNumber(invoices.length)}
-            </span>
-          </div>
+      {/* ─── MODAL 1: Invoice Builder Modal (Create / Edit / Duplicate) ─── */}
+      <InvoiceBuilderModal
+        isOpen={isBuilderOpen}
+        onClose={() => {
+          setIsBuilderOpen(false)
+          setEditingInvoice(null)
+          setDuplicatedDraft(null)
+        }}
+        invoiceToEdit={editingInvoice}
+        initialDraft={duplicatedDraft}
+        existingInvoicesCount={invoices.length}
+        clients={clients}
+        services={services}
+        packages={packages}
+        onSuccess={(saved) => {
+          // Replaced by real-time listener
+        }}
+        onSaveAndSend={(saved) => {
+          setEmailingInvoice(saved)
+        }}
+      />
 
-          {/* Client Selection */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-semibold text-gray-700">Select Client *</label>
-            <select
-              value={formData.clientId}
-              onChange={(e) => handleClientChange(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-white text-sm focus:ring-2 focus:ring-accent-500 outline-none"
-              required
-            >
-              <option value="">-- Choose Client --</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.fullName} ({c.email})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Service/Package Item Picker */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-gray-700">Item Source</label>
-              <select
-                value={formData.itemType}
-                onChange={(e: any) => setFormData({ ...formData, itemType: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-white text-sm focus:ring-2 focus:ring-accent-500 outline-none"
-              >
-                <option value="service">Individual Service</option>
-                <option value="package">Bundled Package</option>
-                <option value="custom">Custom Line Item</option>
-              </select>
-            </div>
-
-            {formData.itemType !== 'custom' && (
-              <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-gray-700">Choose Catalog Item</label>
-                <select
-                  value={formData.selectedId}
-                  onChange={(e) => handleItemSelect(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-white text-sm focus:ring-2 focus:ring-accent-500 outline-none"
-                >
-                  <option value="">-- Select Item --</option>
-                  {formData.itemType === 'service'
-                    ? services.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name} ({formatCurrency(s.defaultPrice)})
-                        </option>
-                      ))
-                    : packages.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.title} ({formatCurrency(p.price)})
-                        </option>
-                      ))}
-                </select>
-              </div>
-            )}
-          </div>
-
-          <Input
-            label="Line Item Description *"
-            placeholder="e.g. Executive Photography session & 20 edited images"
-            value={formData.description}
-            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-            required
-          />
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Input
-              label="Quantity *"
-              type="number"
-              min="1"
-              value={formData.quantity}
-              onChange={(e) => setFormData({ ...formData, quantity: Math.max(1, Number(e.target.value)) })}
-              required
-            />
-            <Input
-              label="Unit Price (GH₵) *"
-              type="number"
-              min="0"
-              step="0.01"
-              value={formData.unitPrice}
-              onChange={(e) => setFormData({ ...formData, unitPrice: Math.max(0, Number(e.target.value)) })}
-              required
-            />
-            <Input
-              label="Discount (GH₵)"
-              type="number"
-              min="0"
-              step="0.01"
-              value={formData.discountValue}
-              onChange={(e) => setFormData({ ...formData, discountValue: Math.max(0, Number(e.target.value)) })}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input
-              label="Due Date *"
-              type="date"
-              value={formData.dueDate}
-              onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
-              required
-            />
-          </div>
-
-          {/* Financial Calculation Summary Box */}
-          <div className="p-4 bg-gray-50 rounded-xl border border-border space-y-2 text-sm">
-            <div className="flex justify-between text-gray-600">
-              <span>Subtotal:</span>
-              <span>{formatCurrency(subtotal)}</span>
-            </div>
-            {discountAmount > 0 && (
-              <div className="flex justify-between text-danger-600">
-                <span>Discount:</span>
-                <span>-{formatCurrency(discountAmount)}</span>
-              </div>
-            )}
-            <div className="flex justify-between font-bold text-gray-900 border-t border-border pt-2 text-base">
-              <span>Total Invoice Amount:</span>
-              <span className="text-accent-700">{formatCurrency(totalAmount)}</span>
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-border">
-            <Button type="button" variant="outline" onClick={() => setIsAddModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="primary" loading={isSubmitting}>
-              {editingInvoice ? 'Update Invoice' : 'Save Invoice'}
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Generated Link Result Modal */}
-      <Modal
-        isOpen={!!generatedLinkData}
-        onClose={() => setGeneratedLinkData(null)}
-        title="Payment Link Generated Successfully!"
-        size="md"
-      >
-        <div className="space-y-5 py-2">
-          <div className="w-12 h-12 rounded-full bg-success-50 text-success-600 flex items-center justify-center mx-auto">
-            <CheckCircle2 size={24} />
-          </div>
-
-          <div className="text-center">
-            <p className="text-sm text-gray-600">
-              Share this secure public payment link with your client via WhatsApp, Email, or SMS:
-            </p>
-          </div>
-
-          <div className="p-3 bg-gray-50 rounded-xl border border-border flex items-center justify-between gap-2">
-            <input
-              type="text"
-              readOnly
-              value={generatedLinkData?.url || ''}
-              className="bg-transparent text-xs text-accent-700 font-mono flex-1 outline-none truncate"
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              icon={<Copy size={14} />}
-              onClick={() => {
-                if (generatedLinkData?.url) {
-                  copyToClipboard(generatedLinkData.url)
-                  toast.success('Payment link copied to clipboard!')
-                }
-              }}
-            >
-              Copy
-            </Button>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-border">
-            <a href={generatedLinkData?.url} target="_blank" rel="noopener noreferrer">
-              <Button variant="outline" icon={<ExternalLink size={14} />}>
-                Preview Page
-              </Button>
-            </a>
-            <Button variant="primary" onClick={() => setGeneratedLinkData(null)}>
-              Done
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* View Invoice Modal */}
-      <Modal
+      {/* ─── MODAL 2: Live Preview Modal (Desktop/Mobile, PDF, Print, Share) ─── */}
+      <InvoicePreviewModal
         isOpen={!!viewingInvoice}
         onClose={() => setViewingInvoice(null)}
-        title={`Invoice ${viewingInvoice?.invoiceNumber}`}
-        size="md"
-      >
-        {viewingInvoice && (
-          <div className="space-y-5 py-2 text-sm">
-            <div className="flex justify-between items-start border-b border-border pb-4">
-              <div>
-                <h3 className="font-bold text-gray-900 text-lg">LEXMEDIA</h3>
-                <p className="text-xs text-muted">Creative Agency & Studio</p>
-              </div>
-              <div className="text-right">
-                <Badge variant="status" status={viewingInvoice.status}>
-                  {viewingInvoice.status}
-                </Badge>
-                <p className="text-xs text-muted mt-1">
-                  Due: {viewingInvoice.dueDate ? formatDate(viewingInvoice.dueDate) : 'N/A'}
-                </p>
-              </div>
-            </div>
+        invoice={viewingInvoice}
+        onEdit={(inv) => {
+          setViewingInvoice(null)
+          handleEdit(inv)
+        }}
+        onSendEmail={(inv) => {
+          setViewingInvoice(null)
+          setEmailingInvoice(inv)
+        }}
+      />
 
-            <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase">Billed To</p>
-              <p className="font-bold text-gray-900">{viewingInvoice.clientName}</p>
-              <p className="text-xs text-muted">{viewingInvoice.clientEmail}</p>
-            </div>
+      {/* ─── MODAL 3: Send Invoice Email Modal ─── */}
+      <SendInvoiceEmailModal
+        isOpen={!!emailingInvoice}
+        onClose={() => setEmailingInvoice(null)}
+        invoice={emailingInvoice}
+      />
 
-            <div className="border border-border rounded-xl p-4 bg-gray-50/50 space-y-2">
-              <p className="text-xs font-semibold text-gray-500 uppercase">Invoice Line Items</p>
-              {viewingInvoice.items.map((item, idx) => (
-                <div key={idx} className="flex justify-between items-center text-xs">
-                  <span>{item.description} (x{item.quantity})</span>
-                  <span className="font-semibold text-gray-900">{formatCurrency(item.total)}</span>
-                </div>
-              ))}
-            </div>
+      {/* ─── MODAL 4: Record Payment Modal ─── */}
+      <RecordPaymentModal
+        isOpen={!!paymentRecordingInvoice}
+        onClose={() => setPaymentRecordingInvoice(null)}
+        invoice={paymentRecordingInvoice}
+      />
 
-            <div className="space-y-1.5 border-t border-border pt-3">
-              <div className="flex justify-between text-xs text-gray-600">
-                <span>Subtotal:</span>
-                <span>{formatCurrency(viewingInvoice.subtotal)}</span>
-              </div>
-              {viewingInvoice.discountAmount > 0 && (
-                <div className="flex justify-between text-xs text-danger-600">
-                  <span>Discount:</span>
-                  <span>-{formatCurrency(viewingInvoice.discountAmount)}</span>
-                </div>
-              )}
-              <div className="flex justify-between font-bold text-gray-900 text-base border-t border-border pt-2">
-                <span>Total Amount:</span>
-                <span className="text-accent-700">{formatCurrency(viewingInvoice.total)}</span>
-              </div>
-              <div className="flex justify-between text-xs text-success-600 font-medium">
-                <span>Amount Paid:</span>
-                <span>{formatCurrency(viewingInvoice.amountPaid || 0)}</span>
-              </div>
-              <div className="flex justify-between text-xs text-danger-600 font-bold">
-                <span>Balance Due:</span>
-                <span>{formatCurrency(viewingInvoice.balanceDue ?? viewingInvoice.total)}</span>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 pt-4 border-t border-border">
-              <Button variant="outline" onClick={() => setViewingInvoice(null)}>
-                Close
-              </Button>
-              <Button
-                variant="primary"
-                icon={<Send size={14} />}
-                onClick={() => {
-                  const inv = viewingInvoice
-                  setViewingInvoice(null)
-                  handleGeneratePaymentLink(inv)
-                }}
-              >
-                Generate Payment Link
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* Delete Confirmation Modal */}
+      {/* ─── MODAL 5: Delete Confirmation Modal ─── */}
       <Modal
-        isOpen={!!invoiceToDelete}
-        onClose={() => setInvoiceToDelete(null)}
-        title="Delete Invoice"
+        isOpen={!!deletingInvoice}
+        onClose={() => setDeletingInvoice(null)}
+        title="Confirm Delete Invoice"
         size="sm"
       >
         <div className="space-y-4">
-          <div className="flex items-center gap-3 text-danger-600 bg-danger-50 p-3 rounded-xl border border-danger-100">
-            <AlertCircle size={24} className="shrink-0" />
-            <p className="text-sm font-semibold">
-              Are you sure you want to delete invoice {invoiceToDelete?.invoiceNumber}?
-            </p>
-          </div>
-          <p className="text-sm text-gray-600">
-            This action cannot be undone. Associated data may remain in the database but this invoice will be removed.
+          <p className="text-xs text-gray-600">
+            Are you sure you want to delete invoice{' '}
+            <strong className="text-gray-900 font-mono">
+              {deletingInvoice?.invoiceNumber}
+            </strong>{' '}
+            issued to <strong>{deletingInvoice?.clientName}</strong>?
           </p>
-          <div className="flex justify-end gap-2 pt-4 border-t border-border">
-            <Button variant="outline" onClick={() => setInvoiceToDelete(null)} disabled={deletingInvoiceId !== null}>
+          <p className="text-xs text-rose-600">
+            This action cannot be undone. Any recorded payments and active payment links for this invoice will no longer be linked.
+          </p>
+          <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+            <Button
+              variant="ghost"
+              onClick={() => setDeletingInvoice(null)}
+              disabled={isDeleting}
+            >
               Cancel
             </Button>
             <Button
-              variant="primary"
-              className="bg-danger-600 hover:bg-danger-700 text-white border-none"
-              onClick={handleDeleteInvoice}
-              loading={deletingInvoiceId !== null}
+              variant="danger"
+              loading={isDeleting}
+              icon={<Trash2 size={14} />}
+              onClick={handleDeleteConfirm}
             >
               Delete Invoice
             </Button>

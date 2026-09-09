@@ -9,16 +9,43 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 // ─── Currency Formatting ─────────────────────────────────────
+export interface CurrencyConfig {
+  code: string
+  label: string
+  symbol: string
+  locale: string
+}
+
+export const SUPPORTED_CURRENCIES: CurrencyConfig[] = [
+  { code: 'GHS', label: 'Ghana Cedi (GH₵)', symbol: 'GH₵', locale: 'en-GH' },
+  { code: 'USD', label: 'US Dollar ($)', symbol: '$', locale: 'en-US' },
+  { code: 'EUR', label: 'Euro (€)', symbol: '€', locale: 'de-DE' },
+  { code: 'GBP', label: 'British Pound (£)', symbol: '£', locale: 'en-GB' },
+]
+
+export function getCurrencySymbol(code = 'GHS'): string {
+  const match = SUPPORTED_CURRENCIES.find(
+    (c) => c.code.toUpperCase() === code.toUpperCase()
+  )
+  return match?.symbol || 'GH₵'
+}
+
 export function formatCurrency(
   amount: number,
   currency = 'GHS',
-  symbol = 'GH₵'
+  symbol?: string
 ): string {
-  const formatted = new Intl.NumberFormat('en-GH', {
+  const normalizedCode = (currency || 'GHS').toUpperCase()
+  const matched = SUPPORTED_CURRENCIES.find((c) => c.code === normalizedCode)
+  const actualSymbol = symbol || matched?.symbol || 'GH₵'
+  const locale = matched?.locale || 'en-GH'
+
+  const formatted = new Intl.NumberFormat(locale, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(amount)
-  return `${symbol}${formatted}`
+  }).format(Number(amount) || 0)
+
+  return `${actualSymbol}${formatted}`
 }
 
 export function formatAmount(amount: number): string {

@@ -153,13 +153,35 @@ export interface Package {
 export type InvoiceStatus =
   | 'Draft'
   | 'Pending'
+  | 'Sent'
   | 'Partially Paid'
   | 'Paid'
   | 'Overdue'
   | 'Cancelled'
 
+export interface InvoiceBusinessInfo {
+  name: string
+  logo?: string
+  address?: string
+  phone?: string
+  whatsapp?: string
+  email?: string
+  website?: string
+  social?: string
+}
+
+export interface InvoiceClientInfo {
+  id?: string
+  name: string
+  company?: string
+  email: string
+  phone?: string
+  address?: string
+}
+
 export interface InvoiceItem {
   id: string
+  title?: string
   description: string
   quantity: number
   unitPrice: number
@@ -168,10 +190,15 @@ export interface InvoiceItem {
 
 export interface Invoice {
   id: string
-  invoiceNumber: string // e.g. LM-INV-0001
+  invoiceNumber: string // e.g. LEX-INV-0001
   clientId: string
   clientName: string
   clientEmail: string
+  clientCompany?: string
+  clientPhone?: string
+  clientAddress?: string
+  businessInfo?: InvoiceBusinessInfo
+  clientInfo?: InvoiceClientInfo
   projectId?: string
   projectName?: string
   packageId?: string
@@ -187,14 +214,26 @@ export interface Invoice {
   amountPaid?: number
   balanceDue?: number
   currency: string
+  currencySymbol?: string
   status: InvoiceStatus
+  paymentTerms?: string
+  paymentMethod?: string
+  paymentDate?: Timestamp | string
+  paymentReference?: string
+  paymentNotes?: string
+  paymentLinkId?: string
+  paymentLinkUrl?: string
+  paymentLinkToken?: string
   notes?: string
-  invoiceDate: Timestamp
-  dueDate?: Timestamp
-  paidAt?: Timestamp
+  terms?: string
+  paymentInstructions?: string
+  thankYouMessage?: string
+  invoiceDate: Timestamp | string
+  dueDate?: Timestamp | string
+  paidAt?: Timestamp | string
   paystackReference?: string
-  createdAt: Timestamp
-  updatedAt: Timestamp
+  createdAt: Timestamp | string
+  updatedAt: Timestamp | string
   createdBy: string
 }
 
@@ -433,6 +472,9 @@ export interface BusinessSettings {
   defaultTaxRate: number
   defaultPaymentTerms?: string
   defaultTermsAndConditions?: string
+  defaultNotes?: string
+  defaultPaymentInstructions?: string
+  defaultThankYouMessage?: string
   defaultWhatsAppMessage: string
   paystackPublicKey?: string
   updatedAt: Timestamp

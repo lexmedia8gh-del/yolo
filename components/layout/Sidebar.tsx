@@ -12,7 +12,7 @@ import {
   FileText,
   CreditCard,
   Link2,
-  Globe,
+  Receipt,
   MessageSquare,
   BellRing,
   Settings,
@@ -30,6 +30,16 @@ const navItems = [
     icon: LayoutDashboard,
   },
   {
+    label: 'Invoices',
+    href: '/invoices',
+    icon: Receipt,
+  },
+  {
+    label: 'Clients',
+    href: '/clients',
+    icon: Users,
+  },
+  {
     label: 'Quick Jobs',
     href: '/quick-jobs',
     icon: Zap,
@@ -40,9 +50,9 @@ const navItems = [
     icon: BellRing,
   },
   {
-    label: 'Clients',
-    href: '/clients',
-    icon: Users,
+    label: 'Projects',
+    href: '/projects',
+    icon: FolderKanban,
   },
   {
     label: 'Services',
@@ -55,16 +65,6 @@ const navItems = [
     icon: Package,
   },
   {
-    label: 'Projects',
-    href: '/projects',
-    icon: FolderKanban,
-  },
-  {
-    label: 'Invoices',
-    href: '/invoices',
-    icon: FileText,
-  },
-  {
     label: 'Payments',
     href: '/payments',
     icon: CreditCard,
@@ -73,11 +73,6 @@ const navItems = [
     label: 'Payment Links',
     href: '/links',
     icon: Link2,
-  },
-  {
-    label: 'Website Content',
-    href: '/website',
-    icon: Globe,
   },
   {
     label: 'WhatsApp',

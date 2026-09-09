@@ -28,6 +28,22 @@ interface SendPaymentReminderEmailParams {
   clientLogoUrl?: string
 }
 
+export interface SendInvoiceEmailParams {
+  toEmail: string
+  clientName: string
+  invoiceNumber: string
+  dueDate?: string
+  totalAmount: number
+  balanceDue: number
+  currency?: string
+  currencySymbol?: string
+  paymentUrl: string
+  personalMessage?: string
+  items?: Array<{ description: string; quantity: number; total: number }>
+  businessName?: string
+  businessLogoUrl?: string
+}
+
 /**
  * Replaces localhost or dynamic IP origins with official production URL if set
  */
@@ -398,6 +414,192 @@ export async function sendDeliveryPaymentRequiredEmail({
   const subject = hasBalance
     ? `Your Deliverables — Balance Due: ${formattedAmount}`
     : `Your Deliverables — LEXMEDIA.GH`
+
+  return sendBrevoEmail({
+    toEmail,
+    clientName,
+    subject,
+    htmlContent,
+    apiKey,
+    senderEmail,
+    senderName,
+  })
+}
+
+export async function sendInvoiceEmail({
+  toEmail,
+  clientName,
+  invoiceNumber,
+  dueDate,
+  totalAmount,
+  balanceDue,
+  currencySymbol = 'GH₵',
+  paymentUrl,
+  personalMessage,
+  items = [],
+  businessName = 'LexMedia',
+  businessLogoUrl,
+}: SendInvoiceEmailParams): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const apiKey = process.env.BREVO_API_KEY
+
+  if (!apiKey) {
+    console.error('[Brevo Service] BREVO_API_KEY environment variable is not configured.')
+    return { success: false, error: 'BREVO_API_KEY environment variable is missing' }
+  }
+
+  const senderEmail = process.env.BREVO_SENDER_EMAIL || 'lexmedia8gh@gmail.com'
+  const senderName = 'LEXMEDIA.GH' // Mandatory sender display name: LEXMEDIA.GH
+
+  const cleanPaymentUrl = getProductionUrl(paymentUrl)
+  const formattedTotal = `${currencySymbol}${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const formattedBalance = `${currencySymbol}${balanceDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const absLogo = makeAbsoluteLogoUrl(businessLogoUrl)
+
+  const itemsHtml = items.length > 0
+    ? `
+      <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin: 16px 0; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; font-size: 13px;">
+        <tr style="background-color: #f8fafc; font-weight: 600; color: #475569; text-transform: uppercase; font-size: 11px;">
+          <th align="left" style="padding: 10px 14px;">Item</th>
+          <th align="center" style="padding: 10px 14px;">Qty</th>
+          <th align="right" style="padding: 10px 14px;">Amount</th>
+        </tr>
+        ${items.slice(0, 8).map((it, idx) => `
+          <tr style="border-top: 1px solid #f1f5f9; background-color: ${idx % 2 === 0 ? '#ffffff' : '#fafafa'};">
+            <td style="padding: 10px 14px; color: #1e293b;">${escapeHtml(it.description)}</td>
+            <td align="center" style="padding: 10px 14px; color: #64748b;">${it.quantity || 1}</td>
+            <td align="right" style="padding: 10px 14px; font-weight: 600; color: #0f172a;">${currencySymbol}${(it.total || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          </tr>
+        `).join('')}
+        ${items.length > 8 ? `
+          <tr>
+            <td colspan="3" align="center" style="padding: 8px; color: #94a3b8; font-size: 11px; background-color: #f8fafc;">+ ${items.length - 8} more item(s) on full invoice</td>
+          </tr>
+        ` : ''}
+      </table>
+    `
+    : ''
+
+  const headerLogo = absLogo
+    ? `<img src="${escapeHtml(absLogo)}" alt="${escapeHtml(businessName)}" width="120" style="display: block; margin: 0 auto 12px auto; max-height: 52px; object-fit: contain;" />`
+    : `<table align="center" border="0" cellspacing="0" cellpadding="0" style="margin: 0 auto 12px auto;">
+        <tr>
+          <td align="center" style="background-color: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.25); width: 50px; height: 50px; border-radius: 12px;">
+            <span style="font-size: 22px; font-weight: 800; color: #38bdf8; font-family: monospace;">LM</span>
+          </td>
+        </tr>
+      </table>`
+
+  const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoice ${escapeHtml(invoiceNumber)} from ${escapeHtml(businessName)}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0b1329; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #0b1329; padding: 40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 580px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);">
+          <!-- Header Banner -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 32px 28px; text-align: center;">
+              ${headerLogo}
+              <h1 style="color: #ffffff; margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.3px;">${escapeHtml(senderName)}</h1>
+              <p style="color: #94a3b8; margin: 4px 0 0 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">Client Billing &amp; Invoice Portal</p>
+            </td>
+          </tr>
+
+          <!-- Main Body -->
+          <tr>
+            <td style="padding: 32px 28px 24px 28px;">
+              <h2 style="margin: 0 0 6px 0; font-size: 18px; font-weight: 700; color: #0f172a;">Hello ${escapeHtml(clientName)},</h2>
+              <p style="margin: 0 0 18px 0; font-size: 14px; line-height: 1.6; color: #475569;">
+                Here is your invoice <strong>${escapeHtml(invoiceNumber)}</strong>${dueDate ? ` due by <strong>${escapeHtml(dueDate)}</strong>` : ''}.
+              </p>
+
+              ${personalMessage ? `
+                <div style="background-color: #f1f5f9; border-left: 4px solid #3b82f6; padding: 12px 16px; margin: 0 0 20px 0; border-radius: 4px;">
+                  <p style="margin: 0; font-size: 13px; font-style: italic; color: #334155;">&ldquo;${escapeHtml(personalMessage)}&rdquo;</p>
+                </div>
+              ` : ''}
+
+              <!-- Invoice Summary Box -->
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin: 0 0 20px 0; padding: 16px 20px;">
+                <tr>
+                  <td>
+                    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td align="left" style="font-size: 12px; color: #64748b; font-weight: 600; text-transform: uppercase;">Invoice Number</td>
+                        <td align="right" style="font-family: monospace; font-weight: 700; color: #0f172a; font-size: 14px;">${escapeHtml(invoiceNumber)}</td>
+                      </tr>
+                      ${dueDate ? `
+                      <tr>
+                        <td align="left" style="font-size: 12px; color: #64748b; padding-top: 8px;">Due Date</td>
+                        <td align="right" style="font-size: 13px; color: #0f172a; padding-top: 8px;">${escapeHtml(dueDate)}</td>
+                      </tr>
+                      ` : ''}
+                      <tr>
+                        <td align="left" style="font-size: 12px; color: #64748b; padding-top: 8px;">Total Invoice Amount</td>
+                        <td align="right" style="font-size: 14px; font-weight: 600; color: #0f172a; padding-top: 8px;">${escapeHtml(formattedTotal)}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              ${itemsHtml}
+
+              <!-- Balance Due Banner -->
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 1px solid #bfdbfe; border-radius: 12px; margin: 0 0 24px 0; padding: 18px; text-align: center;">
+                <tr>
+                  <td>
+                    <p style="margin: 0; font-size: 12px; font-weight: 600; color: #1e40af; text-transform: uppercase; letter-spacing: 0.5px;">Balance Due</p>
+                    <p style="margin: 6px 0 2px 0; font-size: 28px; font-weight: 800; color: #1e3a8a; letter-spacing: -0.5px;">${escapeHtml(formattedBalance)}</p>
+                    <p style="margin: 0; font-size: 12px; color: #3b82f6;">Pay securely online with Mobile Money, Card, or Bank</p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Primary Action Button -->
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin: 24px 0 16px 0;">
+                <tr>
+                  <td align="center">
+                    <a href="${escapeHtml(cleanPaymentUrl)}" target="_blank" style="display: inline-block; width: 85%; max-width: 320px; background-color: #2563eb; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 24px; border-radius: 10px; text-align: center; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);">
+                      View &amp; Pay Invoice
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="font-size: 12px; color: #94a3b8; text-align: center; line-height: 1.5; margin-top: 16px;">
+                Direct portal link:<br>
+                <a href="${escapeHtml(cleanPaymentUrl)}" style="color: #2563eb; text-decoration: none; word-break: break-all;">${escapeHtml(cleanPaymentUrl)}</a>
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 20px 28px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="margin: 0 0 4px 0; font-size: 12px; color: #64748b;">
+                Thank you for choosing ${escapeHtml(businessName)}. If you have any questions, reach out directly at <a href="mailto:${escapeHtml(senderEmail)}" style="color: #2563eb; text-decoration: none;">${escapeHtml(senderEmail)}</a>.
+              </p>
+              <p style="margin: 8px 0 0 0; font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase;">&copy; ${escapeHtml(senderName)} &mdash; Professional Media &amp; Digital Services</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+`
+
+  const subject = balanceDue > 0
+    ? `Invoice ${invoiceNumber} from ${senderName} — Balance Due: ${formattedBalance}`
+    : `Invoice ${invoiceNumber} from ${senderName}`
 
   return sendBrevoEmail({
     toEmail,
