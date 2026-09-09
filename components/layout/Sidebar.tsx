@@ -18,6 +18,7 @@ import {
   Settings,
   ChevronRight,
   Zap,
+  BarChart3,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/hooks/useAuth'
@@ -80,9 +81,9 @@ const navItems = [
     icon: MessageSquare,
   },
   {
-    label: 'Templates',
-    href: '/templates',
-    icon: FileText,
+    label: 'Data Analysis',
+    href: '/analytics',
+    icon: BarChart3,
   },
   {
     label: 'Settings',

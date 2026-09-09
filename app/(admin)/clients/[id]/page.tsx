@@ -36,6 +36,7 @@ import {
   getDocument,
   getDocuments,
   subscribeToDocument,
+  subscribeToCollection,
 } from '@/lib/firebase/firestore'
 import { where, orderBy } from '@/lib/firebase/firestore'
 import type { Client, Project, Invoice, Payment, ClientLink } from '@/lib/types'
@@ -113,12 +114,12 @@ export default function ClientProfilePage() {
     }
   }, [searchParams])
 
-  // Load client
+  // Load client and real-time sub-collections
   useEffect(() => {
     if (!id) return
     setLoading(true)
 
-    const unsubscribe = subscribeToDocument<Client>(
+    const unsubscribeClient = subscribeToDocument<Client>(
       COLLECTIONS.CLIENTS,
       id,
       (data) => {
@@ -127,56 +128,65 @@ export default function ClientProfilePage() {
       }
     )
 
+    const unsubscribeProjects = subscribeToCollection<Project>(
+      COLLECTIONS.PROJECTS,
+      [where('clientId', '==', id)],
+      (data) => {
+        setProjects(data)
+      }
+    )
+
+    const unsubscribeInvoices = subscribeToCollection<Invoice>(
+      COLLECTIONS.INVOICES,
+      [where('clientId', '==', id)],
+      (data) => {
+        setInvoices(data)
+      }
+    )
+
+    const unsubscribePayments = subscribeToCollection<Payment>(
+      COLLECTIONS.PAYMENTS,
+      [where('clientId', '==', id)],
+      (data) => {
+        const sorted = [...data].sort((a, b) => {
+          const aDate = a.paidAt ? new Date(a.paidAt as any).getTime() : 0
+          const bDate = b.paidAt ? new Date(b.paidAt as any).getTime() : 0
+          return bDate - aDate
+        })
+        setPayments(sorted)
+      }
+    )
+
+    const unsubscribeLinks = subscribeToCollection<ClientLink>(
+      COLLECTIONS.CLIENT_LINKS,
+      [where('clientId', '==', id)],
+      (data) => {
+        setLinks(data)
+      }
+    )
+
+    const unsubscribeMessages = subscribeToCollection<any>(
+      COLLECTIONS.WHATSAPP_MESSAGES,
+      [where('clientId', '==', id)],
+      (data) => {
+        setWhatsappMessages(data)
+      }
+    )
+
     getDocument<Client>(COLLECTIONS.CLIENTS, id).then((data) => {
       if (data) setClient(data)
       setLoading(false)
     })
 
-    return () => unsubscribe()
-  }, [id])
-
-  // Load tab data when tab changes or client loaded
-  useEffect(() => {
-    if (!id) return
-
-    const loadTab = async () => {
-      setTabLoading(true)
-      try {
-        if (activeTab === 'projects') {
-          const data = await getDocuments<Project>(COLLECTIONS.PROJECTS, [
-            where('clientId', '==', id),
-          ])
-          setProjects(data)
-        } else if (activeTab === 'invoices') {
-          const data = await getDocuments<Invoice>(COLLECTIONS.INVOICES, [
-            where('clientId', '==', id),
-          ])
-          setInvoices(data)
-        } else if (activeTab === 'payments') {
-          const data = await getDocuments<Payment>(COLLECTIONS.PAYMENTS, [
-            where('clientId', '==', id),
-          ])
-          setPayments(data)
-        } else if (activeTab === 'links') {
-          const data = await getDocuments<ClientLink>(COLLECTIONS.CLIENT_LINKS, [
-            where('clientId', '==', id),
-          ])
-          setLinks(data)
-        } else if (activeTab === 'communication') {
-          const data = await getDocuments<any>(COLLECTIONS.WHATSAPP_MESSAGES, [
-            where('clientId', '==', id),
-          ])
-          setWhatsappMessages(data)
-        }
-      } catch (err) {
-        console.warn('Tab data load error:', err)
-      } finally {
-        setTabLoading(false)
-      }
+    return () => {
+      unsubscribeClient()
+      unsubscribeProjects()
+      unsubscribeInvoices()
+      unsubscribePayments()
+      unsubscribeLinks()
+      unsubscribeMessages()
     }
-
-    loadTab()
-  }, [id, activeTab])
+  }, [id])
 
   if (loading) {
     return (
