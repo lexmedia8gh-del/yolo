@@ -48,7 +48,8 @@ import {
 } from '@/lib/utils'
 import type { QuickJob, ClientLink, Delivery, DeliveryFile } from '@/lib/types'
 import toast from 'react-hot-toast'
-import { uploadDeliveryFile, deleteDeliveryFile } from '@/lib/firebase/storage'
+import { isSupabaseConfigured } from '@/lib/supabase/client'
+import { STORAGE_BUCKETS } from '@/lib/supabase/storage'
 
 interface QuickJobPaymentDeliveryProps {
   job: QuickJob
@@ -293,6 +294,62 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
     }
   }
 
+  // Helper for uploading single file to Supabase Storage via Quick Jobs Upload API
+  const uploadQuickJobFile = (file: File, onProgress?: (percent: number) => void): Promise<any> => {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('jobId', currentJob.id)
+      formData.append('clientId', currentJob.clientId || '')
+      formData.append('clientName', currentJob.clientName || '')
+      formData.append('fileName', file.name)
+      formData.append('fileSize', String(file.size))
+      formData.append('fileType', file.type || file.name.split('.').pop() || 'application/octet-stream')
+
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable && onProgress) {
+          const percent = Math.round((e.loaded / e.total) * 100)
+          onProgress(percent)
+        }
+      })
+
+      xhr.timeout = 3 * 60 * 1000 // 3 minutes
+      xhr.ontimeout = () => {
+        reject(new Error('Upload timed out. Please check your network connection.'))
+      }
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const res = JSON.parse(xhr.responseText)
+            if (res.file) {
+              resolve(res.file)
+            } else {
+              reject(new Error(res.error || 'Upload failed.'))
+            }
+          } catch {
+            reject(new Error('Invalid response from storage server.'))
+          }
+        } else {
+          try {
+            const errRes = JSON.parse(xhr.responseText)
+            reject(new Error(errRes.error || `Upload failed with HTTP ${xhr.status}`))
+          } catch {
+            reject(new Error(`Upload failed with HTTP ${xhr.status}`))
+          }
+        }
+      }
+
+      xhr.onerror = () => {
+        reject(new Error('Network error during file upload. Please check storage connection.'))
+      }
+
+      xhr.open('POST', '/api/quick-jobs/upload')
+      xhr.send(formData)
+    })
+  }
+
   // Handle File Selection and Upload
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
@@ -316,38 +373,36 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
     }
 
     setIsUploading(true)
-    setUploadProgress(10)
+    setUploadProgress(5)
 
     try {
       const newUploads: { id: string; name: string; url: string; path: string; size: number }[] = []
-      let progressStep = 10
-      const stepInc = Math.floor(80 / files.length)
+      let overallProgress = 5
+      const totalWeight = 90 / files.length
 
-      for (const file of files) {
-        const fileId = generateSecureToken('qjf_')
-        const { downloadUrl, storagePath } = await uploadDeliveryFile(
-          'quickJobs',
-          currentJob.id,
-          `${Date.now()}_${file.name}`,
-          file
-        )
-        newUploads.push({
-          id: fileId,
-          name: file.name,
-          url: downloadUrl,
-          path: storagePath,
-          size: file.size,
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        const uploadedRecord = await uploadQuickJobFile(file, (filePercent) => {
+          const currentBatchProgress = Math.round(5 + (i * totalWeight) + (filePercent * totalWeight / 100))
+          setUploadProgress(Math.min(95, currentBatchProgress))
         })
-        progressStep += stepInc
-        setUploadProgress(Math.min(95, progressStep))
+
+        newUploads.push({
+          id: uploadedRecord.id,
+          name: uploadedRecord.name || file.name,
+          url: uploadedRecord.url,
+          path: uploadedRecord.path,
+          size: uploadedRecord.size || file.size,
+        })
       }
 
       setUploadedFiles((prev) => [...prev, ...newUploads])
       setUploadProgress(100)
-      toast.success(`${files.length} file${files.length > 1 ? 's' : ''} uploaded successfully!`)
-    } catch (err) {
+      toast.success(`${files.length} file${files.length > 1 ? 's' : ''} uploaded to Supabase Storage!`)
+    } catch (err: any) {
       console.error('Upload error:', err)
-      toast.error('Failed to upload some files. Please check storage connection.')
+      const errorMsg = err?.message || 'Failed to upload some files. Please check storage connection.'
+      toast.error(errorMsg)
     } finally {
       setIsUploading(false)
       setUploadProgress(0)
@@ -359,9 +414,16 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
   const handleRemoveFile = async (index: number) => {
     const file = uploadedFiles[index]
     try {
-      if (file.path) {
-        await deleteDeliveryFile(file.path)
-      }
+      await fetch('/api/quick-jobs/delete-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobId: currentJob.id,
+          fileId: file.id,
+          path: file.path,
+        }),
+      })
+
       setUploadedFiles((prev) => prev.filter((_, i) => i !== index))
       toast.success('File removed')
     } catch (err) {
@@ -615,11 +677,17 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
         ) : (
           /* UNLOCKED STATE */
           <div className="space-y-4 animate-fade-in">
-            {/* Unlocked Confirmation Badge */}
-            <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/60 rounded-xl p-3 flex items-center gap-2.5 text-xs text-emerald-800 dark:text-emerald-300">
-              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-              <div>
-                <strong className="font-semibold">Payment Confirmed:</strong> File upload is active. You can now upload and dispatch final deliverables.
+            {/* Unlocked Confirmation Badge & Storage Connection Info */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/60 rounded-xl p-3 text-xs text-emerald-800 dark:text-emerald-300">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>
+                  <strong className="font-semibold">Payment Confirmed:</strong> File upload is active.
+                </span>
+              </div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white/80 dark:bg-gray-900/80 rounded-md border border-emerald-300/60 dark:border-emerald-700/60 text-[11px] font-mono text-emerald-900 dark:text-emerald-200 self-start sm:self-auto shadow-xs">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>Supabase Storage: <strong className="font-semibold">Delivery files</strong></span>
               </div>
             </div>
 
