@@ -236,6 +236,7 @@ export interface ClientLink {
   packageTitle?: string
   invoiceId?: string
   invoiceNumber?: string
+  quickJobId?: string
   amount?: number
   currency?: string
   title?: string
@@ -283,7 +284,8 @@ export interface Delivery {
   id: string
   clientId: string
   clientName: string
-  projectId: string
+  projectId?: string
+  quickJobId?: string
   projectName: string
   invoiceId?: string
   title: string
@@ -504,6 +506,8 @@ export interface QuickJobServiceSnapshot {
   defaultPrice: number
 }
 
+export type QuickJobPaymentStatus = 'Unpaid' | 'Partially Paid' | 'Pending' | 'Payment Link Generated' | 'Payment Link Sent' | 'Paid' | 'Failed' | 'Cancelled'
+
 export interface QuickJob {
   id: string
   clientId: string
@@ -518,12 +522,15 @@ export interface QuickJob {
   deadline?: string // YYYY-MM-DD
   notes?: string
   status: QuickJobStatus
-  paymentStatus: PaymentStatus
+  paymentStatus: QuickJobPaymentStatus
   depositPaid: number
   amountPaid: number
   outstandingBalance: number
   currency: string
   fileIds?: string[]
+  paymentToken?: string
+  deliveryStatus?: 'Not Sent' | 'Sent' | 'Failed'
+  deliveryEmailSentAt?: string
   createdAt: Timestamp | string
   updatedAt: Timestamp | string
   createdBy?: string

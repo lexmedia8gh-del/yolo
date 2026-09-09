@@ -137,6 +137,26 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // 6.5 Update Quick Job
+    if (linkData.quickJobId) {
+      const quickJobRef = adminDb.collection('quickJobs').doc(linkData.quickJobId)
+      const qjSnap = await quickJobRef.get()
+      if (qjSnap.exists) {
+        const qj = qjSnap.data()!
+        const qjTotal = qj.originalAgreedPrice ?? 0
+        const prevQjPaid = qj.amountPaid ?? 0
+        const newQjPaid = prevQjPaid + amountPaid
+        const newQjBalance = Math.max(0, qjTotal - newQjPaid)
+        const newQjPayStatus = newQjPaid >= qjTotal ? 'Paid' : 'Partially Paid'
+        batch.update(quickJobRef, {
+          amountPaid: newQjPaid,
+          outstandingBalance: newQjBalance,
+          paymentStatus: newQjPayStatus,
+          updatedAt: FieldValue.serverTimestamp(),
+        })
+      }
+    }
+
     // 7. Update Client
     if (linkData.clientId) {
       const clientRef = adminDb.collection('clients').doc(linkData.clientId)
@@ -162,6 +182,7 @@ export async function GET(req: NextRequest) {
       clientId: linkData.clientId || '',
       clientName: linkData.clientName || '',
       projectId: linkData.projectId || '',
+      quickJobId: linkData.quickJobId || '',
       paystackReference: reference,
       amount: amountPaid,
       currency: currency || linkData.currency || 'GHS',
@@ -183,6 +204,7 @@ export async function GET(req: NextRequest) {
       clientId: linkData.clientId || '',
       clientName: linkData.clientName || '',
       projectId: linkData.projectId || '',
+      quickJobId: linkData.quickJobId || '',
       performedBy: 'system',
       metadata: { reference, channel, amount: amountPaid, currency },
       createdAt: FieldValue.serverTimestamp(),
@@ -201,6 +223,7 @@ export async function GET(req: NextRequest) {
       invoiceId: linkData.invoiceId || '',
       invoiceNumber,
       projectId: linkData.projectId || '',
+      quickJobId: linkData.quickJobId || '',
       paymentId,
       amount: amountPaid,
       currency: currency || 'GHS',

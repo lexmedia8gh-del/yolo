@@ -121,6 +121,7 @@ export async function POST(req: NextRequest) {
     let clientName = linkData?.clientName || txData?.customer?.name || ''
     let clientId = linkData?.clientId || ''
     let projectId = linkData?.projectId || ''
+    let quickJobId = linkData?.quickJobId || ''
 
     if (linkData?.invoiceId) {
       const invoiceRef = adminDb.collection('invoices').doc(linkData.invoiceId)
@@ -164,6 +165,26 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Update Quick Job
+    if (quickJobId) {
+      const quickJobRef = adminDb.collection('quickJobs').doc(quickJobId)
+      const qjSnap = await quickJobRef.get()
+      if (qjSnap.exists) {
+        const qj = qjSnap.data()!
+        const qjTotal = qj.originalAgreedPrice ?? 0
+        const prevQjPaid = qj.amountPaid ?? 0
+        const newQjPaid = prevQjPaid + amountPaid
+        const newQjBalance = Math.max(0, qjTotal - newQjPaid)
+        const newQjPayStatus = newQjPaid >= qjTotal ? 'Paid' : 'Partially Paid'
+        batch.update(quickJobRef, {
+          amountPaid: newQjPaid,
+          outstandingBalance: newQjBalance,
+          paymentStatus: newQjPayStatus,
+          updatedAt: FieldValue.serverTimestamp(),
+        })
+      }
+    }
+
     // Update Client
     if (clientId) {
       const clientRef = adminDb.collection('clients').doc(clientId)
@@ -192,6 +213,7 @@ export async function POST(req: NextRequest) {
       clientId,
       clientName,
       projectId,
+      quickJobId,
       paystackReference: reference,
       amount: amountPaid,
       currency,
@@ -213,6 +235,7 @@ export async function POST(req: NextRequest) {
       clientId,
       clientName,
       projectId,
+      quickJobId,
       performedBy: 'system',
       metadata: { reference, channel, amount: amountPaid, currency },
       createdAt: FieldValue.serverTimestamp(),
@@ -231,6 +254,7 @@ export async function POST(req: NextRequest) {
       invoiceId: linkData?.invoiceId || '',
       invoiceNumber,
       projectId,
+      quickJobId,
       paymentId,
       amount: amountPaid,
       currency,

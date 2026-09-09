@@ -39,6 +39,7 @@ import {
   subscribeToCollection,
 } from '@/lib/firebase/firestore'
 import type { QuickJob, QuickJobStatus, Service, Client } from '@/lib/types'
+import { QuickJobPaymentDelivery } from '@/components/quick-jobs/QuickJobPaymentDelivery'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
@@ -805,6 +806,15 @@ export default function QuickJobsPage() {
                 </p>
               </div>
             )}
+
+            <QuickJobPaymentDelivery 
+              job={viewingJob}
+              onUpdate={async (updatedData) => {
+                await updateDocument(COLLECTIONS.QUICK_JOBS, viewingJob.id, updatedData)
+                setViewingJob({ ...viewingJob, ...updatedData })
+                toast.success('Quick Job updated')
+              }}
+            />
 
             <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-800">
               <Button
