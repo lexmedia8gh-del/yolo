@@ -89,6 +89,48 @@ export async function GET(
       }
     }
 
+    // If files list is empty from deliveryId query, try searching by quickJobId or deliveryDocData.files array
+    if (files.length === 0 && deliveryDocData) {
+      if (deliveryDocData.quickJobId) {
+        try {
+          const adminDb = getAdminDb()
+          const qjFilesSnap = await adminDb
+            .collection(COLLECTIONS.DELIVERY_FILES)
+            .where('quickJobId', '==', deliveryDocData.quickJobId)
+            .get()
+
+          if (!qjFilesSnap.empty) {
+            files = qjFilesSnap.docs.map((d) => {
+              const fd = d.data()
+              return {
+                id: d.id,
+                fileName: fd.fileName || fd.originalName || 'file',
+                originalName: fd.originalName || fd.fileName || 'file',
+                fileType: fd.fileType || 'application/octet-stream',
+                fileSize: fd.fileSize || 0,
+                downloadUrl: fd.downloadUrl || '',
+                downloadCount: fd.downloadCount || 0,
+                uploadedAt: fd.uploadedAt,
+              }
+            })
+          }
+        } catch {}
+      }
+
+      if (files.length === 0 && Array.isArray(deliveryDocData.files) && deliveryDocData.files.length > 0) {
+        files = deliveryDocData.files.map((f: any, idx: number) => ({
+          id: f.id || `file_${idx}`,
+          fileName: f.name || f.fileName || 'file',
+          originalName: f.name || f.originalName || 'file',
+          fileType: f.fileType || 'application/octet-stream',
+          fileSize: f.size || f.fileSize || 0,
+          downloadUrl: f.url || f.downloadUrl || '',
+          downloadCount: f.downloadCount || 0,
+          uploadedAt: f.uploadedAt || deliveryDocData.createdAt,
+        }))
+      }
+    }
+
     if (!deliveryDocData) {
       console.warn(`[Delivery] Token not found: ${token.slice(0, 8)}...`)
       return NextResponse.json({ error: 'Delivery not found or link is invalid' }, { status: 404 })
@@ -169,13 +211,17 @@ export async function GET(
     const formattedFiles = files
       .map((f) => {
         const iso = toISO(f.uploadedAt)
+        let downloadUrl = f.downloadUrl
+        if (!downloadUrl || downloadUrl.includes('localhost') || downloadUrl.includes('127.0.0.1')) {
+          downloadUrl = `/api/files?id=${f.id}`
+        }
         return {
           id: f.id,
           fileName: f.fileName,
           originalName: f.originalName,
           fileType: f.fileType,
           fileSize: f.fileSize,
-          downloadUrl: f.downloadUrl,
+          downloadUrl,
           downloadCount: f.downloadCount,
           uploadedAt: iso,
           _ms: iso ? new Date(iso).getTime() : 0,

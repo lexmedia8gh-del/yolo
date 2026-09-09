@@ -335,22 +335,57 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 /**
  * Returns the application base URL without trailing slash.
  * 
- * 1. Browser-side: Always prefers window.location.origin.
- *    This ensures that when an admin or user is using the deployed Ctrl Room app,
- *    links dynamically match the current deployed domain (or localhost during local dev).
- * 
- * 2. Server-side: Uses configured APP_URL, NEXT_PUBLIC_APP_URL, or VERCEL_URL.
- *    Prefers non-localhost URLs and forbids falling back to localhost in production.
+ * 1. Explicit context: If a valid origin string or request is provided, extracts origin.
+ * 2. Browser-side: Always prefers window.location.origin.
+ * 3. Server-side: Dynamically inspects x-forwarded-host / host headers from incoming requests.
+ * 4. Environment Variables: APP_URL, NEXT_PUBLIC_APP_URL, VERCEL_URL.
  */
-export function getAppUrl(): string {
-  // 1. Browser context: Authoritative for client-side interactions in the web app
-  // This guarantees links generated or clicked in the browser open directly on this web app
+export function getAppUrl(context?: any): string {
+  // 1. Explicit string passed as origin / base URL
+  if (typeof context === 'string') {
+    const trimmed = context.trim().replace(/\/$/, '')
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      if (!trimmed.includes('localhost') && !trimmed.includes('127.0.0.1')) {
+        return trimmed
+      }
+    }
+  }
+
+  // 2. Browser context: Authoritative for client-side interactions in the web app
   if (typeof window !== 'undefined' && window.location?.origin) {
     const origin = window.location.origin.replace(/\/$/, '')
     if (origin) return origin
   }
 
-  // 2. Server context: Use configured APP_URL or NEXT_PUBLIC_APP_URL
+  // 3. Request context (Server-side dynamic host detection from headers)
+  if (context && typeof context === 'object') {
+    try {
+      let headers: Headers | any = null
+      if ('headers' in context && context.headers) {
+        headers = context.headers
+      } else if (context instanceof Headers) {
+        headers = context
+      }
+
+      if (headers) {
+        const getHeader = (name: string): string | null => {
+          if (typeof headers.get === 'function') {
+            return headers.get(name)
+          }
+          return headers[name] || headers[name.toLowerCase()] || null
+        }
+
+        const host = getHeader('x-forwarded-host') || getHeader('host')
+        const proto = getHeader('x-forwarded-proto') || (host && host.includes('localhost') ? 'http' : 'https')
+        if (host) {
+          const cleanHost = host.split(',')[0].trim()
+          return `${proto}://${cleanHost}`.replace(/\/$/, '')
+        }
+      }
+    } catch {}
+  }
+
+  // 4. Server context: Use configured APP_URL or NEXT_PUBLIC_APP_URL
   const configuredAppUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL
   if (configuredAppUrl) {
     const trimmed = configuredAppUrl.trim()
@@ -365,7 +400,7 @@ export function getAppUrl(): string {
     }
   }
 
-  // 3. Server context fallback: check candidate URLs (excluding vercel.app and localhost)
+  // 5. Server context fallback: check candidate URLs (excluding vercel.app and localhost)
   const candidateUrls = [
     process.env.APP_URL,
     process.env.NEXT_PUBLIC_APP_URL,
@@ -388,16 +423,17 @@ export function getAppUrl(): string {
     return normalized.replace(/\/$/, '')
   }
 
-  // Local development default fallback
-  return 'http://localhost:3000'
+  // Fallback for local development or relative links
+  return ''
 }
 
 /**
- * Builds an absolute application URL given a path.
+ * Builds an absolute or clean application URL given a path.
  */
-export function appUrl(path = ''): string {
-  const base = getAppUrl()
+export function appUrl(path = '', context?: any): string {
+  const base = getAppUrl(context)
   const cleanPath = path ? (path.startsWith('/') ? path : `/${path}`) : ''
+  if (!base) return cleanPath || '/'
   return `${base}${cleanPath}`
 }
 
@@ -406,9 +442,9 @@ export function appUrl(path = ''): string {
  * Generates the authoritative customer-facing payment URL across the app:
  * Admin dashboard, Copy button, WhatsApp messages, Email, Invoices, and Projects.
  */
-export function getPaymentLink(tokenOrId: string): string {
+export function getPaymentLink(tokenOrId: string, context?: any): string {
   const cleanToken = (tokenOrId || 'sample').trim()
-  return appUrl(`/pay/${cleanToken}`)
+  return appUrl(`/pay/${cleanToken}`, context)
 }
 
 /**
@@ -416,8 +452,8 @@ export function getPaymentLink(tokenOrId: string): string {
  * Generates the authoritative customer-facing delivery portal URL across the app:
  * Client delivery portal, emails, and admin copy/share actions.
  */
-export function getDeliveryLink(accessToken: string): string {
+export function getDeliveryLink(accessToken: string, context?: any): string {
   const cleanToken = (accessToken || '').trim()
-  return appUrl(`/delivery/${encodeURIComponent(cleanToken)}`)
+  return appUrl(`/delivery/${encodeURIComponent(cleanToken)}`, context)
 }
 

@@ -52,17 +52,18 @@ export interface SendInvoiceEmailParams {
  * Replaces localhost or dynamic IP origins with official production URL if set
  */
 function getProductionUrl(urlStr: string): string {
+  if (!urlStr) return ''
   const prodBase = getAppUrl()
-  if (!prodBase) return urlStr
 
   try {
     const urlObj = new URL(urlStr)
-    if (
+    const isLocal =
       urlObj.hostname === 'localhost' ||
       urlObj.hostname === '127.0.0.1' ||
       urlObj.hostname.startsWith('192.168.') ||
       urlObj.hostname.includes('vercel.app')
-    ) {
+
+    if (isLocal && prodBase && !prodBase.includes('localhost') && !prodBase.includes('127.0.0.1')) {
       const normalizedBase = prodBase.startsWith('http') ? prodBase : `https://${prodBase}`
       const baseObj = new URL(normalizedBase)
       urlObj.protocol = baseObj.protocol

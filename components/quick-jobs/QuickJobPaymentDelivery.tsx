@@ -454,6 +454,7 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
           clientEmail: currentJob.clientEmail,
           files: uploadedFiles,
           resend: isResend,
+          origin: typeof window !== 'undefined' ? window.location.origin : '',
         }),
       })
 

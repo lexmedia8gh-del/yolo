@@ -6,12 +6,14 @@ import { senderName, getEmailSender } from '@/lib/config/email'
 
 export async function POST(req: NextRequest) {
   try {
-    const { jobId, clientName, clientEmail, files, resend } = await req.json()
+    const body = await req.json()
+    const { jobId, clientName, clientEmail, files, resend, origin: clientOrigin } = body
 
     if (!jobId || !clientEmail) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
+    const baseContext = clientOrigin || req
     const adminDb = getAdminDb()
     
     // 1. Verify Quick Job Payment Status
@@ -43,7 +45,7 @@ export async function POST(req: NextRequest) {
         const existingToken = existingDelivSnap.docs[0].data().accessToken
         return NextResponse.json({
           success: true,
-          deliveryLink: getDeliveryLink(existingToken),
+          deliveryLink: getDeliveryLink(existingToken, baseContext),
           message: 'Delivery already sent.',
         })
       }
@@ -153,7 +155,7 @@ export async function POST(req: NextRequest) {
 
     await batch.commit()
 
-    const deliveryLink = getDeliveryLink(accessToken)
+    const deliveryLink = getDeliveryLink(accessToken, baseContext)
 
     // 3. Send email via Brevo API directly using centralized sender configuration
     const apiKey = process.env.BREVO_API_KEY

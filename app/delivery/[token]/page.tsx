@@ -153,6 +153,16 @@ function ClientDeliveryPageInner() {
         return
       }
 
+      // Sanitize downloadUrl to always prefer current origin/relative stream if localhost is present
+      let downloadTarget = data.downloadUrl || `/api/files?id=${file.id}`
+      if (
+        downloadTarget.includes('localhost') ||
+        downloadTarget.includes('127.0.0.1') ||
+        !downloadTarget.startsWith('http')
+      ) {
+        downloadTarget = `/api/files?id=${file.id}`
+      }
+
       // Update local download count
       setFiles((prev) =>
         prev.map((f) => (f.id === file.id ? { ...f, downloadCount: (f.downloadCount || 0) + 1 } : f))
@@ -160,7 +170,7 @@ function ClientDeliveryPageInner() {
 
       // Trigger browser download
       const link = document.createElement('a')
-      link.href = data.downloadUrl
+      link.href = downloadTarget
       link.download = data.fileName || file.fileName
       link.target = '_blank'
       link.rel = 'noopener noreferrer'

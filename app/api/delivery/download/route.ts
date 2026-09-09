@@ -49,6 +49,21 @@ export async function POST(req: NextRequest) {
               updatedAt: FieldValue.serverTimestamp(),
             })
           } catch {}
+        } else if (Array.isArray(deliveryData.files)) {
+          const matchedFile = deliveryData.files.find((f: any) => f.id === fileId)
+          if (matchedFile) {
+            fileData = {
+              id: matchedFile.id,
+              deliveryId,
+              quickJobId: deliveryData.quickJobId,
+              fileName: matchedFile.name || matchedFile.fileName || 'file',
+              originalName: matchedFile.name || matchedFile.originalName || 'file',
+              downloadUrl: matchedFile.url || matchedFile.downloadUrl || '',
+              storagePath: matchedFile.path || matchedFile.storagePath || '',
+              fileSize: matchedFile.size || matchedFile.fileSize || 0,
+              fileType: matchedFile.fileType || 'application/octet-stream',
+            }
+          }
         }
       }
     } catch {
@@ -72,28 +87,60 @@ export async function POST(req: NextRequest) {
       const fileDocRef = doc(db, COLLECTIONS.DELIVERY_FILES, fileId)
       const fileSnap = await getDoc(fileDocRef)
 
-      if (!fileSnap.exists()) {
-        return NextResponse.json({ error: 'File not found' }, { status: 404 })
+      if (fileSnap.exists()) {
+        fileData = fileSnap.data()
+        try {
+          await updateDoc(fileDocRef, {
+            downloadCount: increment(1),
+            lastDownloadedAt: serverTimestamp(),
+          })
+          await updateDoc(doc(db, COLLECTIONS.DELIVERIES, deliveryId), {
+            status: 'Downloaded',
+            updatedAt: serverTimestamp(),
+          })
+        } catch {}
+      } else if (Array.isArray(deliveryData.files)) {
+        const matchedFile = deliveryData.files.find((f: any) => f.id === fileId)
+        if (matchedFile) {
+          fileData = {
+            id: matchedFile.id,
+            deliveryId,
+            quickJobId: deliveryData.quickJobId,
+            fileName: matchedFile.name || matchedFile.fileName || 'file',
+            originalName: matchedFile.name || matchedFile.originalName || 'file',
+            downloadUrl: matchedFile.url || matchedFile.downloadUrl || '',
+            storagePath: matchedFile.path || matchedFile.storagePath || '',
+            fileSize: matchedFile.size || matchedFile.fileSize || 0,
+            fileType: matchedFile.fileType || 'application/octet-stream',
+          }
+        }
       }
-
-      fileData = fileSnap.data()
-      try {
-        await updateDoc(fileDocRef, {
-          downloadCount: increment(1),
-          lastDownloadedAt: serverTimestamp(),
-        })
-        await updateDoc(doc(db, COLLECTIONS.DELIVERIES, deliveryId), {
-          status: 'Downloaded',
-          updatedAt: serverTimestamp(),
-        })
-      } catch {}
     }
 
-    if (fileData?.deliveryId !== deliveryId) {
+    if (!fileData) {
+      return NextResponse.json({ error: 'File not found' }, { status: 404 })
+    }
+
+    // Verify ownership
+    const isMatchingDelivery =
+      fileData.deliveryId === deliveryId ||
+      (fileData.quickJobId && fileData.quickJobId === deliveryData.quickJobId) ||
+      (Array.isArray(deliveryData.files) && deliveryData.files.some((f: any) => f.id === fileId || f.path === fileData.storagePath))
+
+    if (!isMatchingDelivery) {
       return NextResponse.json({ error: 'File does not belong to this delivery' }, { status: 403 })
     }
 
-    const downloadUrl = fileData.downloadUrl || `/api/files?id=${fileId}`
+    // Clean and normalize download URL to prevent localhost issues
+    let downloadUrl = `/api/files?id=${fileId}`
+    if (
+      fileData.downloadUrl &&
+      !fileData.downloadUrl.includes('localhost') &&
+      !fileData.downloadUrl.includes('127.0.0.1') &&
+      fileData.downloadUrl.startsWith('https://')
+    ) {
+      downloadUrl = fileData.downloadUrl
+    }
 
     return NextResponse.json({
       success: true,

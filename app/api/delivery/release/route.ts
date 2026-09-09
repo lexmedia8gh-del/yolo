@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
         }
 
         if (clientEmail) {
-          const publicUrl = getDeliveryLink(deliveryData.accessToken)
+          const publicUrl = getDeliveryLink(deliveryData.accessToken, req)
           const emailRes = await sendDeliveryReadyEmail({
             toEmail: clientEmail,
             clientName,
