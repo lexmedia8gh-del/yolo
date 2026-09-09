@@ -316,15 +316,20 @@ export async function copyToClipboard(text: string): Promise<boolean> {
  *    Prefers non-localhost URLs and forbids falling back to localhost in production.
  */
 export function getAppUrl(): string {
-  // Browser context: authoritative for client-side interactions
+  // 1. Official domain from environment (highest priority for generated links)
+  const envAppUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL
+  if (envAppUrl && !envAppUrl.includes('localhost') && !envAppUrl.includes('127.0.0.1')) {
+    const normalized = envAppUrl.startsWith('http') ? envAppUrl : `https://${envAppUrl}`
+    return normalized.replace(/\/$/, '')
+  }
+
+  // 2. Browser context: fallback to window location
   if (typeof window !== 'undefined' && window.location?.origin) {
     return window.location.origin.replace(/\/$/, '')
   }
 
-  // Server context: evaluate environment variables
+  // 3. Server context: fallback to Vercel URLs
   const candidateUrls = [
-    process.env.APP_URL,
-    process.env.NEXT_PUBLIC_APP_URL,
     process.env.NEXT_PUBLIC_VERCEL_URL,
     process.env.VERCEL_URL,
   ].filter(Boolean) as string[]

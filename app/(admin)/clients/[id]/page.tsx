@@ -750,8 +750,7 @@ export default function ClientProfilePage() {
                       ) : (
                         <div className="space-y-2">
                           {links.map((link) => {
-                            const appUrl = typeof window !== 'undefined' ? window.location.origin : ''
-                            const payUrl = link.url || `${appUrl}/pay/${link.token}`
+                            const payUrl = link.url || getPaymentLink(link.token)
                             return (
                               <div
                                 key={link.id}
