@@ -6,6 +6,10 @@
  */
 
 import { getAppUrl } from '@/lib/utils'
+import { senderName, getEmailSender } from '@/lib/config/email'
+
+// Re-export centralized email sender configuration
+export { senderName, getEmailSender }
 
 interface SendDeliveryEmailParams {
   toEmail: string
@@ -334,13 +338,7 @@ export async function sendDeliveryReadyEmail({
 }: SendDeliveryEmailParams): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const apiKey = process.env.BREVO_API_KEY
 
-  if (!apiKey) {
-    console.error('[Brevo Service] BREVO_API_KEY environment variable is not configured.')
-    return { success: false, error: 'BREVO_API_KEY environment variable is missing' }
-  }
-
-  const senderEmail = process.env.BREVO_SENDER_EMAIL || 'lexmedia8gh@gmail.com'
-  const senderName = process.env.BREVO_SENDER_NAME || 'LEXMEDIA.GH'
+  const { email: senderEmail } = getEmailSender()
 
   const htmlContent = renderEmailTemplate({
     clientName,
@@ -359,7 +357,7 @@ export async function sendDeliveryReadyEmail({
   return sendBrevoEmail({
     toEmail,
     clientName,
-    subject: `Your Deliverables — LEXMEDIA.GH`,
+    subject: `Your Deliverables — ${senderName}`,
     htmlContent,
     apiKey,
     senderEmail,
@@ -380,13 +378,7 @@ export async function sendDeliveryPaymentRequiredEmail({
 }: SendPaymentReminderEmailParams): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const apiKey = process.env.BREVO_API_KEY
 
-  if (!apiKey) {
-    console.error('[Brevo Service] BREVO_API_KEY environment variable is not configured.')
-    return { success: false, error: 'BREVO_API_KEY environment variable is missing' }
-  }
-
-  const senderEmail = process.env.BREVO_SENDER_EMAIL || 'lexmedia8gh@gmail.com'
-  const senderName = process.env.BREVO_SENDER_NAME || 'LEXMEDIA.GH'
+  const { email: senderEmail } = getEmailSender()
 
   const hasBalance = amountDue > 0
   const formattedAmount = `${currencySymbol}${amountDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -413,7 +405,7 @@ export async function sendDeliveryPaymentRequiredEmail({
 
   const subject = hasBalance
     ? `Your Deliverables — Balance Due: ${formattedAmount}`
-    : `Your Deliverables — LEXMEDIA.GH`
+    : `Your Deliverables — ${senderName}`
 
   return sendBrevoEmail({
     toEmail,
@@ -442,13 +434,7 @@ export async function sendInvoiceEmail({
 }: SendInvoiceEmailParams): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const apiKey = process.env.BREVO_API_KEY
 
-  if (!apiKey) {
-    console.error('[Brevo Service] BREVO_API_KEY environment variable is not configured.')
-    return { success: false, error: 'BREVO_API_KEY environment variable is missing' }
-  }
-
-  const senderEmail = process.env.BREVO_SENDER_EMAIL || 'lexmedia8gh@gmail.com'
-  const senderName = 'LEXMEDIA.GH' // Mandatory sender display name: LEXMEDIA.GH
+  const { email: senderEmail } = getEmailSender()
 
   const cleanPaymentUrl = getProductionUrl(paymentUrl)
   const formattedTotal = `${currencySymbol}${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -619,16 +605,31 @@ async function sendBrevoEmail({
   htmlContent,
   apiKey,
   senderEmail,
-  senderName,
+  senderName: emailSenderName,
 }: {
   toEmail: string
   clientName: string
   subject: string
   htmlContent: string
-  apiKey: string
+  apiKey?: string
   senderEmail: string
-  senderName: string
+  senderName?: string
 }) {
+  const activeSenderName = emailSenderName || senderName || 'LEXMEDIA.GH'
+
+  // If no API key configured, operate smoothly in simulated preview mode
+  if (!apiKey) {
+    console.log(`[Email Dispatch - Preview Mode] Continuing without Brevo API key:`)
+    console.log(`  To: "${clientName}" <${toEmail}>`)
+    console.log(`  From: "${activeSenderName}" <${senderEmail}>`)
+    console.log(`  Subject: ${subject}`)
+    return {
+      success: true,
+      messageId: `preview_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      simulated: true,
+    }
+  }
+
   try {
     const res = await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
@@ -638,8 +639,9 @@ async function sendBrevoEmail({
         'api-key': apiKey,
       },
       body: JSON.stringify({
-        sender: { name: senderName, email: senderEmail },
+        sender: { name: activeSenderName, email: senderEmail },
         to: [{ email: toEmail, name: clientName }],
+        replyTo: { name: activeSenderName, email: senderEmail },
         subject,
         htmlContent,
       }),

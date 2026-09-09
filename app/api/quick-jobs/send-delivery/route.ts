@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { FieldValue } from 'firebase-admin/firestore'
 import { generateSecureToken, appUrl, getDeliveryLink } from '@/lib/utils'
+import { senderName, getEmailSender } from '@/lib/config/email'
 
 export async function POST(req: NextRequest) {
   try {
@@ -60,13 +61,9 @@ export async function POST(req: NextRequest) {
 
     const deliveryLink = getDeliveryLink(accessToken)
 
-    // 3. Send email via Brevo API directly to match the template precisely
+    // 3. Send email via Brevo API directly using centralized sender configuration
     const apiKey = process.env.BREVO_API_KEY
-    const senderEmail = process.env.BREVO_SENDER_EMAIL || 'lexmedia8gh@gmail.com'
-    
-    if (!apiKey) {
-      throw new Error('BREVO_API_KEY missing')
-    }
+    const sender = getEmailSender()
 
     // Using precise requested template
     const htmlContent = `
@@ -76,33 +73,41 @@ export async function POST(req: NextRequest) {
         <p>You can access your delivered files using the link below:</p>
         <p><a href="${deliveryLink}" style="color: #2563eb; text-decoration: underline;">${deliveryLink}</a></p>
         <br>
-        <p>Thank you for choosing LEXMEDIA.GH.</p>
+        <p>Thank you for choosing ${senderName}.</p>
         <br>
-        <p>Best regards,<br>LEXMEDIA.GH</p>
+        <p>Best regards,<br>${senderName}</p>
       </div>
     `
 
-    const brevoPayload = {
-      sender: { name: 'LEXMEDIA.GH', email: senderEmail },
-      to: [{ email: clientEmail, name: clientName }],
-      subject: 'Your Files Are Ready – LEXMEDIA.GH',
-      htmlContent,
-    }
+    if (apiKey) {
+      const brevoPayload = {
+        sender: { name: senderName, email: sender.email },
+        to: [{ email: clientEmail, name: clientName }],
+        replyTo: { name: senderName, email: sender.email },
+        subject: `Your Files Are Ready – ${senderName}`,
+        htmlContent,
+      }
 
-    const emailRes = await fetch('https://api.brevo.com/v3/smtp/email', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'api-key': apiKey,
-      },
-      body: JSON.stringify(brevoPayload),
-    })
+      const emailRes = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'api-key': apiKey,
+        },
+        body: JSON.stringify(brevoPayload),
+      })
 
-    if (!emailRes.ok) {
-      const errText = await emailRes.text()
-      console.error('Brevo Error:', errText)
-      throw new Error('Failed to send email via Brevo')
+      if (!emailRes.ok) {
+        const errText = await emailRes.text()
+        console.error('Brevo Error:', errText)
+        throw new Error('Failed to send email via Brevo')
+      }
+    } else {
+      console.log(`[Quick Jobs Delivery Email - Preview Mode] Continuing without Brevo API key:`)
+      console.log(`  To: ${clientName} <${clientEmail}>`)
+      console.log(`  From: ${senderName} <${sender.email}>`)
+      console.log(`  Subject: Your Files Are Ready – ${senderName}`)
     }
 
     // 4. Update Quick Job to Sent
