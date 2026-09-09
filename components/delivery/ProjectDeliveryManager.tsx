@@ -122,6 +122,29 @@ export function ProjectDeliveryManager({
   const [fileToReplace, setFileToReplace] = useState<DeliveryFile | null>(null)
   const [isReplacingFile, setIsReplacingFile] = useState(false)
 
+  // Optional Image Optimization (OFF by default)
+  const [imageOptimizationEnabled, setImageOptimizationEnabled] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('lexmedia_image_optimization')
+      if (saved !== null) {
+        return saved === 'true'
+      }
+    }
+    return false
+  })
+
+  const handleToggleOptimization = (enabled: boolean) => {
+    setImageOptimizationEnabled(enabled)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('lexmedia_image_optimization', String(enabled))
+    }
+    toast.success(
+      enabled
+        ? 'Image optimization is now ON (compressed for delivery)'
+        : 'Image optimization is now OFF (retaining original quality & resolution)'
+    )
+  }
+
   // 1. Fetch or create Delivery record for this Project
   useEffect(() => {
     if (!project?.id) return
@@ -235,7 +258,7 @@ export function ProjectDeliveryManager({
         let isOptimized = false
         let finalSize = staged.size
 
-        if (staged.file.type.startsWith('image/')) {
+        if (imageOptimizationEnabled && staged.file.type.startsWith('image/')) {
           setUploadProgress((prev) => ({
             ...prev,
             [staged.id]: { percent: 0, status: 'optimizing' }
@@ -394,8 +417,8 @@ export function ProjectDeliveryManager({
       let uploadFile = rawFile
       let finalSize = rawFile.size
 
-      // 1. Image Optimization if necessary
-      if (rawFile.type.startsWith('image/')) {
+      // 1. Image Optimization if enabled
+      if (imageOptimizationEnabled && rawFile.type.startsWith('image/')) {
         toast.loading(`Optimizing image...`, { id: toastId })
         const optResult = await optimizeImageFile(rawFile)
         if (optResult.optimized) {
@@ -893,6 +916,20 @@ export function ProjectDeliveryManager({
           >
             Expiration
           </Button>
+
+          <button
+            type="button"
+            onClick={() => handleToggleOptimization(!imageOptimizationEnabled)}
+            className={`inline-flex items-center justify-center font-medium transition-all duration-150 rounded-lg gap-1.5 h-8 px-3 text-xs shadow-sm select-none cursor-pointer border ${
+              imageOptimizationEnabled
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
+                : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+            }`}
+            title="Toggle automatic image optimization during upload"
+          >
+            <Sparkles size={13} className={imageOptimizationEnabled ? 'text-emerald-600' : 'text-gray-400'} />
+            <span>Image Optimization: {imageOptimizationEnabled ? 'ON' : 'OFF'}</span>
+          </button>
         </div>
       </div>
 
