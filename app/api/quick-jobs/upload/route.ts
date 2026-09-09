@@ -72,6 +72,24 @@ export async function POST(req: NextRequest) {
             upsert: true,
           })
 
+        // If primary bucket returned bucket not found, try creating it first
+        if (
+          uploadError &&
+          (uploadError.message.toLowerCase().includes('bucket not found') ||
+            uploadError.message.toLowerCase().includes('nosuchbucket'))
+        ) {
+          try {
+            await supabase.storage.createBucket(primaryBucket, { public: true })
+            const retry = await supabase.storage
+              .from(primaryBucket)
+              .upload(storagePath, buffer, {
+                contentType: fileType,
+                upsert: true,
+              })
+            uploadError = retry.error
+          } catch {}
+        }
+
         // If 'Delivery files' bucket has an issue, try fallback bucket variants
         if (uploadError) {
           console.warn(`[Supabase Upload] Primary bucket '${primaryBucket}' error:`, uploadError.message)
@@ -88,8 +106,7 @@ export async function POST(req: NextRequest) {
               })
 
             if (!fbErr) {
-              const { data: fbUrlData } = supabase.storage.from(fbBucket).getPublicUrl(storagePath)
-              downloadUrl = fbUrlData?.publicUrl || ''
+              downloadUrl = `/api/files?id=${fileDocId}`
               fallbackSuccess = true
               console.log(`[Supabase Upload] Successfully stored in fallback bucket '${fbBucket}'`)
               break
@@ -117,11 +134,7 @@ export async function POST(req: NextRequest) {
           }
         } else {
           // Primary bucket succeeded
-          const { data: urlData } = supabase.storage
-            .from(primaryBucket)
-            .getPublicUrl(storagePath)
-
-          downloadUrl = urlData?.publicUrl || `/api/files?id=${fileDocId}`
+          downloadUrl = `/api/files?id=${fileDocId}`
         }
       } catch (storageErr: any) {
         console.error('[Storage Error in Quick Jobs upload]:', storageErr)

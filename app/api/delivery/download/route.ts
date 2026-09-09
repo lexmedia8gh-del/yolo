@@ -131,16 +131,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'File does not belong to this delivery' }, { status: 403 })
     }
 
-    // Clean and normalize download URL to prevent localhost issues
-    let downloadUrl = `/api/files?id=${fileId}`
-    if (
-      fileData.downloadUrl &&
-      !fileData.downloadUrl.includes('localhost') &&
-      !fileData.downloadUrl.includes('127.0.0.1') &&
-      fileData.downloadUrl.startsWith('https://')
-    ) {
-      downloadUrl = fileData.downloadUrl
-    }
+    // Clean and normalize download URL to route through streaming API endpoint
+    const downloadUrl = `/api/files?id=${fileId}`
 
     return NextResponse.json({
       success: true,

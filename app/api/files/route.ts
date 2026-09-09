@@ -65,9 +65,23 @@ export async function GET(req: NextRequest) {
         for (const b of buckets) {
           for (const p of pathsToTry) {
             try {
-              const { data: fileBlob, error: downloadError } = await supabase.storage
+              let { data: fileBlob, error: downloadError } = await supabase.storage
                 .from(b)
                 .download(p)
+
+              // If bucket is missing, attempt auto-creating it
+              if (
+                downloadError &&
+                (downloadError.message.toLowerCase().includes('bucket not found') ||
+                  downloadError.message.toLowerCase().includes('nosuchbucket'))
+              ) {
+                try {
+                  await supabase.storage.createBucket(b, { public: true })
+                  const retry = await supabase.storage.from(b).download(p)
+                  fileBlob = retry.data
+                  downloadError = retry.error
+                } catch {}
+              }
 
               if (fileBlob && !downloadError) {
                 const fileBuffer = Buffer.from(await fileBlob.arrayBuffer())
@@ -79,6 +93,24 @@ export async function GET(req: NextRequest) {
                     'Content-Length': fileBuffer.length.toString(),
                   },
                 })
+              }
+
+              // Fallback: Try signed URL
+              const { data: signedData } = await supabase.storage.from(b).createSignedUrl(p, 3600)
+              if (signedData?.signedUrl) {
+                const signedRes = await fetch(signedData.signedUrl)
+                const cType = signedRes.headers.get('content-type') || ''
+                if (signedRes.ok && !cType.includes('application/json')) {
+                  const signedBuffer = Buffer.from(await signedRes.arrayBuffer())
+                  return new NextResponse(new Uint8Array(signedBuffer), {
+                    status: 200,
+                    headers: {
+                      'Content-Type': mimeType,
+                      'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
+                      'Content-Length': signedBuffer.length.toString(),
+                    },
+                  })
+                }
               }
             } catch {}
           }
@@ -98,7 +130,8 @@ export async function GET(req: NextRequest) {
     ) {
       try {
         const fetchedRes = await fetch(downloadUrl)
-        if (fetchedRes.ok) {
+        const resContentType = fetchedRes.headers.get('content-type') || ''
+        if (fetchedRes.ok && !resContentType.includes('application/json')) {
           const fetchedBuffer = Buffer.from(await fetchedRes.arrayBuffer())
           return new NextResponse(new Uint8Array(fetchedBuffer), {
             status: 200,

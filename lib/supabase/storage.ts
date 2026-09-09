@@ -40,12 +40,27 @@ export async function uploadDeliveryFile({
 
   try {
     const supabase = getSupabaseClient()
-    const { data, error } = await supabase.storage
+    let { data, error } = await supabase.storage
       .from(STORAGE_BUCKETS.DELIVERY_FILES)
       .upload(path, file, {
         contentType,
         upsert,
       })
+
+    if (
+      error &&
+      (error.message.toLowerCase().includes('bucket not found') ||
+        error.message.toLowerCase().includes('nosuchbucket'))
+    ) {
+      try {
+        await supabase.storage.createBucket(STORAGE_BUCKETS.DELIVERY_FILES, { public: true })
+        const retry = await supabase.storage
+          .from(STORAGE_BUCKETS.DELIVERY_FILES)
+          .upload(path, file, { contentType, upsert })
+        data = retry.data
+        error = retry.error
+      } catch {}
+    }
 
     if (error) {
       console.error('[Supabase Storage] Upload error:', error.message, error)
@@ -55,11 +70,12 @@ export async function uploadDeliveryFile({
       return { data: null, error: new Error(formattedMsg) }
     }
 
+    const resPath = data?.path || path
     const { data: urlData } = supabase.storage
       .from(STORAGE_BUCKETS.DELIVERY_FILES)
-      .getPublicUrl(data.path)
+      .getPublicUrl(resPath)
 
-    return { data: { path: data.path, id: data.id, publicUrl: urlData?.publicUrl }, error: null }
+    return { data: { path: resPath, id: data?.id, publicUrl: urlData?.publicUrl }, error: null }
   } catch (err: any) {
     console.error('[Supabase Storage] Unexpected upload error:', err)
     return { data: null, error: err instanceof Error ? err : new Error(String(err?.message || err)) }

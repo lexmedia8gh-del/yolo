@@ -49,12 +49,29 @@ export async function POST(req: NextRequest) {
 
       // Secure server-side upload directly to Supabase Storage (no local filesystem)
       const supabase = getSupabaseServerClient()
-      const { error: uploadError } = await supabase.storage
+      let { error: uploadError } = await supabase.storage
         .from('Delivery files')
         .upload(storagePath, buffer, {
           contentType: file ? (file.type || 'application/octet-stream') : 'application/octet-stream',
           upsert: true
         })
+
+      if (
+        uploadError &&
+        (uploadError.message.toLowerCase().includes('bucket not found') ||
+          uploadError.message.toLowerCase().includes('nosuchbucket'))
+      ) {
+        try {
+          await supabase.storage.createBucket('Delivery files', { public: true })
+          const retry = await supabase.storage
+            .from('Delivery files')
+            .upload(storagePath, buffer, {
+              contentType: file ? (file.type || 'application/octet-stream') : 'application/octet-stream',
+              upsert: true,
+            })
+          uploadError = retry.error
+        } catch {}
+      }
 
       if (uploadError) {
         console.error('[Supabase Server Upload Error] Upload failed:', uploadError)
@@ -64,12 +81,7 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      // Fetch the public URL of the uploaded object
-      const { data: urlData } = supabase.storage
-        .from('Delivery files')
-        .getPublicUrl(storagePath)
-
-      downloadUrl = urlData?.publicUrl || ''
+      downloadUrl = `/api/files?id=${id}`
     }
 
     const fileName = directUrl ? directFileName : (file ? file.name : '')
