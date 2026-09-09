@@ -10,7 +10,8 @@ import {
   AlertCircle,
   FileText,
   X,
-  CreditCard
+  CreditCard,
+  ExternalLink
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -233,6 +234,15 @@ export function QuickJobPaymentDelivery({ job, onUpdate }: QuickJobPaymentDelive
                 <Input value={paymentLink} readOnly className="text-xs font-mono bg-white dark:bg-gray-900" />
                 <Button variant="outline" size="sm" onClick={handleCopyLink} title="Copy Link" className="w-10 p-0">
                   <Copy className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.open(paymentLink, '_blank')}
+                  title="Open Payment Portal"
+                  className="w-10 p-0"
+                >
+                  <ExternalLink className="w-4 h-4" />
                 </Button>
               </div>
             </div>

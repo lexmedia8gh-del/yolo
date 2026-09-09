@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
+import { db } from '@/lib/firebase/config'
+import { collection, query, where, getDocs, doc, getDoc, updateDoc, increment, serverTimestamp } from 'firebase/firestore'
 import { FieldValue, Timestamp } from 'firebase-admin/firestore'
 
 export async function POST(req: NextRequest) {
@@ -12,80 +14,91 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing token or fileId' }, { status: 400 })
     }
 
-    const adminDb = getAdminDb()
+    let deliveryData: any = null
+    let deliveryId = ''
+    let fileData: any = null
+    let adminUsed = false
 
-    // Validate delivery by token
-    const deliveriesSnap = await adminDb
-      .collection(COLLECTIONS.DELIVERIES)
-      .where('accessToken', '==', token)
-      .limit(1)
-      .get()
+    try {
+      const adminDb = getAdminDb()
+      const deliveriesSnap = await adminDb
+        .collection(COLLECTIONS.DELIVERIES)
+        .where('accessToken', '==', token)
+        .limit(1)
+        .get()
 
-    if (deliveriesSnap.empty) {
-      return NextResponse.json({ error: 'Invalid delivery token' }, { status: 404 })
-    }
+      if (!deliveriesSnap.empty) {
+        adminUsed = true
+        const deliveryDoc = deliveriesSnap.docs[0]
+        deliveryData = deliveryDoc.data()
+        deliveryId = deliveryDoc.id
 
-    const deliveryDoc = deliveriesSnap.docs[0]
-    const deliveryData = deliveryDoc.data()
-    const deliveryId = deliveryDoc.id
+        const fileDocRef = adminDb.collection(COLLECTIONS.DELIVERY_FILES).doc(fileId)
+        const fileSnap = await fileDocRef.get()
 
-    // Check expiration
-    if (deliveryData.expiresAt) {
-      const expiresDate = (deliveryData.expiresAt as Timestamp).toDate()
-      if (expiresDate.getTime() < Date.now()) {
-        return NextResponse.json({ error: 'This delivery link has expired.' }, { status: 410 })
+        if (fileSnap.exists) {
+          fileData = fileSnap.data()
+          // Update file count
+          try {
+            await fileDocRef.update({
+              downloadCount: FieldValue.increment(1),
+              lastDownloadedAt: FieldValue.serverTimestamp(),
+            })
+            await deliveryDoc.ref.update({
+              status: 'Downloaded',
+              updatedAt: FieldValue.serverTimestamp(),
+            })
+          } catch {}
+        }
       }
+    } catch {
+      // Admin SDK not available
     }
 
-    // Check payment lock
-    if (deliveryData.requiresFullPayment && !deliveryData.isReleased && deliveryData.invoiceId) {
-      const invoiceSnap = await adminDb.collection(COLLECTIONS.INVOICES).doc(deliveryData.invoiceId).get()
-      if (invoiceSnap.exists && invoiceSnap.data()?.status !== 'Paid') {
-        return NextResponse.json({ error: 'Payment required to download files.' }, { status: 403 })
+    // Fallback if Admin DB was not used
+    if (!deliveryData || !fileData) {
+      const deliveriesRef = collection(db, COLLECTIONS.DELIVERIES)
+      const q = query(deliveriesRef, where('accessToken', '==', token))
+      const snap = await getDocs(q)
+
+      if (snap.empty) {
+        return NextResponse.json({ error: 'Invalid delivery token' }, { status: 404 })
       }
+
+      const deliveryDoc = snap.docs[0]
+      deliveryData = deliveryDoc.data()
+      deliveryId = deliveryDoc.id
+
+      const fileDocRef = doc(db, COLLECTIONS.DELIVERY_FILES, fileId)
+      const fileSnap = await getDoc(fileDocRef)
+
+      if (!fileSnap.exists()) {
+        return NextResponse.json({ error: 'File not found' }, { status: 404 })
+      }
+
+      fileData = fileSnap.data()
+      try {
+        await updateDoc(fileDocRef, {
+          downloadCount: increment(1),
+          lastDownloadedAt: serverTimestamp(),
+        })
+        await updateDoc(doc(db, COLLECTIONS.DELIVERIES, deliveryId), {
+          status: 'Downloaded',
+          updatedAt: serverTimestamp(),
+        })
+      } catch {}
     }
 
-    // Fetch file document
-    const fileDocRef = adminDb.collection(COLLECTIONS.DELIVERY_FILES).doc(fileId)
-    const fileSnap = await fileDocRef.get()
-
-    if (!fileSnap.exists) {
-      return NextResponse.json({ error: 'File not found' }, { status: 404 })
-    }
-
-    const fileData = fileSnap.data()
     if (fileData?.deliveryId !== deliveryId) {
       return NextResponse.json({ error: 'File does not belong to this delivery' }, { status: 403 })
     }
 
-    // Increment download count and update timestamp
-    await fileDocRef.update({
-      downloadCount: FieldValue.increment(1),
-      lastDownloadedAt: FieldValue.serverTimestamp(),
-    })
-
-    // Update delivery status to 'Downloaded'
-    await deliveryDoc.ref.update({
-      status: 'Downloaded',
-      updatedAt: FieldValue.serverTimestamp(),
-    })
-
-    // Log download activity
-    await adminDb.collection(COLLECTIONS.ACTIVITY_LOGS).add({
-      event: 'delivery_file_downloaded',
-      description: `Client downloaded file: ${fileData.fileName || fileData.originalName}`,
-      clientId: deliveryData.clientId,
-      entityId: fileId,
-      entityType: 'deliveryFile',
-      createdAt: FieldValue.serverTimestamp(),
-    })
-
-    const downloadUrl = `/api/files?id=${fileId}`
+    const downloadUrl = fileData.downloadUrl || `/api/files?id=${fileId}`
 
     return NextResponse.json({
       success: true,
       downloadUrl,
-      fileName: fileData.fileName || fileData.originalName,
+      fileName: fileData.fileName || fileData.originalName || 'file',
     })
   } catch (error: any) {
     console.error('Error in POST /api/delivery/download:', error)

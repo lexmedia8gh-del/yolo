@@ -20,6 +20,17 @@ const AUTH_PATHS = ['/login']
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
+  // Unconditionally allow public portal routes: /pay/*, /p/*, /payment/*, /delivery/*, /d/*
+  if (
+    pathname.startsWith('/pay') ||
+    pathname.startsWith('/p/') ||
+    pathname.startsWith('/payment') ||
+    pathname.startsWith('/delivery') ||
+    pathname.startsWith('/d/')
+  ) {
+    return NextResponse.next()
+  }
+
   // Check for Firebase auth session cookie
   const sessionCookie = request.cookies.get('__session')
   const isAuthenticated = !!sessionCookie?.value
@@ -56,8 +67,8 @@ export const config = {
      * - favicon.ico
      * - public folder files
      * - API routes (handled separately)
-     * - Public client pages /p/*, /pay/*, /delivery/*, /d/* (always accessible)
+     * - Public client pages /p/*, /pay/*, /payment/*, /delivery/*, /d/* (always accessible)
      */
-    '/((?!_next/static|_next/image|favicon.ico|public|api|p/|pay/|delivery/|d/).*)',
+    '/((?!_next/static|_next/image|favicon.ico|public|api|p/|pay/|payment/|delivery/|d/).*)',
   ],
 }

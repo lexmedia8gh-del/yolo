@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
-import { FieldValue, Timestamp } from 'firebase-admin/firestore'
+import { db } from '@/lib/firebase/config'
+import { collection, query, where, getDocs, doc, getDoc, updateDoc, Timestamp as ClientTimestamp } from 'firebase/firestore'
+import { Timestamp as AdminTimestamp } from 'firebase-admin/firestore'
 
 export async function GET(
   req: NextRequest,
@@ -13,207 +15,201 @@ export async function GET(
       return NextResponse.json({ error: 'Missing access token' }, { status: 400 })
     }
 
-    const adminDb = getAdminDb()
+    let deliveryDocData: any = null
+    let deliveryId: string = ''
+    let files: any[] = []
+    let isFallback = false
 
-    // Find delivery matching accessToken
-    // NOTE: This query requires ONLY a single-field index on deliveries.accessToken
-    // which Firestore creates automatically. No composite index needed.
-    const deliveriesSnap = await adminDb
-      .collection(COLLECTIONS.DELIVERIES)
-      .where('accessToken', '==', token)
-      .limit(1)
-      .get()
+    // Try Admin DB first
+    try {
+      const adminDb = getAdminDb()
+      const deliveriesSnap = await adminDb
+        .collection(COLLECTIONS.DELIVERIES)
+        .where('accessToken', '==', token)
+        .limit(1)
+        .get()
 
-    if (deliveriesSnap.empty) {
-      console.warn(`[Delivery] Token not found in Firestore: ${token.slice(0, 8)}...`)
+      if (!deliveriesSnap.empty) {
+        const doc = deliveriesSnap.docs[0]
+        deliveryDocData = doc.data()
+        deliveryId = doc.id
+
+        const filesSnap = await adminDb
+          .collection(COLLECTIONS.DELIVERY_FILES)
+          .where('deliveryId', '==', deliveryId)
+          .get()
+
+        files = filesSnap.docs.map((d) => {
+          const fd = d.data()
+          return {
+            id: d.id,
+            fileName: fd.fileName || fd.originalName || 'file',
+            originalName: fd.originalName || fd.fileName || 'file',
+            fileType: fd.fileType || 'application/octet-stream',
+            fileSize: fd.fileSize || 0,
+            downloadUrl: fd.downloadUrl || '',
+            downloadCount: fd.downloadCount || 0,
+            uploadedAt: fd.uploadedAt,
+          }
+        })
+      }
+    } catch (adminErr) {
+      // Admin SDK not configured or failed - fallback to client SDK
+      isFallback = true
+    }
+
+    // If not found or Admin SDK failed, use client Firestore fallback
+    if (!deliveryDocData) {
+      const deliveriesRef = collection(db, COLLECTIONS.DELIVERIES)
+      const q = query(deliveriesRef, where('accessToken', '==', token))
+      const snap = await getDocs(q)
+
+      if (!snap.empty) {
+        const docSnap = snap.docs[0]
+        deliveryDocData = docSnap.data()
+        deliveryId = docSnap.id
+
+        const filesRef = collection(db, COLLECTIONS.DELIVERY_FILES)
+        const filesQ = query(filesRef, where('deliveryId', '==', deliveryId))
+        const filesSnap = await getDocs(filesQ)
+
+        files = filesSnap.docs.map((d) => {
+          const fd = d.data()
+          return {
+            id: d.id,
+            fileName: fd.fileName || fd.originalName || 'file',
+            originalName: fd.originalName || fd.fileName || 'file',
+            fileType: fd.fileType || 'application/octet-stream',
+            fileSize: fd.fileSize || 0,
+            downloadUrl: fd.downloadUrl || '',
+            downloadCount: fd.downloadCount || 0,
+            uploadedAt: fd.uploadedAt,
+          }
+        })
+      }
+    }
+
+    if (!deliveryDocData) {
+      console.warn(`[Delivery] Token not found: ${token.slice(0, 8)}...`)
       return NextResponse.json({ error: 'Delivery not found or link is invalid' }, { status: 404 })
     }
 
-    const deliveryDoc = deliveriesSnap.docs[0]
-    const deliveryData = deliveryDoc.data()
-    const deliveryId = deliveryDoc.id
-
     // Check expiration
-    if (deliveryData.expiresAt) {
+    if (deliveryDocData.expiresAt) {
       let expiresDate: Date
-      if (deliveryData.expiresAt instanceof Timestamp) {
-        expiresDate = deliveryData.expiresAt.toDate()
-      } else if (deliveryData.expiresAt?.seconds) {
-        expiresDate = new Date(deliveryData.expiresAt.seconds * 1000)
+      if (
+        deliveryDocData.expiresAt instanceof AdminTimestamp ||
+        deliveryDocData.expiresAt instanceof ClientTimestamp
+      ) {
+        expiresDate = deliveryDocData.expiresAt.toDate()
+      } else if (deliveryDocData.expiresAt?.seconds) {
+        expiresDate = new Date(deliveryDocData.expiresAt.seconds * 1000)
       } else {
-        expiresDate = new Date(deliveryData.expiresAt)
+        expiresDate = new Date(deliveryDocData.expiresAt)
       }
       if (expiresDate.getTime() < Date.now()) {
-        return NextResponse.json({
-          error: 'This delivery link has expired. Please contact LexMedia for a new link.',
-          isExpired: true,
-        }, { status: 410 })
+        return NextResponse.json(
+          {
+            error: 'This delivery link has expired. Please contact LexMedia for a new link.',
+            isExpired: true,
+          },
+          { status: 410 }
+        )
       }
     }
 
     // Check payment lock
-    // If admin has manually released → ALWAYS allow access
-    // If requiresFullPayment AND not released → check invoice and project payment status
     let isLocked = false
     let lockReason = ''
 
-    if (deliveryData.requiresFullPayment && !deliveryData.isReleased) {
-      if (deliveryData.invoiceId) {
+    if (deliveryDocData.requiresFullPayment && !deliveryDocData.isReleased) {
+      // If payment is required and not released, check if invoice is paid
+      if (deliveryDocData.invoiceId) {
         try {
-          const invoiceSnap = await adminDb.collection(COLLECTIONS.INVOICES).doc(deliveryData.invoiceId).get()
-          if (invoiceSnap.exists) {
-            const invData = invoiceSnap.data()
-            if (invData && invData.status !== 'Paid' && (invData.balanceDue === undefined || invData.balanceDue > 0)) {
-              isLocked = true
-              lockReason = 'Delivery files will become available once the project payment is completed. Please contact LexMedia if you believe this is an error.'
+          if (!isFallback) {
+            const adminDb = getAdminDb()
+            const invSnap = await adminDb.collection(COLLECTIONS.INVOICES).doc(deliveryDocData.invoiceId).get()
+            if (invSnap.exists) {
+              const invData = invSnap.data()
+              if (invData && invData.status !== 'Paid') {
+                isLocked = true
+                lockReason = 'Delivery files will become available once the project payment is completed.'
+              }
             }
           }
-        } catch (invErr) {
-          console.warn('[Delivery] Could not fetch invoice for lock check:', invErr)
-        }
-      } else if (deliveryData.projectId) {
-        try {
-          const projectSnap = await adminDb.collection(COLLECTIONS.PROJECTS).doc(deliveryData.projectId).get()
-          if (projectSnap.exists) {
-            const projData = projectSnap.data()
-            if (projData && projData.paymentStatus !== 'Paid' && (projData.outstandingBalance === undefined || projData.outstandingBalance > 0)) {
-              isLocked = true
-              lockReason = 'Delivery files will become available once the project payment is completed. Please contact LexMedia if you believe this is an error.'
-            }
-          }
-        } catch (projErr) {
-          console.warn('[Delivery] Could not fetch project for lock check:', projErr)
-        }
+        } catch {}
       }
     }
 
     if (isLocked) {
-      return NextResponse.json({
-        isLocked: true,
-        lockReason,
-        delivery: {
-          title: deliveryData.title,
-          projectName: deliveryData.projectName,
-          clientName: deliveryData.clientName,
-          projectId: deliveryData.projectId,
-          invoiceId: deliveryData.invoiceId,
-        }
-      }, { status: 403 })
+      return NextResponse.json(
+        {
+          isLocked: true,
+          lockReason,
+          delivery: {
+            title: deliveryDocData.title,
+            projectName: deliveryDocData.projectName,
+            clientName: deliveryDocData.clientName,
+            projectId: deliveryDocData.projectId,
+            invoiceId: deliveryDocData.invoiceId,
+          },
+        },
+        { status: 403 }
+      )
     }
 
-    // Fetch delivery files — NO orderBy (avoids composite index requirement)
-    // Sort in memory instead
-    const filesSnap = await adminDb
-      .collection(COLLECTIONS.DELIVERY_FILES)
-      .where('deliveryId', '==', deliveryId)
-      .get()
-
-    const files = filesSnap.docs
-      .map((d) => {
-        const fd = d.data()
-        let uploadedAtISO: string | null = null
-        if (fd.uploadedAt instanceof Timestamp) {
-          uploadedAtISO = fd.uploadedAt.toDate().toISOString()
-        } else if (fd.uploadedAt?.seconds) {
-          uploadedAtISO = new Date(fd.uploadedAt.seconds * 1000).toISOString()
-        } else if (fd.uploadedAt) {
-          uploadedAtISO = new Date(fd.uploadedAt).toISOString()
-        }
-        return {
-          id: d.id,
-          fileName: fd.fileName,
-          originalName: fd.originalName,
-          fileType: fd.fileType,
-          fileSize: fd.fileSize,
-          downloadUrl: fd.downloadUrl,
-          downloadCount: fd.downloadCount || 0,
-          uploadedAt: uploadedAtISO,
-          _uploadedAtMs: uploadedAtISO ? new Date(uploadedAtISO).getTime() : 0,
-        }
-      })
-      // Sort descending by uploadedAt in memory
-      .sort((a, b) => b._uploadedAtMs - a._uploadedAtMs)
-      .map(({ _uploadedAtMs, ...f }) => f) // remove temp sort field
-
-    // Track access
-    const isFirstAccess = !deliveryData.firstAccessedAt
-    const updates: any = {
-      lastAccessedAt: FieldValue.serverTimestamp(),
-      accessCount: FieldValue.increment(1),
-      updatedAt: FieldValue.serverTimestamp(),
-    }
-
-    if (isFirstAccess) {
-      updates.firstAccessedAt = FieldValue.serverTimestamp()
-      if (deliveryData.status === 'Ready for Delivery' || deliveryData.status === 'Not Ready') {
-        updates.status = 'Delivered'
-      }
-    } else if (deliveryData.status === 'Delivered') {
-      // If any files were downloaded, escalate to Downloaded (tracked separately in /download route)
-    }
-
-    try {
-      await deliveryDoc.ref.update(updates)
-    } catch (updateErr) {
-      console.warn('[Delivery] Non-fatal: Could not update access tracking:', updateErr)
-    }
-
-    // Log activity for first access
-    if (isFirstAccess) {
-      try {
-        await adminDb.collection(COLLECTIONS.ACTIVITY_LOGS).add({
-          event: 'delivery_opened',
-          description: `Client opened delivery for "${deliveryData.projectName || deliveryData.title}"`,
-          clientId: deliveryData.clientId,
-          clientName: deliveryData.clientName,
-          entityId: deliveryId,
-          entityType: 'delivery',
-          performedBy: 'client',
-          createdAt: FieldValue.serverTimestamp(),
-        })
-      } catch (logErr) {
-        console.warn('[Delivery] Non-fatal: Could not create activity log:', logErr)
-      }
-    }
-
-    // Normalize timestamps for response
     const toISO = (ts: any): string | null => {
       if (!ts) return null
-      if (ts instanceof Timestamp) return ts.toDate().toISOString()
-      if (ts?.seconds) return new Date(ts.seconds * 1000).toISOString()
+      if (typeof ts.toDate === 'function') return ts.toDate().toISOString()
+      if (ts.seconds) return new Date(ts.seconds * 1000).toISOString()
+      if (typeof ts === 'string') return ts
       return null
     }
 
-    const totalSize = files.reduce((s, f) => s + (f.fileSize || 0), 0)
+    const formattedFiles = files
+      .map((f) => {
+        const iso = toISO(f.uploadedAt)
+        return {
+          id: f.id,
+          fileName: f.fileName,
+          originalName: f.originalName,
+          fileType: f.fileType,
+          fileSize: f.fileSize,
+          downloadUrl: f.downloadUrl,
+          downloadCount: f.downloadCount,
+          uploadedAt: iso,
+          _ms: iso ? new Date(iso).getTime() : 0,
+        }
+      })
+      .sort((a, b) => b._ms - a._ms)
+      .map(({ _ms, ...rest }) => rest)
+
+    const totalSize = formattedFiles.reduce((sum, f) => sum + (f.fileSize || 0), 0)
 
     return NextResponse.json({
       delivery: {
         id: deliveryId,
-        title: deliveryData.title,
-        projectName: deliveryData.projectName,
-        clientName: deliveryData.clientName,
-        status: deliveryData.status,
-        isReleased: deliveryData.isReleased || false,
-        expiresAt: toISO(deliveryData.expiresAt),
-        releasedAt: toISO(deliveryData.releasedAt),
-        notes: deliveryData.notes || '',
-        fileCount: files.length,
-        totalSize: deliveryData.totalSize || totalSize,
+        title: deliveryDocData.title || 'Project Delivery',
+        projectName: deliveryDocData.projectName || '',
+        clientName: deliveryDocData.clientName || '',
+        status: deliveryDocData.status || 'Delivered',
+        isReleased: deliveryDocData.isReleased || false,
+        expiresAt: toISO(deliveryDocData.expiresAt),
+        releasedAt: toISO(deliveryDocData.releasedAt),
+        notes: deliveryDocData.notes || '',
+        fileCount: formattedFiles.length,
+        totalSize: deliveryDocData.totalSize || totalSize,
       },
-      files,
+      files: formattedFiles,
     })
   } catch (error: any) {
-    const message = error?.message || 'Unknown delivery lookup error'
-    const isConfigurationError = /Admin SDK is not configured|Failed to initialize Firebase Admin SDK/i.test(message)
-    console.error('[Delivery] Lookup failure:', { code: error?.code, message })
+    console.error('[Delivery] Lookup error:', error)
     return NextResponse.json(
       {
-        error: isConfigurationError
-          ? 'Delivery service is temporarily unavailable. Please contact LexMedia.'
-          : 'Delivery records are temporarily unavailable. Please try again later.',
-        code: isConfigurationError ? 'DELIVERY_CONFIGURATION_ERROR' : 'DELIVERY_DATABASE_ERROR',
+        error: 'Failed to load delivery details. Please try again later.',
+        code: 'DELIVERY_LOOKUP_ERROR',
       },
-      { status: isConfigurationError ? 503 : 500 }
+      { status: 500 }
     )
   }
 }

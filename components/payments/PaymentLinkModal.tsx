@@ -137,7 +137,7 @@ export function PaymentLinkModal({
   }, [currentInvoice, currentProject])
 
   const getEffectiveUrl = (token?: string, url?: string) => {
-    if (url && !url.includes('localhost') && !url.includes('127.0.0.1')) return url
+    if (url && !url.includes('localhost') && !url.includes('127.0.0.1') && !url.includes('vercel.app')) return url
     return getPaymentLink(token || 'sample')
   }
 

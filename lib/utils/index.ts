@@ -316,42 +316,49 @@ export async function copyToClipboard(text: string): Promise<boolean> {
  *    Prefers non-localhost URLs and forbids falling back to localhost in production.
  */
 export function getAppUrl(): string {
-  // 1. Official domain from environment (highest priority for generated links)
-  const envAppUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL
-  if (envAppUrl && !envAppUrl.includes('localhost') && !envAppUrl.includes('127.0.0.1')) {
-    const normalized = envAppUrl.startsWith('http') ? envAppUrl : `https://${envAppUrl}`
-    return normalized.replace(/\/$/, '')
-  }
-
-  // 2. Browser context: fallback to window location
+  // 1. Browser context: Authoritative for client-side interactions in the web app
+  // This guarantees links generated or clicked in the browser open directly on this web app
   if (typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin.replace(/\/$/, '')
+    const origin = window.location.origin.replace(/\/$/, '')
+    if (origin) return origin
   }
 
-  // 3. Server context: fallback to Vercel URLs
+  // 2. Server context: Use configured APP_URL or NEXT_PUBLIC_APP_URL
+  const configuredAppUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL
+  if (configuredAppUrl) {
+    const trimmed = configuredAppUrl.trim()
+    if (
+      trimmed &&
+      !trimmed.includes('localhost') &&
+      !trimmed.includes('127.0.0.1') &&
+      !trimmed.includes('vercel.app')
+    ) {
+      const normalized = trimmed.startsWith('http') ? trimmed : `https://${trimmed}`
+      return normalized.replace(/\/$/, '')
+    }
+  }
+
+  // 3. Server context fallback: check candidate URLs (excluding vercel.app and localhost)
   const candidateUrls = [
+    process.env.APP_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
     process.env.NEXT_PUBLIC_VERCEL_URL,
     process.env.VERCEL_URL,
   ].filter(Boolean) as string[]
 
-  // In production or when candidate URLs exist, prefer non-localhost entries
-  const nonLocalhost = candidateUrls.find(
-    (u) => !u.includes('localhost') && !u.includes('127.0.0.1')
+  const nonVercel = candidateUrls.find(
+    (u) =>
+      !u.includes('vercel.app') &&
+      !u.includes('localhost') &&
+      !u.includes('127.0.0.1')
   )
-
-  const selectedUrl = nonLocalhost || candidateUrls[0]
+  const selectedUrl = nonVercel || candidateUrls[0]
 
   if (selectedUrl) {
     const normalized = selectedUrl.startsWith('http')
       ? selectedUrl
       : `https://${selectedUrl}`
     return normalized.replace(/\/$/, '')
-  }
-
-  // Server-side in production without environment variables must fail clearly
-  if (process.env.NODE_ENV === 'production') {
-    console.error('ERROR: Production environment is missing APP_URL or NEXT_PUBLIC_APP_URL configuration.')
-    throw new Error('APP_URL is not configured for production. Please set APP_URL in your hosting platform environment.')
   }
 
   // Local development default fallback

@@ -21,8 +21,6 @@ import { Spinner } from '@/components/ui/Spinner'
 import {
   COLLECTIONS,
   getDocuments,
-  updateDocument,
-  addDocument,
 } from '@/lib/firebase/firestore'
 import type { ClientLink, Invoice } from '@/lib/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -45,7 +43,6 @@ function PublicPaymentPageInner() {
   const searchParams = useSearchParams()
   const token = (params?.token as string) || ''
   const refQuery = searchParams?.get('reference')
-  const isMockParam = searchParams?.get('mock')
   const { branding } = useBranding()
 
   const [linkData, setLinkData] = useState<ClientLink | null>(null)
@@ -61,8 +58,30 @@ function PublicPaymentPageInner() {
 
     async function loadPaymentDetails() {
       try {
+        // 1. Try server API first (bypasses client security rule restrictions and guarantees invoice lookup)
+        const res = await fetch(`/api/pay/${encodeURIComponent(token)}`)
+        if (res.ok) {
+          const apiData = await res.json()
+          if (apiData?.success && apiData.link) {
+            setLinkData(apiData.link)
+            if (apiData.invoice) {
+              setInvoiceData(apiData.invoice)
+            }
+            if (apiData.isAlreadyPaid) {
+              setPaymentSuccess(true)
+            }
+
+            if (refQuery) {
+              await verifyPaystackTransaction(refQuery, apiData.link)
+            }
+            setLoading(false)
+            return
+          }
+        }
+
+        // 2. Client-side fallback if server API is unreachable or returned 404
         const allLinks = await getDocuments<ClientLink>(COLLECTIONS.CLIENT_LINKS)
-        const match = allLinks.find((l) => l.token === token)
+        const match = allLinks.find((l) => l.token === token || l.id === token)
 
         if (!match) {
           setErrorMsg('This payment link is invalid or does not exist.')
@@ -71,15 +90,23 @@ function PublicPaymentPageInner() {
         }
 
         setLinkData(match)
+        if (match.status === 'Paid' || match.paymentStatus === 'Paid') {
+          setPaymentSuccess(true)
+        }
 
+        // Safe invoice lookup: do not throw or crash if invoice is restricted
         if (match.invoiceId) {
-          const allInvoices = await getDocuments<Invoice>(COLLECTIONS.INVOICES)
-          const inv = allInvoices.find((i) => i.id === match.invoiceId)
-          if (inv) {
-            setInvoiceData(inv)
-            if (inv.status === 'Paid') {
-              setPaymentSuccess(true)
+          try {
+            const allInvoices = await getDocuments<Invoice>(COLLECTIONS.INVOICES)
+            const inv = allInvoices.find((i) => i.id === match.invoiceId)
+            if (inv) {
+              setInvoiceData(inv)
+              if (inv.status === 'Paid') {
+                setPaymentSuccess(true)
+              }
             }
+          } catch {
+            // Unauthenticated users cannot read invoices directly; ignore gracefully
           }
         }
 
@@ -100,7 +127,9 @@ function PublicPaymentPageInner() {
   const verifyPaystackTransaction = async (reference: string, link: ClientLink) => {
     setIsProcessing(true)
     try {
-      const res = await fetch(`/api/paystack/verify?reference=${encodeURIComponent(reference)}&token=${encodeURIComponent(token)}`)
+      const res = await fetch(
+        `/api/paystack/verify?reference=${encodeURIComponent(reference)}&token=${encodeURIComponent(token)}`
+      )
       const data = await res.json()
 
       if (res.ok && data.status === 'success') {
@@ -127,7 +156,9 @@ function PublicPaymentPageInner() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token: linkData.token,
-          email: linkData.clientName ? `${linkData.clientName.toLowerCase().replace(/\s+/g, '')}@client.com` : 'client@lexmedia.com',
+          email: linkData.clientName
+            ? `${linkData.clientName.toLowerCase().replace(/\s+/g, '')}@client.com`
+            : 'client@lexmedia.com',
           amount: linkData.amount,
           invoiceNumber: linkData.invoiceNumber,
           clientName: linkData.clientName,
@@ -170,12 +201,12 @@ function PublicPaymentPageInner() {
     return (
       <PageEnter>
         <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-          <ErrorReveal className="w-full max-w-md bg-white p-8 rounded-3xl border border-border shadow-modal text-center space-y-4">
-            <div className="w-14 h-14 rounded-2xl bg-danger-50 text-danger-600 flex items-center justify-center mx-auto">
+          <ErrorReveal className="w-full max-w-md bg-white p-8 rounded-3xl border border-gray-200 shadow-lg text-center space-y-4">
+            <div className="w-14 h-14 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center mx-auto">
               <AlertCircle size={28} />
             </div>
             <h2 className="text-xl font-bold text-gray-900">Payment Request Unavailable</h2>
-            <p className="text-sm text-muted leading-relaxed">
+            <p className="text-sm text-gray-600 leading-relaxed">
               {errorMsg || 'This payment link has expired, been revoked, or is invalid.'}
             </p>
           </ErrorReveal>
@@ -184,7 +215,11 @@ function PublicPaymentPageInner() {
     )
   }
 
-  const isAlreadyPaid = paymentSuccess || linkData.status === 'Paid' || (invoiceData && invoiceData.status === 'Paid')
+  const isAlreadyPaid =
+    paymentSuccess ||
+    linkData.status === 'Paid' ||
+    linkData.paymentStatus === 'Paid' ||
+    (invoiceData && invoiceData.status === 'Paid')
   const isCancelled = linkData.status === 'Cancelled'
 
   return (
@@ -209,7 +244,7 @@ function PublicPaymentPageInner() {
               </div>
             )}
             <h1 className="text-2xl font-bold tracking-tight" style={{ color: branding.textColor || '#111827' }}>
-              {(branding.businessName || 'LEXMEDIA').toUpperCase()}
+              {(branding.businessName || 'CTRL ROOM').toUpperCase()}
             </h1>
             <p className="text-xs uppercase font-semibold tracking-wider" style={{ color: branding.mutedTextColor || '#6B7280' }}>
               Official Payment Portal
@@ -218,116 +253,152 @@ function PublicPaymentPageInner() {
 
           {/* Card Body */}
           <CardReveal delay={0.12}>
-            <Card className="p-6 sm:p-8 space-y-6 shadow-modal border-border bg-white rounded-3xl">
-              {isCancelled ? (
-                <ErrorReveal className="text-center py-6 space-y-3">
-                  <div className="w-12 h-12 rounded-2xl bg-gray-100 text-gray-500 flex items-center justify-center mx-auto">
-                    <AlertCircle size={24} />
-                  </div>
-                  <h3 className="font-bold text-gray-900 text-lg">Link Cancelled</h3>
-                  <p className="text-sm text-muted">This payment link has been revoked by Lexmedia admin.</p>
-                </ErrorReveal>
-              ) : isAlreadyPaid ? (
-                <SuccessReveal className="text-center py-6 space-y-3">
-                  <div className="w-16 h-16 rounded-full bg-success-50 text-success-600 flex items-center justify-center mx-auto">
-                    <CheckCircle2 size={36} />
-                  </div>
-                  <Badge variant="success" size="md">
-                    Payment Complete
-                  </Badge>
-                  <h2 className="text-2xl font-bold text-gray-900 mt-2">Thank You!</h2>
-                  <p className="text-sm text-muted max-w-sm mx-auto">
-                    Payment for invoice <span className="font-semibold text-gray-900">{linkData.invoiceNumber}</span> has been completed successfully.
-                  </p>
-                  <div className="pt-4 text-xs text-muted border-t border-border">
-                    Transaction Ref: <code className="font-mono text-gray-700">{refQuery || 'Verified'}</code>
-                  </div>
-                </SuccessReveal>
-              ) : (
-                <StaggerContainer delayStart={0.05} className="space-y-6">
+            <Card className="border border-gray-200/80 shadow-xl shadow-gray-200/40 rounded-3xl overflow-hidden bg-white">
+              <div className="p-6 sm:p-8 space-y-6">
 
-                  {/* Client / Invoice header */}
+                {/* Amount Header Banner */}
+                <div className="text-center p-6 rounded-2xl bg-gradient-to-b from-gray-50 to-white border border-gray-100 space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    {isAlreadyPaid ? 'Amount Paid' : 'Total Amount Due'}
+                  </span>
+                  <div className="text-4xl sm:text-5xl font-extrabold tracking-tight text-gray-900 font-mono">
+                    {formatCurrency(linkData.amount || 0, linkData.currency)}
+                  </div>
+                  <div className="pt-2 flex justify-center">
+                    {isAlreadyPaid ? (
+                      <Badge variant="success" className="px-3 py-1 font-semibold text-xs gap-1.5 shadow-sm">
+                        <CheckCircle2 size={13} className="text-emerald-500" /> Payment Complete
+                      </Badge>
+                    ) : isCancelled ? (
+                      <Badge variant="danger" className="px-3 py-1 font-semibold text-xs">
+                        Cancelled
+                      </Badge>
+                    ) : (
+                      <Badge variant="warning" className="px-3 py-1 font-semibold text-xs gap-1.5 shadow-sm">
+                        <Clock size={13} /> Awaiting Payment
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+
+                {/* Summary Metadata */}
+                <StaggerContainer delayStart={0.18} className="space-y-3 pt-2">
                   <StaggerItem>
-                    <div className="flex items-center justify-between border-b border-border pb-4">
-                      <div>
-                        <p className="text-xs text-muted">Billed To</p>
-                        <p className="text-lg font-bold text-gray-900">{linkData.clientName}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs text-muted">Invoice Number</p>
-                        <p className="font-mono font-bold text-accent-700">{linkData.invoiceNumber || 'LXM-INV'}</p>
-                      </div>
+                    <div className="flex items-center justify-between text-sm py-2 border-b border-gray-100">
+                      <span className="text-gray-500 flex items-center gap-2">
+                        <Building2 size={16} className="text-gray-400" /> Client
+                      </span>
+                      <span className="font-semibold text-gray-900">{linkData.clientName || 'Valued Client'}</span>
                     </div>
                   </StaggerItem>
 
-                  {/* Service/Package Item Summary */}
-                  {invoiceData && invoiceData.items && invoiceData.items.length > 0 && (
+                  {linkData.projectName && (
                     <StaggerItem>
-                      <div className="bg-gray-50 rounded-2xl p-4 border border-border space-y-2">
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Services / Package Details</p>
-                        {invoiceData.items.map((item, idx) => (
-                          <div key={idx} className="flex justify-between items-start text-sm">
-                            <div>
-                              <p className="font-semibold text-gray-900">{item.description}</p>
-                              <p className="text-xs text-muted">Qty: {item.quantity}</p>
-                            </div>
-                            <p className="font-semibold text-gray-900">{formatCurrency(item.total)}</p>
-                          </div>
-                        ))}
+                      <div className="flex items-center justify-between text-sm py-2 border-b border-gray-100">
+                        <span className="text-gray-500 flex items-center gap-2">
+                          <FileText size={16} className="text-gray-400" /> Project
+                        </span>
+                        <span className="font-semibold text-gray-900">{linkData.projectName}</span>
                       </div>
                     </StaggerItem>
                   )}
 
-                  {/* Amount Box */}
+                  {linkData.invoiceNumber && (
+                    <StaggerItem>
+                      <div className="flex items-center justify-between text-sm py-2 border-b border-gray-100">
+                        <span className="text-gray-500 flex items-center gap-2">
+                          <FileText size={16} className="text-gray-400" /> Invoice Reference
+                        </span>
+                        <span className="font-mono font-bold text-gray-900">{linkData.invoiceNumber}</span>
+                      </div>
+                    </StaggerItem>
+                  )}
+
+                  {linkData.title && !linkData.invoiceNumber && (
+                    <StaggerItem>
+                      <div className="flex items-center justify-between text-sm py-2 border-b border-gray-100">
+                        <span className="text-gray-500 flex items-center gap-2">
+                          <FileText size={16} className="text-gray-400" /> Description
+                        </span>
+                        <span className="font-medium text-gray-900">{linkData.title}</span>
+                      </div>
+                    </StaggerItem>
+                  )}
+
                   <StaggerItem>
-                    <div className="bg-accent-50/50 p-6 rounded-2xl border border-accent-100 text-center space-y-1">
-                      <p className="text-xs font-bold uppercase tracking-wider text-accent-800">Amount Due</p>
-                      <p className="text-3xl font-black text-accent-900">
-                        {formatCurrency(linkData.amount || 0)}
-                      </p>
-                      {invoiceData?.dueDate && (
-                        <p className="text-xs text-muted pt-1">
-                          Due Date: {formatDate(invoiceData.dueDate)}
-                        </p>
-                      )}
+                    <div className="flex items-center justify-between text-sm py-2">
+                      <span className="text-gray-500 flex items-center gap-2">
+                        <ShieldCheck size={16} className="text-emerald-500" /> Payment Processing
+                      </span>
+                      <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                        256-Bit SSL Encrypted
+                      </span>
                     </div>
                   </StaggerItem>
-
-                  {/* Pay Now Button */}
-                  <StaggerItem>
-                    <Button
-                      onClick={handlePayNow}
-                      variant="primary"
-                      fullWidth
-                      size="lg"
-                      loading={isProcessing}
-                      className="py-4 text-base font-bold shadow-lg"
-                      icon={<CreditCard size={20} />}
-                    >
-                      Pay Now ({formatCurrency(linkData.amount || 0)})
-                    </Button>
-                  </StaggerItem>
-
-                  {/* Security notice */}
-                  <StaggerItem>
-                    <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
-                      <ShieldCheck size={14} className="text-success-600" />
-                      <span>Secured with Paystack 256-bit SSL encryption</span>
-                    </div>
-                  </StaggerItem>
-
                 </StaggerContainer>
-              )}
+
+                {/* Primary Action Button */}
+                <div className="pt-2">
+                  {isAlreadyPaid ? (
+                    <SuccessReveal className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200 text-center space-y-2">
+                      <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-1">
+                        <CheckCircle2 size={22} />
+                      </div>
+                      <h3 className="font-bold text-emerald-900 text-base">Payment Confirmed</h3>
+                      <p className="text-xs text-emerald-700 leading-relaxed max-w-sm mx-auto">
+                        Thank you! This payment has been successfully received and recorded. Your project team has been notified.
+                      </p>
+                    </SuccessReveal>
+                  ) : isCancelled ? (
+                    <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 text-center text-sm text-gray-500">
+                      This payment link is no longer accepting payments.
+                    </div>
+                  ) : (
+                    <Button
+                      size="lg"
+                      className="w-full h-14 rounded-2xl font-bold text-base shadow-lg transition-transform active:scale-[0.99] flex items-center justify-center gap-2"
+                      style={{
+                        backgroundColor: branding.buttonColor || '#0A0A0A',
+                        color: branding.buttonTextColor || '#FFFFFF',
+                      }}
+                      onClick={handlePayNow}
+                      disabled={isProcessing}
+                    >
+                      {isProcessing ? (
+                        <>
+                          <Spinner size="sm" className="mr-2" />
+                          Connecting to Paystack...
+                        </>
+                      ) : (
+                        <>
+                          <Lock size={18} />
+                          Pay {formatCurrency(linkData.amount || 0, linkData.currency)} with Paystack
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </div>
+
+                {/* Trust Footer Notice */}
+                <div className="text-center pt-2">
+                  <p className="text-xs text-gray-400 flex items-center justify-center gap-1.5">
+                    <Lock size={12} />
+                    Transactions are processed securely by Paystack. Card details are never stored.
+                  </p>
+                </div>
+
+              </div>
             </Card>
           </CardReveal>
-        </div>
 
-        {/* Footer */}
-        <FadeIn delay={0.3}>
-          <footer className="text-center py-4 text-xs" style={{ color: branding.mutedTextColor || '#6B7280' }}>
-            © {new Date().getFullYear()} {branding.businessName || 'Lexmedia Agency'}. All rights reserved.
-          </footer>
-        </FadeIn>
+          {/* Bottom Branding Footer */}
+          <FadeIn delay={0.25} className="text-center">
+            <p className="text-xs text-gray-400">
+              &copy; {new Date().getFullYear()} {branding.businessName || 'Ctrl Room'}. All rights reserved.
+            </p>
+          </FadeIn>
+
+        </div>
       </div>
     </PageEnter>
   )

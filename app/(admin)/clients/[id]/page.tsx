@@ -750,7 +750,7 @@ export default function ClientProfilePage() {
                       ) : (
                         <div className="space-y-2">
                           {links.map((link) => {
-                            const payUrl = link.url || getPaymentLink(link.token)
+                            const payUrl = (link.url && !link.url.includes('vercel.app')) ? link.url : getPaymentLink(link.token)
                             return (
                               <div
                                 key={link.id}
