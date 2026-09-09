@@ -43,16 +43,16 @@ export interface ResumableUploadOptions {
 }
 
 /**
- * Determines if an error is permanent (e.g. 403 RLS permission, 401 unauthorized, 400 bad request, 413 file size limit)
- * versus transient (network loss, timeout, server 5xx, socket reset).
+ * Determines if an error is permanent (e.g. 403 RLS permission, 401 unauthorized, 400 bad request)
+ * versus transient (network loss, timeout, 413 payload too large, server 5xx, socket reset).
  */
 export function isPermanentUploadError(error: any): boolean {
   if (!error) return false
   const errStr = String(error.message || error || '').toLowerCase()
   
-  // HTTP status code check
+  // HTTP status code check (413 is NOT permanent — chunk size can be reduced)
   const status = error.originalResponse ? error.originalResponse.getStatus() : (error.status || 0)
-  if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
+  if (status >= 400 && status < 500 && status !== 408 && status !== 429 && status !== 413) {
     return true
   }
 
@@ -63,8 +63,6 @@ export function isPermanentUploadError(error: any): boolean {
     errStr.includes('unauthorized') ||
     errStr.includes('forbidden') ||
     errStr.includes('bucket not found') ||
-    errStr.includes('file size limit') ||
-    errStr.includes('too large') ||
     errStr.includes('invalid file type')
   ) {
     return true
@@ -87,7 +85,7 @@ export function getFriendlyErrorMessage(error: any): string {
     return 'Authentication expired. Please sign in again.'
   }
   if (status === 413 || errStr.includes('too large') || errStr.includes('payload')) {
-    return 'File exceeds maximum upload size limits.'
+    return 'Payload too large. Uploading in smaller chunks...'
   }
   if (errStr.includes('bucket not found') || errStr.includes('nosuchbucket')) {
     return `Supabase Storage bucket '${STORAGE_BUCKETS.DELIVERY_FILES}' was not found.`
@@ -114,7 +112,7 @@ export class ResumableUploadTask {
   private bytesUploaded = 0
   private retryAttempt = 0
   private maxRetries = 5
-  private chunkSize: number = 6 * 1024 * 1024 // 6MB default chunks
+  private chunkSize: number = 2 * 1024 * 1024 // 2MB default safe chunk size to prevent 413 Payload Too Large
   private onProgressCallback?: (progress: UploadTaskProgress) => void
 
   private startTime = 0
@@ -141,7 +139,7 @@ export class ResumableUploadTask {
     this.fileSize = options.file.size
     this.clientId = options.clientId || ''
     this.maxRetries = options.maxRetries ?? 5
-    this.chunkSize = options.chunkSize ?? 6 * 1024 * 1024
+    this.chunkSize = options.chunkSize ?? 2 * 1024 * 1024 // 2MB default chunks
     this.onProgressCallback = options.onProgress
 
     const sanitizedName = this.file.name.replace(/[^a-zA-Z0-9._\- ]/g, '_').trim() || 'file'
@@ -182,7 +180,7 @@ export class ResumableUploadTask {
   }
 
   /**
-   * Starts or resumes the file upload using TUS protocol.
+   * Starts or resumes the file upload using TUS protocol or chunked fallback.
    */
   public async start(): Promise<{ downloadUrl: string; storagePath: string }> {
     this.isCancelled = false
@@ -205,14 +203,19 @@ export class ResumableUploadTask {
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
     if (isSupabaseConfigured() && supabaseUrl && supabaseAnonKey) {
-      return this.startTusUpload(supabaseUrl, supabaseAnonKey)
+      try {
+        return await this.startTusUpload(supabaseUrl, supabaseAnonKey)
+      } catch (tusErr: any) {
+        console.warn('[Resumable Upload] TUS failed, falling back to chunked server upload:', tusErr)
+        return await this.startChunkedServerUpload()
+      }
     } else {
-      return this.startFallbackServerUpload()
+      return await this.startChunkedServerUpload()
     }
   }
 
   /**
-   * Executes TUS resumable upload directly to Supabase Storage.
+   * Executes TUS resumable upload directly to Supabase Storage with dynamic 413 chunk sizing.
    */
   private startTusUpload(supabaseUrl: string, supabaseAnonKey: string): Promise<{ downloadUrl: string; storagePath: string }> {
     return new Promise((resolve, reject) => {
@@ -250,6 +253,29 @@ export class ResumableUploadTask {
             return
           }
 
+          const status = err.originalResponse ? err.originalResponse.getStatus() : (err.status || 0)
+          const errStr = String(err.message || err || '').toLowerCase()
+
+          // Handle 413 Payload Too Large by dynamically cutting chunk size in half and retrying
+          if (status === 413 || errStr.includes('413') || errStr.includes('too large') || errStr.includes('payload')) {
+            console.warn('[Resumable Upload] 413 Payload Too Large received. Halving chunk size...')
+            this.chunkSize = Math.max(512 * 1024, Math.floor(this.chunkSize / 2))
+            this.statusMessage = `Payload too large — reducing chunk size to ${Math.round(this.chunkSize / 1024)}KB...`
+            this.notify()
+
+            if (this.chunkSize <= 512 * 1024) {
+              console.warn('[Resumable Upload] Minimum chunk size reached. Switching to Chunked Server Upload...')
+              this.startChunkedServerUpload().then(resolve).catch(reject)
+              return
+            }
+
+            setTimeout(() => {
+              if (this.isCancelled) return
+              this.startTusUpload(supabaseUrl, supabaseAnonKey).then(resolve).catch(reject)
+            }, 1000)
+            return
+          }
+
           if (isPermanentUploadError(err)) {
             this.isPermanentErr = true
             this.status = 'error'
@@ -275,11 +301,15 @@ export class ResumableUploadTask {
               this.tusUpload?.start()
             }, delay)
           } else {
-            this.status = 'error'
-            this.errorDetail = getFriendlyErrorMessage(err)
-            this.statusMessage = `Upload failed after ${this.maxRetries} attempts.`
-            this.notify()
-            reject(new Error(this.errorDetail))
+            // If TUS fails max retries, attempt Chunked Server Upload fallback
+            console.warn('[Resumable Upload] TUS failed max retries. Attempting Chunked Server Upload fallback...')
+            this.startChunkedServerUpload().then(resolve).catch((fallbackErr) => {
+              this.status = 'error'
+              this.errorDetail = fallbackErr?.message || getFriendlyErrorMessage(err)
+              this.statusMessage = `Upload failed after ${this.maxRetries} attempts.`
+              this.notify()
+              reject(new Error(this.errorDetail))
+            })
           }
         },
         onProgress: (bytesUploaded, bytesTotal) => {
@@ -359,118 +389,98 @@ export class ResumableUploadTask {
   }
 
   /**
-   * Fallback chunked uploader using XMLHttpRequest with chunking and retries.
+   * Resumable chunked uploader using 2MB slices to /api/delivery/upload-chunk.
+   * Prevents 413 Payload Too Large on any file size.
    */
-  private startFallbackServerUpload(): Promise<{ downloadUrl: string; storagePath: string }> {
-    return new Promise((resolve, reject) => {
-      this.status = 'uploading'
-      this.statusMessage = 'Uploading via server API...'
-      this.notify()
+  private async startChunkedServerUpload(): Promise<{ downloadUrl: string; storagePath: string }> {
+    this.status = 'uploading'
+    this.statusMessage = 'Uploading file in safe chunks...'
+    this.startTime = Date.now()
+    this.lastTime = Date.now()
+    this.lastBytes = 0
+    this.notify()
 
-      const xhr = new XMLHttpRequest()
-      const formData = new FormData()
-      formData.append('file', this.file)
-      formData.append('projectId', this.projectId)
-      formData.append('deliveryId', this.deliveryId)
-      formData.append('clientId', this.clientId)
-      formData.append('fileDocId', this.fileId)
+    const currentChunkSize = this.chunkSize || 2 * 1024 * 1024
+    const totalChunks = Math.max(1, Math.ceil(this.fileSize / currentChunkSize))
 
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable && !this.isCancelled) {
-          this.bytesUploaded = e.loaded
-          this.fileSize = e.total
-          const percent = Math.min(100, Math.round((e.loaded / e.total) * 100))
-          this.status = percent >= 100 ? 'saving' : 'uploading'
-          this.statusMessage = percent >= 100 ? 'Saving file metadata...' : `Uploading... ${percent}%`
-          this.notify()
-        }
-      })
+    for (let i = 0; i < totalChunks; i++) {
+      if (this.isCancelled) throw new Error('Upload cancelled.')
 
-      xhr.onload = () => {
-        if (this.isCancelled) return
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const res = JSON.parse(xhr.responseText)
-            if (res.downloadUrl) {
-              this.status = 'done'
-              this.statusMessage = 'Upload completed successfully'
-              this.notify()
-              resolve({ downloadUrl: res.downloadUrl, storagePath: res.storagePath || this.storagePath })
-            } else {
-              throw new Error(res.error || 'Server upload failed.')
+      const start = i * currentChunkSize
+      const end = Math.min(this.fileSize, start + currentChunkSize)
+      const chunkBlob = this.file.slice(start, end)
+      const chunkFile = new File([chunkBlob], this.fileName, { type: this.file.type })
+
+      let chunkSuccess = false
+      let attempt = 0
+
+      while (!chunkSuccess && attempt < this.maxRetries) {
+        if (this.isCancelled) throw new Error('Upload cancelled.')
+        attempt++
+
+        try {
+          const formData = new FormData()
+          formData.append('chunk', chunkFile)
+          formData.append('fileId', this.fileId)
+          formData.append('chunkIndex', String(i))
+          formData.append('totalChunks', String(totalChunks))
+          formData.append('fileName', this.fileName)
+          formData.append('fileSize', String(this.fileSize))
+          formData.append('fileType', this.file.type || 'application/octet-stream')
+          formData.append('projectId', this.projectId)
+          formData.append('deliveryId', this.deliveryId)
+          formData.append('clientId', this.clientId)
+
+          const res = await fetch('/api/delivery/upload-chunk', {
+            method: 'POST',
+            body: formData,
+          })
+
+          if (res.status === 413) {
+            console.warn('[Chunk Upload] HTTP 413 received. Reducing chunk size and restarting...')
+            this.chunkSize = Math.max(512 * 1024, Math.floor(this.chunkSize / 2))
+            return await this.startChunkedServerUpload()
+          }
+
+          const data = await res.json()
+          if (!res.ok || !data.success) {
+            throw new Error(data.error || `Chunk ${i + 1}/${totalChunks} failed`)
+          }
+
+          chunkSuccess = true
+          this.bytesUploaded = end
+          const percent = Math.min(100, Math.round((end / this.fileSize) * 100))
+          this.statusMessage = percent >= 100 ? 'Saving metadata...' : `Uploading... ${percent}%`
+
+          const now = Date.now()
+          const timeDiff = (now - this.lastTime) / 1000
+          if (timeDiff >= 0.5) {
+            const bytesDiff = this.bytesUploaded - this.lastBytes
+            this.speed = Math.round(bytesDiff / timeDiff)
+            this.lastTime = now
+            this.lastBytes = this.bytesUploaded
+            if (this.speed > 0) {
+              this.eta = Math.round((this.fileSize - this.bytesUploaded) / this.speed)
             }
-          } catch (e: any) {
-            this.status = 'error'
-            this.errorDetail = e?.message || 'Invalid server response.'
-            this.statusMessage = `Failed: ${this.errorDetail}`
-            this.notify()
-            reject(new Error(this.errorDetail))
           }
-        } else {
-          let errText = `Upload failed with HTTP ${xhr.status}`
-          try {
-            const errRes = JSON.parse(xhr.responseText)
-            if (errRes.error) errText = errRes.error
-          } catch {}
-
-          if (xhr.status === 403 || xhr.status === 401 || xhr.status === 413) {
-            this.isPermanentErr = true
-            this.status = 'error'
-            this.errorDetail = errText
-            this.statusMessage = `Failed: ${errText}`
-            this.notify()
-            reject(new Error(errText))
-          } else if (this.retryAttempt < this.maxRetries) {
-            this.retryAttempt++
-            const delay = Math.min(1000 * Math.pow(2, this.retryAttempt - 1), 20000)
-            this.status = 'retrying'
-            this.statusMessage = `Retrying upload (Attempt ${this.retryAttempt} of ${this.maxRetries})...`
-            this.notify()
-
-            this.retryTimer = setTimeout(() => {
-              if (this.isCancelled) return
-              this.startFallbackServerUpload().then(resolve).catch(reject)
-            }, delay)
-          } else {
-            this.status = 'error'
-            this.errorDetail = errText
-            this.statusMessage = `Upload failed after ${this.maxRetries} attempts.`
-            this.notify()
-            reject(new Error(errText))
-          }
-        }
-      }
-
-      xhr.onerror = () => {
-        if (this.isCancelled) return
-        if (!navigator.onLine) {
-          this.onNetworkLost()
-          return
-        }
-
-        if (this.retryAttempt < this.maxRetries) {
-          this.retryAttempt++
-          const delay = Math.min(1000 * Math.pow(2, this.retryAttempt - 1), 20000)
-          this.status = 'retrying'
-          this.statusMessage = `Retrying upload (Attempt ${this.retryAttempt} of ${this.maxRetries})...`
           this.notify()
 
-          this.retryTimer = setTimeout(() => {
-            if (this.isCancelled) return
-            this.startFallbackServerUpload().then(resolve).catch(reject)
-          }, delay)
-        } else {
-          this.status = 'error'
-          this.errorDetail = 'Network error during upload.'
-          this.statusMessage = 'Upload failed due to network interruption.'
-          this.notify()
-          reject(new Error(this.errorDetail))
+          if (data.done) {
+            this.status = 'done'
+            this.statusMessage = 'Upload completed successfully'
+            this.notify()
+            return { downloadUrl: data.downloadUrl, storagePath: data.storagePath }
+          }
+        } catch (err: any) {
+          if (attempt >= this.maxRetries) {
+            throw new Error(`Upload failed on chunk ${i + 1}/${totalChunks}: ${err?.message || 'Chunk error'}`)
+          }
+          await new Promise((r) => setTimeout(r, Math.min(1000 * Math.pow(2, attempt - 1), 10000)))
         }
       }
+    }
 
-      xhr.open('POST', '/api/delivery/upload')
-      xhr.send(formData)
-    })
+    throw new Error('Upload assembly failed.')
   }
 
   /**
