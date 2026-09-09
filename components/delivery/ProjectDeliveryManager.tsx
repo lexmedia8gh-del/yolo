@@ -28,7 +28,13 @@ import {
   AlertTriangle,
   ShieldAlert,
   ShieldCheck,
+  Pause,
+  Play,
+  RotateCcw,
+  Wifi,
+  WifiOff,
 } from 'lucide-react'
+import { ResumableUploadTask, UploadTaskProgress } from '@/lib/supabase/resumable'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Spinner } from '@/components/ui/Spinner'
@@ -97,7 +103,21 @@ export function ProjectDeliveryManager({
   // Staged files (selected before upload)
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([])
   const [isUploading, setIsUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState<{ [key: string]: { percent: number; status: 'preparing' | 'optimizing' | 'uploading' | 'saving' | 'done' | 'error'; error?: string } }>({})
+  const [uploadProgress, setUploadProgress] = useState<{ [key: string]: UploadTaskProgress }>({})
+  const [isOffline, setIsOffline] = useState<boolean>(() => typeof navigator !== 'undefined' ? !navigator.onLine : false)
+  const activeTasksRef = useRef<{ [key: string]: ResumableUploadTask }>({})
+
+  // Monitor network status
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false)
+    const handleOffline = () => setIsOffline(true)
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
   
   // Modals & action states
   const [showExpireModal, setShowExpireModal] = useState(false)
@@ -209,7 +229,10 @@ export function ProjectDeliveryManager({
   }
 
   const handleRemoveStaged = (id: string) => {
-    if (isUploading) return
+    if (activeTasksRef.current[id]) {
+      activeTasksRef.current[id].cancel()
+      delete activeTasksRef.current[id]
+    }
     const fileToRemove = stagedFiles.find((f) => f.id === id)
     if (fileToRemove?.previewUrl) {
       URL.revokeObjectURL(fileToRemove.previewUrl)
@@ -223,7 +246,8 @@ export function ProjectDeliveryManager({
   }
 
   const handleClearStaged = () => {
-    if (isUploading) return
+    Object.values(activeTasksRef.current).forEach((task) => task.cancel())
+    activeTasksRef.current = {}
     stagedFiles.forEach((f) => {
       if (f.previewUrl) URL.revokeObjectURL(f.previewUrl)
     })
@@ -231,7 +255,7 @@ export function ProjectDeliveryManager({
     setUploadProgress({})
   }
 
-  // 3. Process Upload of Staged Files
+  // 3. Process Resumable Upload of Staged Files
   const handleStartUpload = async () => {
     await startUploadForFiles(stagedFiles)
   }
@@ -242,26 +266,41 @@ export function ProjectDeliveryManager({
     setIsUploading(true)
 
     for (const staged of filesToUpload) {
-      // Skip if already completed or currently uploading
       const currentProgress = uploadProgress[staged.id]
       if (currentProgress?.status === 'done') continue
 
       try {
-        // 1. Preparing & Optimizing Stage
-        setUploadProgress((prev) => ({
-          ...prev,
-          [staged.id]: { percent: 0, status: 'preparing' }
-        }))
-
         let uploadFile = staged.file
         let originalSize = staged.size
         let isOptimized = false
         let finalSize = staged.size
 
+        // Initial progress state
+        setUploadProgress((prev) => ({
+          ...prev,
+          [staged.id]: {
+            fileId: staged.id,
+            fileName: staged.name,
+            fileSize: staged.size,
+            bytesUploaded: 0,
+            percent: 0,
+            status: 'preparing',
+            statusMessage: 'Preparing upload...',
+            speedBytesPerSec: 0,
+            estimatedTimeRemainingSeconds: 0,
+            retryAttempt: 0,
+            maxRetries: 5,
+          },
+        }))
+
         if (imageOptimizationEnabled && staged.file.type.startsWith('image/')) {
           setUploadProgress((prev) => ({
             ...prev,
-            [staged.id]: { percent: 0, status: 'optimizing' }
+            [staged.id]: {
+              ...prev[staged.id],
+              status: 'optimizing',
+              statusMessage: 'Optimizing image for fast delivery...',
+            },
           }))
 
           const optResult = await optimizeImageFile(staged.file)
@@ -271,7 +310,6 @@ export function ProjectDeliveryManager({
             finalSize = optResult.optimizedSize
             originalSize = optResult.originalSize
 
-            // Update staged files state with optimized metadata & file
             setStagedFiles((prev) =>
               prev.map((f) =>
                 f.id === staged.id
@@ -288,54 +326,31 @@ export function ProjectDeliveryManager({
           }
         }
 
-        // 2. Upload to Storage Stage
-        setUploadProgress((prev) => ({
-          ...prev,
-          [staged.id]: { percent: 0, status: 'uploading' }
-        }))
-
         const fileDocId = generateSecureToken(16)
         
-        const { downloadUrl, storagePath } = await uploadDeliveryFile(
-          project.id,
-          delivery.id,
-          fileDocId,
-          uploadFile,
-          (progress) => {
+        // Instantiate Resumable Upload Task
+        const task = new ResumableUploadTask({
+          projectId: project.id,
+          deliveryId: delivery.id,
+          fileId: fileDocId,
+          file: uploadFile,
+          clientId: project.clientId,
+          onProgress: (progress: UploadTaskProgress) => {
             setUploadProgress((prev) => ({
               ...prev,
-              [staged.id]: { percent: Math.round(progress), status: progress >= 100 ? 'saving' : 'uploading' },
+              [staged.id]: progress,
             }))
           },
-          project.clientId
-        )
+        })
 
-        const fullFileRecord: DeliveryFile = {
-          id: fileDocId,
-          deliveryId: delivery.id,
-          projectId: project.id,
-          clientId: project.clientId,
-          fileName: staged.name,
-          originalName: staged.name,
-          fileType: uploadFile.type,
-          fileSize: finalSize,
-          storagePath,
-          downloadUrl,
-          downloadCount: 0,
-          uploadedAt: new Date() as any,
-          uploadedBy: 'admin',
-        }
+        activeTasksRef.current[staged.id] = task
 
-        // Verify successful save and refresh list
-        setUploadProgress((prev) => ({
-          ...prev,
-          [staged.id]: { percent: 100, status: 'done' },
-        }))
+        // Execute task (handles chunking, retries, network drops, and database registration on success)
+        await task.start()
 
         toast.success(`"${staged.name}" uploaded successfully!`)
         await loadDeliveryData()
 
-        // Clean up completed file from staged list after a slight delay
         setTimeout(() => {
           if (staged.previewUrl) URL.revokeObjectURL(staged.previewUrl)
           setStagedFiles((prev) => prev.filter((f) => f.id !== staged.id))
@@ -344,56 +359,50 @@ export function ProjectDeliveryManager({
             delete copy[staged.id]
             return copy
           })
+          delete activeTasksRef.current[staged.id]
         }, 1200)
 
       } catch (err: any) {
         console.error(`Failed to upload ${staged.name}:`, err)
-        
-        // Handle precise user-facing error mapping
-        let userErrMsg = 'Upload failed. Please try again.'
-        const errStr = String(err?.message || err || '').toLowerCase()
-        const errStatus = err?.status || 0
-
-        if (errStatus === 413 || errStr.includes('413') || errStr.includes('too large') || errStr.includes('payload')) {
-          userErrMsg = 'This file is too large. Ctrl Room will optimize the image before uploading.'
-        } else if (errStatus === 401 || errStr.includes('401') || errStr.includes('unauthorized') || errStr.includes('session') || errStr.includes('sign in')) {
-          userErrMsg = 'Your session has expired. Please sign in again.'
-        } else if (errStatus === 403 || errStr.includes('403') || errStr.includes('permission') || errStr.includes('not allowed')) {
-          userErrMsg = "You don't have permission to upload this file."
-        } else if (errStr.includes('unavailable') || errStr.includes('storage')) {
-          userErrMsg = 'File storage is temporarily unavailable. Please try again.'
-        } else if (errStr.includes('network') || errStr.includes('timeout') || errStr.includes('connection') || !navigator.onLine) {
-          userErrMsg = 'Upload interrupted. Check your internet connection and try again.'
-        } else {
-          userErrMsg = err?.message || 'File storage failed. Please check connection and retry.'
-        }
-
-        setUploadProgress((prev) => ({
-          ...prev,
-          [staged.id]: {
-            percent: 0,
-            status: 'error',
-            error: userErrMsg,
-          },
-        }))
-        toast.error(`Error uploading "${staged.name}": ${userErrMsg}`)
+        toast.error(`Upload error on "${staged.name}": ${err?.message || 'Upload failed.'}`)
       }
     }
 
     setIsUploading(false)
   }
 
-  const handleRetryUpload = async (stagedId: string) => {
-    const fileToRetry = stagedFiles.find((f) => f.id === stagedId)
-    if (!fileToRetry) return
-    
-    // Clear the error status
-    setUploadProgress((prev) => ({
-      ...prev,
-      [stagedId]: { percent: 0, status: 'preparing' }
-    }))
+  const handlePauseUpload = (stagedId: string) => {
+    activeTasksRef.current[stagedId]?.pause()
+  }
 
-    await startUploadForFiles([fileToRetry])
+  const handleResumeUpload = (stagedId: string) => {
+    activeTasksRef.current[stagedId]?.resume()
+  }
+
+  const handleRetryUpload = async (stagedId: string) => {
+    const task = activeTasksRef.current[stagedId]
+    if (task) {
+      try {
+        await task.retry()
+        toast.success('Upload complete!')
+        await loadDeliveryData()
+      } catch (err: any) {
+        toast.error(err?.message || 'Retry failed.')
+      }
+    } else {
+      const fileToRetry = stagedFiles.find((f) => f.id === stagedId)
+      if (fileToRetry) {
+        await startUploadForFiles([fileToRetry])
+      }
+    }
+  }
+
+  const handleCancelUpload = (stagedId: string) => {
+    if (activeTasksRef.current[stagedId]) {
+      activeTasksRef.current[stagedId].cancel()
+      delete activeTasksRef.current[stagedId]
+    }
+    handleRemoveStaged(stagedId)
   }
 
   // File replacement actions for step 14
@@ -1095,20 +1104,30 @@ export function ProjectDeliveryManager({
         {/* STAGED FILES SECTION (Shows selected files before upload) */}
         {stagedFiles.length > 0 && (
           <div className="p-4 rounded-xl border-2 border-indigo-200 bg-indigo-50/40 space-y-4 animate-fade-in">
+            {/* Network Offline Alert Banner */}
+            {isOffline && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs font-semibold flex items-center justify-between gap-2 animate-fade-in">
+                <div className="flex items-center gap-2">
+                  <WifiOff size={16} className="text-amber-600 shrink-0" />
+                  <span>Internet connection lost. Upload will resume when your connection returns.</span>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-amber-200/80 text-amber-900 font-bold uppercase">Offline</span>
+              </div>
+            )}
+
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="text-xs font-bold text-indigo-950 uppercase tracking-wider">
                   Files Selected for Upload ({stagedFiles.length})
                 </h4>
                 <p className="text-xs text-indigo-700 mt-0.5">
-                  Review selected files below. Images are optimized automatically to save storage and prevent timeout.
+                  Resumable & fault-tolerant upload system. Auto-resumes on network reconnection.
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={isUploading}
                   onClick={handleClearStaged}
                   className="bg-white text-xs border-indigo-200 text-indigo-700 hover:bg-indigo-50"
                 >
@@ -1121,7 +1140,7 @@ export function ProjectDeliveryManager({
                   onClick={handleStartUpload}
                   icon={<Upload size={13} />}
                 >
-                  {isUploading ? 'Uploading...' : `Upload Now (${formatFileSize(stagedFiles.reduce((s, f) => s + f.size, 0))})`}
+                  {isUploading ? 'Uploading...' : `Upload All (${formatFileSize(stagedFiles.reduce((s, f) => s + f.size, 0))})`}
                 </Button>
               </div>
             </div>
@@ -1129,6 +1148,15 @@ export function ProjectDeliveryManager({
             <div className="divide-y divide-indigo-100 bg-white rounded-xl border border-indigo-100 overflow-hidden">
               {stagedFiles.map((sf) => {
                 const prog = uploadProgress[sf.id]
+                const status = prog?.status || 'idle'
+
+                const isError = status === 'error'
+                const isDone = status === 'done'
+                const isOfflineStatus = status === 'offline' || isOffline
+                const isPaused = status === 'paused'
+                const isUploadingStatus = status === 'uploading'
+                const isRetrying = status === 'retrying'
+
                 return (
                   <div key={sf.id} className="p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -1148,39 +1176,81 @@ export function ProjectDeliveryManager({
                       )}
 
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-semibold text-gray-900 truncate">{sf.name}</p>
-                        <div className="flex items-center gap-1.5 mt-0.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-xs font-semibold text-gray-900 truncate">{sf.name}</p>
+                          {/* Status Badge */}
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              isDone
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : isError
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : isOfflineStatus
+                                ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                : isPaused
+                                ? 'bg-gray-100 text-gray-700 border-gray-300'
+                                : isRetrying
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                            }`}
+                          >
+                            {isDone && 'Completed ✓'}
+                            {isError && 'Failed'}
+                            {isOfflineStatus && 'Offline — Waiting to resume'}
+                            {isPaused && 'Paused'}
+                            {isRetrying && `Retrying (${prog?.retryAttempt || 1}/5)`}
+                            {isUploadingStatus && `Uploading... ${prog?.percent || 0}%`}
+                            {status === 'preparing' && 'Preparing...'}
+                            {status === 'optimizing' && 'Optimizing Image...'}
+                            {status === 'saving' && 'Saving metadata...'}
+                            {status === 'reconnecting' && 'Connection restored — resuming...'}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 mt-0.5 text-[11px] text-gray-400">
                           {sf.isOptimized && sf.originalSize ? (
-                            <p className="text-[11px] text-gray-400">
+                            <span>
                               <span className="line-through">{formatFileSize(sf.originalSize)}</span>
-                              <span className="text-emerald-600 font-semibold ml-1">→ {formatFileSize(sf.size)} (Optimized)</span>
-                            </p>
+                              <span className="text-emerald-600 font-semibold ml-1">→ {formatFileSize(sf.size)}</span>
+                            </span>
                           ) : (
-                            <p className="text-[11px] text-gray-400">{formatFileSize(sf.size)}</p>
+                            <span>{formatFileSize(sf.size)}</span>
+                          )}
+
+                          {/* Upload speed & ETA info */}
+                          {isUploadingStatus && prog && prog.speedBytesPerSec > 0 && (
+                            <span className="text-indigo-600 font-medium">
+                              · {formatFileSize(prog.speedBytesPerSec)}/s
+                              {prog.estimatedTimeRemainingSeconds > 0 && (
+                                <span className="ml-1">· {prog.estimatedTimeRemainingSeconds < 60 ? `${prog.estimatedTimeRemainingSeconds}s left` : `${Math.floor(prog.estimatedTimeRemainingSeconds / 60)}m left`}</span>
+                              )}
+                            </span>
                           )}
                         </div>
 
-                        {/* Progress bar */}
+                        {/* Status Message & Progress bar */}
                         {prog && (
                           <div className="mt-2 space-y-1">
-                            <div className="flex items-center justify-between text-[10px] text-indigo-700">
-                              <span className="font-semibold">
-                                {prog.status === 'preparing' && 'Preparing...'}
-                                {prog.status === 'optimizing' && 'Optimizing Image...'}
-                                {prog.status === 'uploading' && `Uploading... ${prog.percent}%`}
-                                {prog.status === 'saving' && 'Saving metadata...'}
-                                {prog.status === 'done' && 'Complete ✓'}
-                                {prog.status === 'error' && (
-                                  <span className="text-rose-600 font-medium">{prog.error || 'Upload error'}</span>
-                                )}
-                              </span>
+                            <div className="text-[10px] font-medium text-gray-600">
+                              {isError ? (
+                                <span className="text-rose-600 font-medium">{prog.error || prog.statusMessage || 'Upload error'}</span>
+                              ) : (
+                                <span>{prog.statusMessage}</span>
+                              )}
                             </div>
-                            <div className="w-full bg-indigo-100 rounded-full h-1.5 overflow-hidden">
+
+                            <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
                               <div
                                 className={`h-1.5 rounded-full transition-all duration-300 ${
-                                  prog.status === 'error' ? 'bg-rose-500' : prog.status === 'done' ? 'bg-emerald-500' : 'bg-indigo-600'
+                                  isError
+                                    ? 'bg-rose-500'
+                                    : isDone
+                                    ? 'bg-emerald-500'
+                                    : isOfflineStatus || isPaused || isRetrying
+                                    ? 'bg-amber-500'
+                                    : 'bg-indigo-600'
                                 }`}
-                                style={{ width: `${prog.status === 'done' ? 100 : prog.status === 'error' ? 100 : prog.percent}%` }}
+                                style={{ width: `${isDone ? 100 : isError ? 100 : prog.percent}%` }}
                               />
                             </div>
                           </div>
@@ -1188,26 +1258,52 @@ export function ProjectDeliveryManager({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
-                      {prog?.status === 'error' && (
+                    {/* Manual Controls per file */}
+                    <div className="flex items-center gap-1.5 shrink-0 self-end md:self-center">
+                      {isUploadingStatus && (
+                        <button
+                          type="button"
+                          onClick={() => handlePauseUpload(sf.id)}
+                          className="p-1.5 rounded-md text-gray-500 hover:text-amber-700 hover:bg-amber-50 transition-colors text-xs font-medium flex items-center gap-1"
+                          title="Pause upload"
+                        >
+                          <Pause size={14} />
+                          <span className="hidden sm:inline text-[11px]">Pause</span>
+                        </button>
+                      )}
+
+                      {isPaused && (
+                        <button
+                          type="button"
+                          onClick={() => handleResumeUpload(sf.id)}
+                          className="p-1.5 rounded-md text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 transition-colors text-xs font-medium flex items-center gap-1"
+                          title="Resume upload"
+                        >
+                          <Play size={14} />
+                          <span className="text-[11px]">Resume</span>
+                        </button>
+                      )}
+
+                      {isError && (
                         <button
                           type="button"
                           onClick={() => handleRetryUpload(sf.id)}
-                          className="px-2 py-1 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition-colors text-xs font-semibold"
+                          className="px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 transition-colors text-xs font-semibold flex items-center gap-1"
+                          title="Retry upload"
                         >
-                          Retry
+                          <RotateCcw size={13} />
+                          <span>Retry</span>
                         </button>
                       )}
-                      {!isUploading && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveStaged(sf.id)}
-                          className="p-1 rounded-md text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
-                          title="Remove file"
-                        >
-                          <X size={15} />
-                        </button>
-                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleCancelUpload(sf.id)}
+                        className="p-1.5 rounded-md text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
+                        title="Cancel & Remove"
+                      >
+                        <X size={15} />
+                      </button>
                     </div>
                   </div>
                 )
