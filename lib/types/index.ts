@@ -346,6 +346,7 @@ export interface Delivery {
   accessCount: number
   fileCount: number
   totalSize?: number
+  files?: DeliveryFile[] | any[]
   notifyEmailSent?: boolean
   notifyEmailSentAt?: Timestamp | null
   notifyEmailMessageId?: string | null
@@ -573,6 +574,7 @@ export interface QuickJob {
   paymentToken?: string
   deliveryStatus?: 'Not Sent' | 'Sent' | 'Failed'
   deliveryEmailSentAt?: string
+  deliveryAccessToken?: string
   createdAt: Timestamp | string
   updatedAt: Timestamp | string
   createdBy?: string

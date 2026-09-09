@@ -22,6 +22,9 @@ import {
   Phone,
   Mail,
   Check,
+  Lock,
+  Unlock,
+  ShieldCheck,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -495,12 +498,30 @@ export default function QuickJobsPage() {
                     </div>
                   </div>
 
-                  {/* Payment Status Bar */}
-                  <div className="flex items-center justify-between text-[11px] px-1">
-                    <span className="text-gray-500">Payment:</span>
-                    <span className={`font-semibold ${job.paymentStatus === 'Paid' ? 'text-emerald-600 dark:text-emerald-400' : job.paymentStatus === 'Partially Paid' ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                      {job.paymentStatus} ({formatCurrency(job.amountPaid || 0, job.currency)} paid)
-                    </span>
+                  {/* Payment & Upload Status Bar */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between text-[11px] px-1">
+                      <span className="text-gray-500">Payment:</span>
+                      <span className={`font-semibold ${job.paymentStatus === 'Paid' ? 'text-emerald-600 dark:text-emerald-400' : job.paymentStatus === 'Partially Paid' ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                        {job.paymentStatus} ({formatCurrency(job.amountPaid || 0, job.currency)} paid)
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] px-1">
+                      <span className="text-gray-500">Deliverables:</span>
+                      {job.deliveryStatus === 'Sent' ? (
+                        <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                          <CheckCircle2 size={12} /> Delivered
+                        </span>
+                      ) : job.paymentStatus === 'Paid' ? (
+                        <span className="text-indigo-600 dark:text-indigo-400 font-medium flex items-center gap-1">
+                          <Unlock size={12} /> Upload Ready
+                        </span>
+                      ) : (
+                        <span className="text-rose-500 dark:text-rose-400 font-medium flex items-center gap-1">
+                          <Lock size={12} /> Upload Locked
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -741,100 +762,103 @@ export default function QuickJobsPage() {
       </Modal>
 
       {/* View Details Modal */}
-      {viewingJob && (
-        <Modal
-          isOpen={!!viewingJob}
-          onClose={() => setViewingJob(null)}
-          title="Quick Job Details"
-          size="md"
-        >
-          <div className="space-y-4 text-xs">
-            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
-              <div>
-                <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wide">
-                  {viewingJob.serviceSnapshot?.name || 'Quick Service Job'}
-                </span>
-                <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mt-0.5">
-                  {viewingJob.jobDescription}
-                </h3>
+      {(() => {
+        const activeViewingJob = viewingJob ? (quickJobs.find((j) => j.id === viewingJob.id) || viewingJob) : null
+        if (!activeViewingJob) return null
+        return (
+          <Modal
+            isOpen={!!activeViewingJob}
+            onClose={() => setViewingJob(null)}
+            title="Quick Job Details"
+            size="md"
+          >
+            <div className="space-y-4 text-xs">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
+                <div>
+                  <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wide">
+                    {activeViewingJob.serviceSnapshot?.name || 'Quick Service Job'}
+                  </span>
+                  <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mt-0.5">
+                    {activeViewingJob.jobDescription}
+                  </h3>
+                </div>
+                <Badge variant={statusColorMap[activeViewingJob.status]?.badgeVariant || 'default'}>
+                  {activeViewingJob.status}
+                </Badge>
               </div>
-              <Badge variant={statusColorMap[viewingJob.status]?.badgeVariant || 'default'}>
-                {viewingJob.status}
-              </Badge>
-            </div>
 
-            <div className="grid grid-cols-2 gap-3 bg-gray-50 dark:bg-gray-800/50 p-3 rounded-xl">
-              <div>
-                <span className="text-gray-400 block mb-0.5">Client</span>
-                <span className="font-semibold text-gray-900 dark:text-gray-100">{viewingJob.clientName}</span>
-                {viewingJob.clientEmail && <span className="text-[11px] text-gray-500 block">{viewingJob.clientEmail}</span>}
+              <div className="grid grid-cols-2 gap-3 bg-gray-50 dark:bg-gray-800/50 p-3 rounded-xl">
+                <div>
+                  <span className="text-gray-400 block mb-0.5">Client</span>
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">{activeViewingJob.clientName}</span>
+                  {activeViewingJob.clientEmail && <span className="text-[11px] text-gray-500 block">{activeViewingJob.clientEmail}</span>}
+                </div>
+                <div>
+                  <span className="text-gray-400 block mb-0.5">Deadline</span>
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">
+                    {activeViewingJob.deadline ? formatDate(activeViewingJob.deadline) : 'No deadline'}
+                  </span>
+                </div>
               </div>
-              <div>
-                <span className="text-gray-400 block mb-0.5">Deadline</span>
-                <span className="font-semibold text-gray-900 dark:text-gray-100">
-                  {viewingJob.deadline ? formatDate(viewingJob.deadline) : 'No deadline'}
-                </span>
-              </div>
-            </div>
 
-            <div className="grid grid-cols-3 gap-3 bg-indigo-50/50 dark:bg-indigo-950/20 p-3 rounded-xl">
-              <div>
-                <span className="text-gray-500 dark:text-gray-400 block text-[10px]">Agreed Price</span>
-                <span className="font-bold text-sm text-gray-900 dark:text-gray-100 font-mono">
-                  {formatCurrency(viewingJob.originalAgreedPrice, viewingJob.currency)}
-                </span>
+              <div className="grid grid-cols-3 gap-3 bg-indigo-50/50 dark:bg-indigo-950/20 p-3 rounded-xl">
+                <div>
+                  <span className="text-gray-500 dark:text-gray-400 block text-[10px]">Agreed Price</span>
+                  <span className="font-bold text-sm text-gray-900 dark:text-gray-100 font-mono">
+                    {formatCurrency(activeViewingJob.originalAgreedPrice, activeViewingJob.currency)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-500 dark:text-gray-400 block text-[10px]">Amount Paid</span>
+                  <span className="font-bold text-sm text-emerald-600 dark:text-emerald-400 font-mono">
+                    {formatCurrency(activeViewingJob.amountPaid || 0, activeViewingJob.currency)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-500 dark:text-gray-400 block text-[10px]">Outstanding</span>
+                  <span className="font-bold text-sm text-rose-600 dark:text-rose-400 font-mono">
+                    {formatCurrency(activeViewingJob.outstandingBalance || 0, activeViewingJob.currency)}
+                  </span>
+                </div>
               </div>
-              <div>
-                <span className="text-gray-500 dark:text-gray-400 block text-[10px]">Amount Paid</span>
-                <span className="font-bold text-sm text-emerald-600 dark:text-emerald-400 font-mono">
-                  {formatCurrency(viewingJob.amountPaid || 0, viewingJob.currency)}
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-500 dark:text-gray-400 block text-[10px]">Outstanding</span>
-                <span className="font-bold text-sm text-rose-600 dark:text-rose-400 font-mono">
-                  {formatCurrency(viewingJob.outstandingBalance || 0, viewingJob.currency)}
-                </span>
-              </div>
-            </div>
 
-            {viewingJob.notes && (
-              <div>
-                <span className="text-gray-400 block mb-1 font-semibold">Notes & Instructions</span>
-                <p className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                  {viewingJob.notes}
-                </p>
-              </div>
-            )}
+              {activeViewingJob.notes && (
+                <div>
+                  <span className="text-gray-400 block mb-1 font-semibold">Notes & Instructions</span>
+                  <p className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                    {activeViewingJob.notes}
+                  </p>
+                </div>
+              )}
 
-            <QuickJobPaymentDelivery 
-              job={viewingJob}
-              onUpdate={async (updatedData) => {
-                await updateDocument(COLLECTIONS.QUICK_JOBS, viewingJob.id, updatedData)
-                setViewingJob({ ...viewingJob, ...updatedData })
-                toast.success('Quick Job updated')
-              }}
-            />
-
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-800">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  const j = viewingJob
-                  setViewingJob(null)
-                  openEditModal(j)
+              <QuickJobPaymentDelivery 
+                job={activeViewingJob}
+                onUpdate={async (updatedData) => {
+                  await updateDocument(COLLECTIONS.QUICK_JOBS, activeViewingJob.id, updatedData)
+                  setViewingJob((prev) => prev ? { ...prev, ...updatedData } : null)
                 }}
-              >
-                Edit Job
-              </Button>
-              <Button size="sm" onClick={() => setViewingJob(null)}>
-                Close
-              </Button>
+              />
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-800">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const j = activeViewingJob
+                    setViewingJob(null)
+                    openEditModal(j)
+                  }}
+                >
+                  Edit Job
+                </Button>
+                <Button size="sm" onClick={() => setViewingJob(null)}>
+                  Close
+                </Button>
+              </div>
             </div>
-          </div>
-        </Modal>
-      )}
+          </Modal>
+        )
+      })()}
 
       {/* Delete Confirmation Modal */}
       {deletingJob && (
