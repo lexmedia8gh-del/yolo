@@ -1299,7 +1299,7 @@ export function ProjectDeliveryManager({
               </Button>
             )}
 
-            {(deliveryStatus !== 'Locked' || isQuickJobFullyPaidNoFiles) && deliveryStatus !== 'Released' && (
+            {!quickJob && (deliveryStatus !== 'Locked' || isQuickJobFullyPaidNoFiles) && deliveryStatus !== 'Released' && (
               files.length === 0 ? (
                 <Button
                   size="sm"
@@ -1710,7 +1710,7 @@ export function ProjectDeliveryManager({
         </div>
 
         {/* SUBMIT DELIVERY ACTION / STATUS PANEL */}
-        {!isReleased && (deliveryStatus !== 'Locked' || isQuickJobFullyPaidNoFiles) && (
+        {!quickJob && !isReleased && (deliveryStatus !== 'Locked' || isQuickJobFullyPaidNoFiles) && (
           <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in shadow-xs">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
