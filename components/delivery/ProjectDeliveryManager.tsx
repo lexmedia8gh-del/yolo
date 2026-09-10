@@ -33,6 +33,8 @@ import {
   RotateCcw,
   Wifi,
   WifiOff,
+  Send,
+  Mail,
 } from 'lucide-react'
 import { ResumableUploadTask, UploadTaskProgress } from '@/lib/supabase/resumable'
 import { Button } from '@/components/ui/Button'
@@ -140,6 +142,8 @@ export function ProjectDeliveryManager({
   const [customDays, setCustomDays] = useState<number>(14)
   const [isRegenerating, setIsRegenerating] = useState(false)
   const [isReleasing, setIsReleasing] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [resendingEmail, setResendingEmail] = useState(false)
   const [copiedLink, setCopiedLink] = useState(false)
   const [sendingWA, setSendingWA] = useState(false)
   const [waSent, setWaSent] = useState(false)
@@ -678,9 +682,24 @@ export function ProjectDeliveryManager({
     }
   }
 
-  const handleDirectRelease = async () => {
-    if (!delivery) return
-    setIsReleasing(true)
+  const handleSubmitDelivery = async (isResend = false) => {
+    if (!delivery) {
+      toast.error('Delivery record is still initializing.')
+      return
+    }
+
+    if (files.length === 0) {
+      toast.error('Please upload at least one file before submitting delivery.')
+      return
+    }
+
+    if (isResend) {
+      setResendingEmail(true)
+    } else {
+      setIsSubmitting(true)
+      setIsReleasing(true)
+    }
+
     try {
       const res = await fetch('/api/delivery/release', {
         method: 'POST',
@@ -688,12 +707,15 @@ export function ProjectDeliveryManager({
         body: JSON.stringify({
           deliveryId: delivery.id,
           release: true,
+          resendEmail: isResend,
+          quickJobId: resolvedQuickJobId || undefined,
+          projectId: resolvedProjectId || undefined,
         }),
       })
 
       const data = await res.json()
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to release delivery')
+        throw new Error(data.error || 'Failed to submit delivery')
       }
 
       setCanonicalUrl(data.publicUrl || '')
@@ -703,20 +725,44 @@ export function ProjectDeliveryManager({
               ...prev,
               isReleased: true,
               accessToken: data.accessToken || prev.accessToken,
-              status: data.status || 'Ready for Delivery',
+              status: data.status || 'Delivered',
               releasedAt: Timestamp.now() as any,
+              notifyEmailSent: data.emailNotification?.sent ?? prev.notifyEmailSent,
+              notifyEmailError: data.emailNotification?.error ?? null,
+              notifyEmailMessageId: data.emailNotification?.messageId ?? prev.notifyEmailMessageId,
             }
           : null
       )
 
-      toast.success('Delivery released! Files are now accessible by client.')
+      if (data.emailNotification?.sent) {
+        toast.success(
+          isResend
+            ? 'Delivery notification email resent via Brevo!'
+            : 'Delivery submitted! Client notification email sent via Brevo.'
+        )
+      } else if (data.emailNotification?.skipped) {
+        toast.success('Delivery finalized! (Notification was previously sent)')
+      } else if (data.emailNotification?.error) {
+        toast.error(`Delivery created, but email could not be sent: ${data.emailNotification.error}`)
+      } else {
+        toast.success('Delivery submitted and finalized!')
+      }
+
+      onUpdate?.({
+        deliveryStatus: 'Sent',
+        status: 'Completed',
+      })
     } catch (err: any) {
-      console.error('Direct release error:', err)
-      toast.error(err?.message || 'Failed to release delivery.')
+      console.error('Submit delivery error:', err)
+      toast.error(err?.message || 'Failed to submit delivery.')
     } finally {
+      setIsSubmitting(false)
       setIsReleasing(false)
+      setResendingEmail(false)
     }
   }
+
+  const handleDirectRelease = () => handleSubmitDelivery(false)
 
   // 7. Update Expiration Settings
   const handleSaveExpiration = async () => {
@@ -1097,7 +1143,7 @@ export function ProjectDeliveryManager({
             </div>
           </div>
 
-          {/* Action Control: Admin Release, Release Delivery, or Revoke Release */}
+          {/* Action Control: Admin Release, Submit Delivery, or Revoke Release */}
           <div className="flex items-center gap-2 shrink-0">
             {deliveryStatus === 'Locked' && (
               <Button
@@ -1115,32 +1161,63 @@ export function ProjectDeliveryManager({
               </Button>
             )}
 
-            {deliveryStatus === 'Ready' && (
-              <Button
-                size="sm"
-                variant="primary"
-                loading={isReleasing}
-                onClick={handleDirectRelease}
-                icon={<Unlock size={14} />}
-              >
-                Release Delivery
-              </Button>
+            {deliveryStatus !== 'Locked' && deliveryStatus !== 'Released' && (
+              files.length === 0 ? (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled
+                  className="opacity-50 cursor-not-allowed text-xs"
+                >
+                  Upload files to continue
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  loading={isSubmitting || isReleasing}
+                  disabled={isSubmitting || isReleasing}
+                  onClick={() => handleSubmitDelivery(false)}
+                  icon={<Send size={14} />}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-xs"
+                >
+                  {isSubmitting ? 'Sending Delivery...' : 'Submit Delivery'}
+                </Button>
+              )
             )}
 
             {deliveryStatus === 'Released' && (
-              <Button
-                size="sm"
-                variant="outline"
-                loading={isReleasing}
-                onClick={() => {
-                  setRevokeConfirmed(false)
-                  setShowRevokeReleaseModal(true)
-                }}
-                icon={<Lock size={14} />}
-                className="border-gray-300 text-gray-700 bg-white hover:bg-gray-100"
-              >
-                Revoke Release
-              </Button>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
+                  <CheckCircle2 size={13} className="text-emerald-600" />
+                  Delivery Sent
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  loading={resendingEmail}
+                  disabled={resendingEmail}
+                  onClick={() => handleSubmitDelivery(true)}
+                  icon={<Mail size={12} />}
+                  className="text-xs text-gray-700 bg-white hover:bg-gray-50 border-gray-300"
+                  title="Resend delivery email notification to client"
+                >
+                  {resendingEmail ? 'Sending...' : 'Resend Email'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  loading={isReleasing}
+                  onClick={() => {
+                    setRevokeConfirmed(false)
+                    setShowRevokeReleaseModal(true)
+                  }}
+                  icon={<Lock size={12} />}
+                  className="border-gray-200 text-gray-600 bg-white hover:bg-gray-50 text-xs"
+                >
+                  Revoke
+                </Button>
+              </div>
             )}
           </div>
         </div>
@@ -1483,6 +1560,134 @@ export function ProjectDeliveryManager({
             </div>
           )}
         </div>
+
+        {/* SUBMIT DELIVERY ACTION / STATUS PANEL */}
+        {!isReleased && deliveryStatus !== 'Locked' && (
+          <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in shadow-xs">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <div className={`w-7 h-7 rounded-lg ${files.length > 0 ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-500'} flex items-center justify-center shrink-0`}>
+                  <Send size={14} />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-indigo-950 uppercase tracking-wider">
+                    {files.length > 0 ? `Ready to Submit Delivery (${files.length} ${files.length === 1 ? 'file' : 'files'} ready)` : 'Awaiting Delivery Files'}
+                  </h4>
+                  <p className="text-xs text-indigo-800">
+                    {files.length > 0
+                      ? `Submitting will lock in deliverables, activate client portal access, and dispatch the Brevo delivery notification email to ${resolvedClientName}.`
+                      : 'Please upload or select required delivery files to continue.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <Button
+              size="md"
+              variant={files.length > 0 ? 'primary' : 'outline'}
+              loading={isSubmitting || isReleasing}
+              disabled={isSubmitting || isReleasing || files.length === 0}
+              onClick={() => handleSubmitDelivery(false)}
+              icon={files.length > 0 ? <Send size={15} /> : undefined}
+              className={`font-semibold text-xs shadow-xs shrink-0 w-full sm:w-auto ${
+                files.length > 0
+                  ? 'bg-indigo-650 hover:bg-indigo-700 text-white'
+                  : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+              }`}
+            >
+              {isSubmitting || isReleasing
+                ? '⟳ Sending Delivery...'
+                : files.length > 0
+                ? 'Submit Delivery'
+                : 'Upload files to continue'}
+            </Button>
+          </div>
+        )}
+
+        {/* DELIVERY SUBMITTED & NOTIFICATION STATUS BANNER */}
+        {isReleased && (
+          <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/60 space-y-3 animate-fade-in">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                  <CheckCircle2 size={15} />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-emerald-950 uppercase tracking-wider">
+                    ✓ Delivery Sent
+                  </h4>
+                  <p className="text-xs text-emerald-800">
+                    The deliverables are active and available for client download.
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                <Check size={12} />
+                ✓ Delivery Sent
+              </span>
+            </div>
+
+            {/* Brevo Email Status Banner */}
+            {delivery?.notifyEmailSent ? (
+              <div className="p-3 bg-white/90 rounded-lg border border-emerald-200 text-xs text-emerald-900 flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <Mail size={14} className="text-emerald-600 shrink-0" />
+                  <span>
+                    Brevo delivery notification email sent successfully to <strong>{client?.email || quickJob?.clientEmail || resolvedClientName}</strong>.
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  loading={resendingEmail}
+                  disabled={resendingEmail}
+                  onClick={() => handleSubmitDelivery(true)}
+                  icon={<RotateCcw size={12} />}
+                  className="text-xs text-emerald-800 border-emerald-300 hover:bg-emerald-50 bg-white"
+                >
+                  {resendingEmail ? 'Resending...' : 'Resend Email'}
+                </Button>
+              </div>
+            ) : delivery?.notifyEmailError ? (
+              <div className="p-3 bg-amber-50 rounded-lg border border-amber-300 text-xs text-amber-900 flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertCircle size={15} className="text-amber-600 shrink-0" />
+                  <span>
+                    ⚠ Delivery created, but email could not be sent: <em>{delivery.notifyEmailError}</em>
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  loading={resendingEmail}
+                  disabled={resendingEmail}
+                  onClick={() => handleSubmitDelivery(true)}
+                  icon={<RotateCcw size={12} />}
+                  className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+                >
+                  {resendingEmail ? 'Retrying...' : 'Retry Brevo Email'}
+                </Button>
+              </div>
+            ) : (
+              <div className="p-3 bg-white/90 rounded-lg border border-gray-200 text-xs text-gray-700 flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <Mail size={14} className="text-gray-500 shrink-0" />
+                  <span>Ready to notify client via Brevo email.</span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  loading={resendingEmail}
+                  disabled={resendingEmail}
+                  onClick={() => handleSubmitDelivery(true)}
+                  icon={<Send size={12} />}
+                  className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
+                >
+                  {resendingEmail ? 'Sending...' : 'Send Delivery Email'}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Expiration Settings Modal */}
