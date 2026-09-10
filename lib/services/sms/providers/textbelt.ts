@@ -49,12 +49,25 @@ export class TextbeltProvider implements SmsProvider {
     const apiKey = this.getApiKey()
     const isTestKey = apiKey === 'textbelt'
 
+    let finalMessage = message.trim()
+    let urlRemovedNotice = ''
+
+    if (isTestKey) {
+      // Automatically detect and remove URLs (http://, https://, www., or standard domains) for Textbelt free SMS
+      const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,}(?:\/[^\s]*)?)/gi
+      if (urlRegex.test(finalMessage)) {
+        finalMessage = finalMessage.replace(urlRegex, '').replace(/\s+/g, ' ').trim()
+        urlRemovedNotice = ' Links were removed because Textbelt free SMS does not support URLs.'
+      }
+    }
+
     // Server-side debug log (safe: never exposes the secret API key value)
     console.log('[Textbelt Provider] Preparing SMS request:', {
       recipient: normalizedPhone,
-      messageLength: message.trim().length,
+      messageLength: finalMessage.length,
       isTestKey,
       hasCustomApiKey: !isTestKey,
+      urlRemovedNotice: Boolean(urlRemovedNotice),
     })
 
     // 4. Send SMS via Textbelt HTTP API
@@ -67,7 +80,7 @@ export class TextbeltProvider implements SmsProvider {
         },
         body: JSON.stringify({
           phone: normalizedPhone,
-          message: message.trim(),
+          message: finalMessage,
           key: apiKey,
           ...(senderId ? { sender: senderId } : {}),
         }),
@@ -89,7 +102,7 @@ export class TextbeltProvider implements SmsProvider {
       if (data && data.success === true) {
         let statusMessage = 'SMS request accepted by provider'
         if (isTestKey) {
-          statusMessage = 'SMS request accepted by Textbelt using test key ("textbelt"). Note: Handset delivery requires a paid Textbelt API key.'
+          statusMessage = `SMS request accepted by Textbelt using test key ("textbelt").${urlRemovedNotice} Note: Handset delivery requires a paid Textbelt API key.`
         }
 
         return {
