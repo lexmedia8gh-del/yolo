@@ -379,6 +379,24 @@ export function getAppUrl(context?: any): string {
         const proto = getHeader('x-forwarded-proto') || (host && host.includes('localhost') ? 'http' : 'https')
         if (host) {
           const cleanHost = host.split(',')[0].trim()
+          const isLocalhostHost = cleanHost.includes('localhost') || cleanHost.includes('127.0.0.1')
+          
+          if (isLocalhostHost) {
+            const configuredAppUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL
+            if (configuredAppUrl) {
+              const trimmed = configuredAppUrl.trim()
+              if (
+                trimmed &&
+                !trimmed.includes('localhost') &&
+                !trimmed.includes('127.0.0.1') &&
+                !trimmed.includes('vercel.app')
+              ) {
+                const normalized = trimmed.startsWith('http') ? trimmed : `https://${trimmed}`
+                return normalized.replace(/\/$/, '')
+              }
+            }
+          }
+          
           return `${proto}://${cleanHost}`.replace(/\/$/, '')
         }
       }
