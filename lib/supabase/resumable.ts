@@ -180,7 +180,7 @@ export class ResumableUploadTask {
   }
 
   /**
-   * Starts or resumes the file upload using standard direct upload, TUS protocol, or chunked fallback.
+   * Starts or resumes the file upload using direct browser upload to Supabase Storage.
    */
   public async start(): Promise<{ downloadUrl: string; storagePath: string }> {
     this.isCancelled = false
@@ -203,24 +203,18 @@ export class ResumableUploadTask {
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
     if (isSupabaseConfigured() && supabaseUrl && supabaseAnonKey) {
-      // For files <= 6MB, fast direct browser upload to Supabase Storage
-      if (this.fileSize <= 6 * 1024 * 1024) {
+      try {
+        return await this.startDirectStandardUpload()
+      } catch (err: any) {
+        console.warn('[Direct Upload] Upload failed, falling back to TUS resumable:', err?.message)
         try {
-          return await this.startDirectStandardUpload()
-        } catch (err: any) {
-          console.warn('[Direct Upload] Standard upload failed, falling back to TUS:', err?.message)
+          return await this.startTusUpload(supabaseUrl, supabaseAnonKey)
+        } catch (tusErr: any) {
+          throw new Error(tusErr?.message || err?.message || 'Supabase Storage upload failed.')
         }
       }
-
-      // For files > 6MB (10MB, 15MB, 25MB, 50MB+), TUS resumable upload with 2MB chunks
-      try {
-        return await this.startTusUpload(supabaseUrl, supabaseAnonKey)
-      } catch (tusErr: any) {
-        console.warn('[Resumable Upload] TUS failed, falling back to chunked server upload:', tusErr)
-        return await this.startChunkedServerUpload()
-      }
     } else {
-      return await this.startChunkedServerUpload()
+      throw new Error('Supabase Storage is not configured. Please check your settings.')
     }
   }
 
