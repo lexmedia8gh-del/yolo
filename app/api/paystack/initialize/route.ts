@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     
     let baseAppUrl: string
     try {
-      baseAppUrl = getAppUrl()
+      baseAppUrl = getAppUrl(req)
     } catch (err: any) {
       return NextResponse.json(
         { error: err.message || 'Server APP_URL is not configured for production.' },
