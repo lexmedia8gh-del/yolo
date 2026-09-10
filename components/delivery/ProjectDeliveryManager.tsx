@@ -204,12 +204,29 @@ export function ProjectDeliveryManager({
     }
   }
 
-  // 2. Stage Files Selected
+  // 2. Stage Files Selected with Pre-Upload Size Validation
   const handleFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedList = e.target.files
     if (!selectedList || selectedList.length === 0 || !delivery) return
 
-    const newStaged: StagedFile[] = Array.from(selectedList).map((f) => {
+    const MAX_FILE_SIZE_MB = 500
+    const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+
+    const validFiles: File[] = []
+    for (const f of Array.from(selectedList)) {
+      if (f.size > MAX_FILE_SIZE_BYTES) {
+        toast.error(`"${f.name}" is too large. Maximum allowed size is ${MAX_FILE_SIZE_MB} MB.`)
+      } else {
+        validFiles.push(f)
+      }
+    }
+
+    if (validFiles.length === 0) {
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      return
+    }
+
+    const newStaged: StagedFile[] = validFiles.map((f) => {
       const isImage = f.type.startsWith('image/')
       return {
         id: generateSecureToken(12),
