@@ -1,28 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAdminDb, getAdminStorage } from '@/lib/firebase/admin'
+import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 import { FieldValue } from 'firebase-admin/firestore'
-import { getSupabaseServerClient } from '@/lib/supabase/server'
-import { STORAGE_BUCKETS } from '@/lib/supabase/storage'
 import { generateSecureToken } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData()
-    const file = formData.get('file') as File | null
-    const jobId = (formData.get('jobId') as string) || ''
-    const clientId = (formData.get('clientId') as string) || ''
-    const clientName = (formData.get('clientName') as string) || ''
-    const directUrl = (formData.get('directUrl') as string) || ''
-    const directStoragePath = (formData.get('storagePath') as string) || ''
-    const directFileName = (formData.get('fileName') as string) || ''
-    const directFileSize = (formData.get('fileSize') as string) || ''
-    const directFileType = (formData.get('fileType') as string) || ''
+    let body: any = {}
+    const contentType = req.headers.get('content-type') || ''
+    
+    if (contentType.includes('application/json')) {
+      body = await req.json()
+    } else if (contentType.includes('multipart/form-data')) {
+      const formData = await req.formData()
+      body = {
+        jobId: formData.get('jobId'),
+        clientId: formData.get('clientId'),
+        clientName: formData.get('clientName'),
+        fileDocId: formData.get('fileDocId'),
+        directUrl: formData.get('directUrl'),
+        storagePath: formData.get('storagePath'),
+        fileName: formData.get('fileName'),
+        fileSize: formData.get('fileSize'),
+        fileType: formData.get('fileType'),
+      }
+    } else {
+      body = await req.json().catch(() => ({}))
+    }
+
+    const jobId = body.jobId || ''
+    const clientId = body.clientId || ''
+    const clientName = body.clientName || ''
+    const directUrl = body.directUrl || ''
+    const storagePath = body.storagePath || ''
+    const fileName = body.fileName || body.originalName || 'file'
+    const fileSize = parseInt(body.fileSize, 10) || 0
+    const fileType = body.fileType || 'application/octet-stream'
 
     if (!jobId) {
       return NextResponse.json({ error: 'Missing Quick Job ID' }, { status: 400 })
+    }
+
+    if (!directUrl || !storagePath) {
+      return NextResponse.json(
+        { error: 'Upload failed: Files must be uploaded directly to Supabase Storage. Missing direct storage URL.' },
+        { status: 400 }
+      )
     }
 
     // 1. Verify Quick Job exists & is paid
@@ -46,108 +71,11 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const fileDocId = generateSecureToken('qjf_')
-    const fileName = directFileName || (file ? file.name : 'deliverable-file')
-    const sanitizedName = fileName.replace(/[^a-zA-Z0-9._\- ]/g, '_').trim() || 'file'
-    const fileSize = directFileSize ? parseInt(directFileSize, 10) : (file ? file.size : 0)
-    const fileType = directFileType || (file ? (file.type || fileName.split('.').pop() || 'application/octet-stream') : 'application/octet-stream')
+    const fileDocId = body.fileDocId || generateSecureToken('qjf_')
+    const downloadUrl = directUrl
+    const storageProvider = 'supabase'
 
-    let downloadUrl = directUrl
-    let storagePath = directStoragePath || `quick-jobs/${jobId}/${fileDocId}/${sanitizedName}`
-    let storageProvider = 'supabase'
-
-    // 2. Perform Server-side Upload to Supabase Storage if file buffer provided
-    if (!directUrl && file) {
-      const bytes = await file.arrayBuffer()
-      const buffer = Buffer.from(bytes)
-
-      try {
-        const supabase = getSupabaseServerClient()
-        const primaryBucket = STORAGE_BUCKETS.DELIVERY_FILES // 'Delivery files'
-        
-        let { error: uploadError } = await supabase.storage
-          .from(primaryBucket)
-          .upload(storagePath, buffer, {
-            contentType: fileType,
-            upsert: true,
-          })
-
-        // If primary bucket returned bucket not found, try creating it first
-        if (
-          uploadError &&
-          (uploadError.message.toLowerCase().includes('bucket not found') ||
-            uploadError.message.toLowerCase().includes('nosuchbucket'))
-        ) {
-          try {
-            await supabase.storage.createBucket(primaryBucket, { public: true })
-            const retry = await supabase.storage
-              .from(primaryBucket)
-              .upload(storagePath, buffer, {
-                contentType: fileType,
-                upsert: true,
-              })
-            uploadError = retry.error
-          } catch {}
-        }
-
-        // If 'Delivery files' bucket has an issue, try fallback bucket variants
-        if (uploadError) {
-          console.warn(`[Supabase Upload] Primary bucket '${primaryBucket}' error:`, uploadError.message)
-          
-          const fallbackBuckets = ['deliveries', 'delivery-files', 'quick-jobs']
-          let fallbackSuccess = false
-
-          for (const fbBucket of fallbackBuckets) {
-            const { error: fbErr } = await supabase.storage
-              .from(fbBucket)
-              .upload(storagePath, buffer, {
-                contentType: fileType,
-                upsert: true,
-              })
-
-            if (!fbErr) {
-              downloadUrl = `/api/files?id=${fileDocId}`
-              fallbackSuccess = true
-              console.log(`[Supabase Upload] Successfully stored in fallback bucket '${fbBucket}'`)
-              break
-            }
-          }
-
-          if (!fallbackSuccess) {
-            // If all Supabase buckets failed, fallback to Firebase Admin Storage or stream endpoint
-            console.warn('[Supabase Upload] Falling back to secondary storage provider:', uploadError.message)
-            try {
-              const adminStorage = getAdminStorage()
-              const bucket = adminStorage.bucket()
-              const gcsFile = bucket.file(storagePath)
-              await gcsFile.save(buffer, {
-                metadata: { contentType: fileType },
-                resumable: false,
-              })
-              storageProvider = 'firebase'
-              downloadUrl = `/api/files?id=${fileDocId}`
-            } catch (firebaseErr: any) {
-              console.warn('[Firebase Storage Fallback Warning]:', firebaseErr.message)
-              // Final resilient fallback: Stream route directly
-              downloadUrl = `/api/files?id=${fileDocId}`
-            }
-          }
-        } else {
-          // Primary bucket succeeded
-          downloadUrl = `/api/files?id=${fileDocId}`
-        }
-      } catch (storageErr: any) {
-        console.error('[Storage Error in Quick Jobs upload]:', storageErr)
-        downloadUrl = `/api/files?id=${fileDocId}`
-      }
-    }
-
-    // If still no download URL, set default stream URL
-    if (!downloadUrl) {
-      downloadUrl = `/api/files?id=${fileDocId}`
-    }
-
-    // 3. Save File Document to Firestore
+    // 2. Save File Document to Firestore
     const fileRecord = {
       id: fileDocId,
       quickJobId: jobId,
@@ -167,7 +95,7 @@ export async function POST(req: NextRequest) {
 
     await adminDb.collection(COLLECTIONS.DELIVERY_FILES).doc(fileDocId).set(fileRecord)
 
-    // 4. Update or Create linked Deliveries record
+    // 3. Update or Create linked Deliveries record
     const delivSnap = await adminDb
       .collection(COLLECTIONS.DELIVERIES)
       .where('quickJobId', '==', jobId)
@@ -175,12 +103,11 @@ export async function POST(req: NextRequest) {
       .get()
 
     let deliveryId = ''
-    let existingFiles: any[] = []
 
     if (!delivSnap.empty) {
       const delivDoc = delivSnap.docs[0]
       deliveryId = delivDoc.id
-      existingFiles = delivDoc.data().files || []
+      const existingFiles = delivDoc.data().files || []
       
       const newFileList = [
         ...existingFiles,

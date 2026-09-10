@@ -50,6 +50,7 @@ import type { QuickJob, ClientLink, Delivery, DeliveryFile } from '@/lib/types'
 import toast from 'react-hot-toast'
 import { isSupabaseConfigured, getSupabaseClient } from '@/lib/supabase/client'
 import { STORAGE_BUCKETS } from '@/lib/supabase/storage'
+import * as tus from 'tus-js-client'
 
 const QUICK_JOBS_MAX_FILE_SIZE = 500 * 1024 * 1024 // 500 MB limit
 
@@ -296,7 +297,7 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
     }
   }
 
-  // Helper for uploading single file directly to Supabase Storage or via fallback legacy upload
+  // Helper for uploading single file directly to Supabase Storage (supporting large files via TUS or direct upload)
   const uploadQuickJobFile = async (file: File, onProgress?: (percent: number) => void): Promise<any> => {
     if (file.size > QUICK_JOBS_MAX_FILE_SIZE) {
       throw new Error(`Upload failed: The file is larger than the Quick Jobs upload limit (${Math.round(QUICK_JOBS_MAX_FILE_SIZE / (1024 * 1024))} MB).`)
@@ -306,123 +307,152 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
     const fileDocId = generateSecureToken('qjf_')
     const storagePath = `quick-jobs/${currentJob.id}/${fileDocId}/${sanitizedName}`
 
-    if (isSupabaseConfigured()) {
-      try {
-        if (onProgress) onProgress(10)
-        const supabase = getSupabaseClient()
-        const primaryBucket = STORAGE_BUCKETS.DELIVERY_FILES // 'Delivery files'
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase Storage is not configured. Please configure Supabase in settings to upload files.')
+    }
 
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from(primaryBucket)
-          .upload(storagePath, file, {
-            contentType: file.type || 'application/octet-stream',
-            upsert: true,
-          })
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
-        if (uploadError) {
-          throw new Error(uploadError.message || 'Supabase Storage upload failed.')
-        }
+    if (file.size <= 6 * 1024 * 1024) {
+      // Direct standard upload for files <= 6MB
+      if (onProgress) onProgress(15)
+      const supabase = getSupabaseClient()
+      const primaryBucket = STORAGE_BUCKETS.DELIVERY_FILES // 'Delivery files'
 
-        if (onProgress) onProgress(70)
-
-        const { data: urlData } = supabase.storage
-          .from(primaryBucket)
-          .getPublicUrl(uploadData?.path || storagePath)
-
-        const directUrl = urlData?.publicUrl || `/api/files?id=${fileDocId}`
-
-        if (onProgress) onProgress(85)
-
-        const res = await fetch('/api/quick-jobs/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jobId: currentJob.id,
-            clientId: currentJob.clientId || '',
-            clientName: currentJob.clientName || '',
-            fileDocId,
-            directUrl,
-            storagePath,
-            fileName: file.name,
-            fileSize: file.size,
-            fileType: file.type || file.name.split('.').pop() || 'application/octet-stream',
-          }),
+      let { error: uploadError } = await supabase.storage
+        .from(primaryBucket)
+        .upload(storagePath, file, {
+          contentType: file.type || 'application/octet-stream',
+          upsert: true,
         })
 
-        const resData = await res.json()
-        if (!res.ok || !resData.success) {
-          throw new Error(resData.error || 'Server metadata registration failed.')
-        }
-
-        if (onProgress) onProgress(100)
-        return resData.file
-      } catch (supErr: any) {
-        console.warn('Direct upload error in Quick Jobs, falling back to legacy upload:', supErr?.message)
-        return await uploadQuickJobFileLegacy(file, onProgress)
+      if (uploadError && (uploadError.message.toLowerCase().includes('bucket not found') || uploadError.message.toLowerCase().includes('nosuchbucket'))) {
+        try {
+          await supabase.storage.createBucket(primaryBucket, { public: true })
+          const retry = await supabase.storage
+            .from(primaryBucket)
+            .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: true })
+          uploadError = retry.error
+        } catch {}
       }
-    } else {
-      return await uploadQuickJobFileLegacy(file, onProgress)
-    }
-  }
 
-  // Legacy fallback using XMLHttpRequest
-  const uploadQuickJobFileLegacy = (file: File, onProgress?: (percent: number) => void): Promise<any> => {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest()
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('jobId', currentJob.id)
-      formData.append('clientId', currentJob.clientId || '')
-      formData.append('clientName', currentJob.clientName || '')
-      formData.append('fileName', file.name)
-      formData.append('fileSize', String(file.size))
-      formData.append('fileType', file.type || file.name.split('.').pop() || 'application/octet-stream')
+      if (uploadError) {
+        throw new Error(`Supabase Storage upload failed: ${uploadError.message}`)
+      }
 
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable && onProgress) {
-          const percent = Math.round((e.loaded / e.total) * 100)
-          onProgress(percent)
-        }
+      if (onProgress) onProgress(75)
+
+      const { data: urlData } = supabase.storage
+        .from(primaryBucket)
+        .getPublicUrl(storagePath)
+
+      const directUrl = urlData?.publicUrl || `/api/files?id=${fileDocId}`
+
+      if (onProgress) onProgress(90)
+
+      const res = await fetch('/api/quick-jobs/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobId: currentJob.id,
+          clientId: currentJob.clientId || '',
+          clientName: currentJob.clientName || '',
+          fileDocId,
+          directUrl,
+          storagePath,
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type || file.name.split('.').pop() || 'application/octet-stream',
+        }),
       })
 
-      xhr.timeout = 5 * 60 * 1000 // 5 minutes
-      xhr.ontimeout = () => {
-        reject(new Error('Upload failed: Your connection was interrupted or timed out. Please try again.'))
+      const resData = await res.json()
+      if (!res.ok || !resData.success) {
+        throw new Error(resData.error || 'Server metadata registration failed.')
       }
 
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const res = JSON.parse(xhr.responseText)
-            if (res.file) {
-              resolve(res.file)
-            } else {
-              reject(new Error(res.error || 'Upload failed.'))
-            }
-          } catch {
-            reject(new Error('Invalid response from storage server.'))
-          }
-        } else {
-          try {
-            const errRes = JSON.parse(xhr.responseText)
-            reject(new Error(errRes.error || `Upload failed with HTTP ${xhr.status}`))
-          } catch {
-            if (xhr.status === 413) {
-              reject(new Error('Upload failed: The server rejected the upload because the request was too large (HTTP 413).'))
-            } else {
-              reject(new Error(`Upload failed with HTTP ${xhr.status}`))
-            }
-          }
+      if (onProgress) onProgress(100)
+      return resData.file
+    } else {
+      // TUS resumable upload for files > 6MB (10MB, 20MB, 50MB, 100MB+)
+      return new Promise((resolve, reject) => {
+        if (!supabaseUrl || !supabaseAnonKey) {
+          reject(new Error('Supabase URL or Anon Key is missing for resumable upload.'))
+          return
         }
-      }
 
-      xhr.onerror = () => {
-        reject(new Error('Upload failed: Network error during file upload. Please check storage connection.'))
-      }
+        const endpoint = `${supabaseUrl.replace(/\/$/, '')}/storage/v1/upload/resumable`
+        if (onProgress) onProgress(5)
 
-      xhr.open('POST', '/api/quick-jobs/upload')
-      xhr.send(formData)
-    })
+        const upload = new tus.Upload(file, {
+          endpoint,
+          chunkSize: 1 * 1024 * 1024, // 1MB chunks
+          retryDelays: [0, 1000, 2000, 4000, 8000, 16000],
+          removeFingerprintOnSuccess: true,
+          headers: {
+            authorization: `Bearer ${supabaseAnonKey}`,
+            apikey: supabaseAnonKey,
+            'x-upsert': 'true',
+          },
+          metadata: {
+            bucketName: STORAGE_BUCKETS.DELIVERY_FILES,
+            objectName: storagePath,
+            contentType: file.type || 'application/octet-stream',
+            cacheControl: '3600',
+          },
+          onError: (err: any) => {
+            reject(new Error(err?.message || 'TUS upload failed.'))
+          },
+          onProgress: (bytesUploaded, bytesTotal) => {
+            if (onProgress) {
+              const pct = Math.round((bytesUploaded / bytesTotal) * 80) + 10
+              onProgress(Math.min(90, pct))
+            }
+          },
+          onSuccess: async () => {
+            try {
+              if (onProgress) onProgress(92)
+              const supabase = getSupabaseClient()
+              const { data: urlData } = supabase.storage
+                .from(STORAGE_BUCKETS.DELIVERY_FILES)
+                .getPublicUrl(storagePath)
+
+              const directUrl = urlData?.publicUrl || `/api/files?id=${fileDocId}`
+              if (onProgress) onProgress(96)
+
+              const res = await fetch('/api/quick-jobs/upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  jobId: currentJob.id,
+                  clientId: currentJob.clientId || '',
+                  clientName: currentJob.clientName || '',
+                  fileDocId,
+                  directUrl,
+                  storagePath,
+                  fileName: file.name,
+                  fileSize: file.size,
+                  fileType: file.type || file.name.split('.').pop() || 'application/octet-stream',
+                }),
+              })
+
+              const resData = await res.json()
+              if (!res.ok || !resData.success) {
+                throw new Error(resData.error || 'Server metadata registration failed.')
+              }
+
+              if (onProgress) onProgress(100)
+              resolve(resData.file)
+            } catch (regErr: any) {
+              reject(regErr)
+            }
+          },
+        })
+
+        upload.start()
+      })
+    }
   }
 
   // Handle File Selection and Upload
