@@ -20,11 +20,12 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { deliveryId, release, reason, adminOverride: explicitAdminOverride } = body as {
+    const { deliveryId, release, reason, adminOverride: explicitAdminOverride, resendEmail } = body as {
       deliveryId: string
       release: boolean
       reason?: string
       adminOverride?: boolean
+      resendEmail?: boolean
     }
 
     if (!deliveryId) {
@@ -42,7 +43,15 @@ export async function POST(req: NextRequest) {
     const deliveryData = snap.data()!
     const willRelease = release !== false // default true
 
-    // Check if project or invoice has outstanding balance to mark as admin override
+    // Verify files exist for this delivery record if we are attempting to release/submit
+    if (willRelease) {
+      const filesSnap = await adminDb.collection(COLLECTIONS.DELIVERY_FILES).where('deliveryId', '==', deliveryId).get()
+      if (filesSnap.empty) {
+        return NextResponse.json({ error: 'Please upload at least one file before submitting delivery.' }, { status: 400 })
+      }
+    }
+
+    // Check if project, invoice, or quick job has outstanding balance to mark as admin override
     let isPaymentOutstanding = true
     if (deliveryData.invoiceId) {
       try {
@@ -55,6 +64,31 @@ export async function POST(req: NextRequest) {
         }
       } catch (e) {
         console.warn('Could not verify invoice status for delivery release:', e)
+      }
+    } else if (deliveryData.quickJobId) {
+      try {
+        const qjSnap = await adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(deliveryData.quickJobId).get()
+        if (qjSnap.exists) {
+          const qjData = qjSnap.data()!
+          
+          // Verify payment is actually verified/"paid"
+          const isPaid = qjData.paymentStatus === 'Paid' || 
+            (Number(qjData.outstandingBalance) <= 0 && Number(qjData.amountPaid) >= Number(qjData.originalAgreedPrice))
+          
+          if (willRelease && !isPaid) {
+            return NextResponse.json({ error: 'Cannot submit delivery. Quick Job payment must be confirmed first.' }, { status: 400 })
+          }
+          if (isPaid) {
+            isPaymentOutstanding = false
+          }
+        } else if (willRelease) {
+          return NextResponse.json({ error: 'Associated Quick Job not found.' }, { status: 404 })
+        }
+      } catch (e) {
+        console.warn('Could not verify quick job status for delivery release:', e)
+        if (willRelease) {
+          return NextResponse.json({ error: 'Failed to verify payment status' }, { status: 500 })
+        }
       }
     }
 
@@ -90,7 +124,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Check duplicate notification email flag
-      if (deliveryData.notifyEmailSent) {
+      if (deliveryData.notifyEmailSent && !resendEmail) {
         emailNotificationStatus = { sent: false, skipped: true, error: 'Email notification was already sent for this delivery' }
       } else {
         // Fetch client email from Firestore (server truth)
@@ -131,12 +165,17 @@ export async function POST(req: NextRequest) {
             updates.notifyEmailSent = true
             updates.notifyEmailSentAt = FieldValue.serverTimestamp()
             updates.notifyEmailMessageId = emailRes.messageId || null
+            updates.notifyEmailError = null
             emailNotificationStatus = { sent: true, messageId: emailRes.messageId }
           } else {
+            updates.notifyEmailSent = false
+            updates.notifyEmailError = emailRes.error || 'Failed to send email via Brevo'
             emailNotificationStatus = { sent: false, error: emailRes.error }
             console.warn(`[Delivery Release] Brevo email notification failed for delivery ${deliveryId}:`, emailRes.error)
           }
         } else {
+          updates.notifyEmailSent = false
+          updates.notifyEmailError = 'Client email address is missing'
           emailNotificationStatus = { sent: false, error: 'Client email address is missing' }
           console.warn(`[Delivery Release] No email address found for client ${deliveryData.clientId}`)
         }
@@ -150,6 +189,20 @@ export async function POST(req: NextRequest) {
     }
 
     await deliveryRef.update(updates)
+
+    // Update associated Quick Job status if applicable
+    if (deliveryData.quickJobId && willRelease) {
+      try {
+        const qjRef = adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(deliveryData.quickJobId)
+        await qjRef.update({
+          deliveryStatus: 'Sent',
+          status: 'Completed',
+          updatedAt: FieldValue.serverTimestamp(),
+        })
+      } catch (e) {
+        console.warn('Could not update Quick Job status on delivery release:', e)
+      }
+    }
 
     // Log activity
     if (willRelease) {

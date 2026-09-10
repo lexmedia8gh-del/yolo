@@ -888,6 +888,9 @@ export function ProjectDeliveryManager({
   const isReleased = Boolean(delivery?.isReleased || delivery?.status === 'Delivered' || delivery?.status === 'Downloaded')
   const hasFiles = files.length > 0
 
+  const isUploadLockedForQuickJob = Boolean(quickJob && !isFullyPaid)
+  const isQuickJobFullyPaidNoFiles = Boolean(quickJob && isFullyPaid && !hasFiles)
+
   // The 3-state delivery status system: Locked | Ready | Released
   let deliveryStatus: 'Locked' | 'Ready' | 'Released' = 'Locked'
   if (isReleased) {
@@ -991,19 +994,25 @@ export function ProjectDeliveryManager({
           <button
             type="button"
             onClick={() => {
+              if (isUploadLockedForQuickJob) {
+                toast.error('Upload is locked until client payment is confirmed.')
+                return
+              }
               if (!delivery) {
                 toast.error('Delivery record is still loading or failed to initialize.')
                 return
               }
               fileInputRef.current?.click()
             }}
-            disabled={isUploading || !delivery}
-            className={`inline-flex items-center justify-center font-medium transition-all duration-150 rounded-lg gap-1.5 h-8 px-3 text-xs shadow-sm select-none cursor-pointer bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800 ${
-              isUploading || !delivery ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''
-            }`}
+            disabled={isUploading || !delivery || isUploadLockedForQuickJob}
+            className={`inline-flex items-center justify-center font-medium transition-all duration-150 rounded-lg gap-1.5 h-8 px-3 text-xs shadow-sm select-none cursor-pointer ${
+              isUploadLockedForQuickJob
+                ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed pointer-events-none'
+                : 'bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800'
+            } ${isUploading || !delivery ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`}
           >
-            <Upload size={14} />
-            <span>Upload Final Files</span>
+            {isUploadLockedForQuickJob ? <Lock size={14} /> : <Upload size={14} />}
+            <span>{isUploadLockedForQuickJob ? 'Upload Locked' : 'Upload Final Files'}</span>
           </button>
 
           <Button
@@ -1033,6 +1042,135 @@ export function ProjectDeliveryManager({
       </div>
 
       <div className="p-5 space-y-6">
+        {quickJob && (
+          <div className="p-4 rounded-xl border border-indigo-100 bg-indigo-50/10 space-y-3">
+            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Quick Job Delivery Flow</h4>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              {/* Step 1: Payment */}
+              <div className={`p-3 rounded-lg border flex items-center gap-3 ${
+                isFullyPaid 
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
+                  : 'bg-amber-50 border-amber-200 text-amber-900'
+              }`}>
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs font-bold ${
+                  isFullyPaid ? 'bg-emerald-600 text-white' : 'bg-amber-500 text-white'
+                }`}>
+                  {isFullyPaid ? '✓' : '1'}
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider">Payment Status</p>
+                  <p className="text-xs font-semibold mt-0.5">
+                    {isFullyPaid ? 'Payment Confirmed' : 'Awaiting Payment'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Step 2: Upload */}
+              <div className={`p-3 rounded-lg border flex items-center gap-3 ${
+                isReleased 
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : hasFiles 
+                  ? 'bg-indigo-50 border-indigo-200 text-indigo-900' 
+                  : !isFullyPaid 
+                  ? 'bg-gray-50 border-gray-200 text-gray-400' 
+                  : 'bg-blue-50 border-blue-200 text-blue-900'
+              }`}>
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs font-bold ${
+                  isReleased 
+                    ? 'bg-emerald-600 text-white'
+                    : hasFiles 
+                    ? 'bg-indigo-600 text-white' 
+                    : !isFullyPaid 
+                    ? 'bg-gray-200 text-gray-400' 
+                    : 'bg-blue-500 text-white'
+                }`}>
+                  {isReleased || hasFiles ? '✓' : '2'}
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider">Deliverables Upload</p>
+                  <p className="text-xs font-semibold mt-0.5">
+                    {!isFullyPaid 
+                      ? '🔒 Upload Locked' 
+                      : hasFiles 
+                      ? '✓ Upload Unlocked' 
+                      : '✓ Ready to Upload'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Step 3: Ready to Submit */}
+              <div className={`p-3 rounded-lg border flex items-center gap-3 ${
+                isReleased
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : (isSubmitting || isReleasing)
+                  ? 'bg-amber-50 border-amber-200 text-amber-900'
+                  : hasFiles 
+                  ? 'bg-indigo-50 border-indigo-200 text-indigo-900 animate-pulse'
+                  : 'bg-gray-50 border-gray-200 text-gray-400'
+              }`}>
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs font-bold ${
+                  isReleased 
+                    ? 'bg-emerald-600 text-white'
+                    : (isSubmitting || isReleasing)
+                    ? 'bg-amber-500 text-white'
+                    : hasFiles 
+                    ? 'bg-indigo-600 text-white' 
+                    : 'bg-gray-200 text-gray-400'
+                }`}>
+                  {isReleased ? '✓' : '3'}
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider">Submission State</p>
+                  <p className="text-xs font-semibold mt-0.5">
+                    {isReleased 
+                      ? 'Files Submitted' 
+                      : (isSubmitting || isReleasing)
+                      ? 'Processing Delivery'
+                      : hasFiles 
+                      ? 'Files ready for submission' 
+                      : 'Pending Upload'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Step 4: Notification Status */}
+              <div className={`p-3 rounded-lg border flex items-center gap-3 ${
+                isReleased
+                  ? delivery?.notifyEmailSent
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                    : delivery?.notifyEmailError
+                    ? 'bg-rose-50 border-rose-200 text-rose-900'
+                    : 'bg-blue-50 border-blue-200 text-blue-900'
+                  : 'bg-gray-50 border-gray-200 text-gray-400'
+              }`}>
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs font-bold ${
+                  isReleased
+                    ? delivery?.notifyEmailSent
+                      ? 'bg-emerald-600 text-white'
+                      : delivery?.notifyEmailError
+                      ? 'bg-rose-600 text-white'
+                      : 'bg-blue-500 text-white'
+                    : 'bg-gray-200 text-gray-400'
+                }`}>
+                  {isReleased && delivery?.notifyEmailSent ? '✓' : '4'}
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider">Brevo Notification</p>
+                  <p className="text-xs font-semibold mt-0.5">
+                    {isReleased
+                      ? delivery?.notifyEmailSent
+                        ? '✓ Delivered'
+                        : delivery?.notifyEmailError
+                        ? 'Email Error ⚠'
+                        : 'Sending...'
+                      : 'Awaiting Submission'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Status Metrics Bar */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="p-3.5 rounded-xl bg-gray-50/80 border border-gray-200/80">
@@ -1145,7 +1283,7 @@ export function ProjectDeliveryManager({
 
           {/* Action Control: Admin Release, Submit Delivery, or Revoke Release */}
           <div className="flex items-center gap-2 shrink-0">
-            {deliveryStatus === 'Locked' && (
+            {deliveryStatus === 'Locked' && !isQuickJobFullyPaidNoFiles && (
               <Button
                 size="sm"
                 variant="primary"
@@ -1161,13 +1299,13 @@ export function ProjectDeliveryManager({
               </Button>
             )}
 
-            {deliveryStatus !== 'Locked' && deliveryStatus !== 'Released' && (
+            {(deliveryStatus !== 'Locked' || isQuickJobFullyPaidNoFiles) && deliveryStatus !== 'Released' && (
               files.length === 0 ? (
                 <Button
                   size="sm"
                   variant="primary"
                   disabled
-                  className="opacity-50 cursor-not-allowed text-xs"
+                  className="opacity-50 cursor-not-allowed text-xs bg-gray-100 text-gray-400 border border-gray-200"
                 >
                   Upload files to continue
                 </Button>
@@ -1181,7 +1319,7 @@ export function ProjectDeliveryManager({
                   icon={<Send size={14} />}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-xs"
                 >
-                  {isSubmitting ? 'Sending Delivery...' : 'Submit Delivery'}
+                  {isSubmitting ? '⟳ Sending Delivery...' : 'Submit Delivery'}
                 </Button>
               )
             )}
@@ -1501,14 +1639,24 @@ export function ProjectDeliveryManager({
           </div>
 
           {files.length === 0 ? (
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              className="py-12 text-center bg-gray-50/60 rounded-xl border border-dashed border-gray-300 hover:bg-gray-50 transition-colors cursor-pointer space-y-2"
-            >
-              <Upload size={24} className="mx-auto text-gray-400" />
-              <p className="text-xs font-semibold text-gray-700">Click to select and upload final delivery files</p>
-              <p className="text-[11px] text-gray-400">Supports JPG, PNG, WEBP, PDF, MP4, MOV, ZIP and more</p>
-            </div>
+            isUploadLockedForQuickJob ? (
+              <div
+                className="py-12 text-center bg-amber-50/40 rounded-xl border border-dashed border-amber-200/80 space-y-2 select-none"
+              >
+                <Lock size={24} className="mx-auto text-amber-500 animate-pulse" />
+                <p className="text-xs font-bold text-amber-900 uppercase tracking-wider">🔒 Upload Locked</p>
+                <p className="text-[11px] text-amber-700">Awaiting payment verification before unlocking deliverables upload.</p>
+              </div>
+            ) : (
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="py-12 text-center bg-gray-50/60 rounded-xl border border-dashed border-gray-300 hover:bg-gray-50 transition-colors cursor-pointer space-y-2"
+              >
+                <Upload size={24} className="mx-auto text-gray-400" />
+                <p className="text-xs font-semibold text-gray-700">Click to select and upload final delivery files</p>
+                <p className="text-[11px] text-gray-400">Supports JPG, PNG, WEBP, PDF, MP4, MOV, ZIP and more</p>
+              </div>
+            )
           ) : (
             <div className="divide-y divide-gray-100 border border-gray-200/80 rounded-xl overflow-hidden bg-white">
               {files.map((file) => (
@@ -1562,7 +1710,7 @@ export function ProjectDeliveryManager({
         </div>
 
         {/* SUBMIT DELIVERY ACTION / STATUS PANEL */}
-        {!isReleased && deliveryStatus !== 'Locked' && (
+        {!isReleased && (deliveryStatus !== 'Locked' || isQuickJobFullyPaidNoFiles) && (
           <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in shadow-xs">
             <div className="space-y-1">
               <div className="flex items-center gap-2">

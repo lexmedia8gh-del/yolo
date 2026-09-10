@@ -350,6 +350,7 @@ export interface Delivery {
   notifyEmailSent?: boolean
   notifyEmailSentAt?: Timestamp | null
   notifyEmailMessageId?: string | null
+  notifyEmailError?: string | null
   uploadEmailSent?: boolean
   uploadEmailSentAt?: Timestamp | null
   uploadEmailMessageId?: string | null
