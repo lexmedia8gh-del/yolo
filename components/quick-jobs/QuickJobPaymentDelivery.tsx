@@ -48,8 +48,10 @@ import {
 } from '@/lib/utils'
 import type { QuickJob, ClientLink, Delivery, DeliveryFile } from '@/lib/types'
 import toast from 'react-hot-toast'
-import { isSupabaseConfigured } from '@/lib/supabase/client'
+import { isSupabaseConfigured, getSupabaseClient } from '@/lib/supabase/client'
 import { STORAGE_BUCKETS } from '@/lib/supabase/storage'
+
+const QUICK_JOBS_MAX_FILE_SIZE = 500 * 1024 * 1024 // 500 MB limit
 
 interface QuickJobPaymentDeliveryProps {
   job: QuickJob
@@ -294,8 +296,77 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
     }
   }
 
-  // Helper for uploading single file to Supabase Storage via Quick Jobs Upload API
-  const uploadQuickJobFile = (file: File, onProgress?: (percent: number) => void): Promise<any> => {
+  // Helper for uploading single file directly to Supabase Storage or via fallback legacy upload
+  const uploadQuickJobFile = async (file: File, onProgress?: (percent: number) => void): Promise<any> => {
+    if (file.size > QUICK_JOBS_MAX_FILE_SIZE) {
+      throw new Error(`Upload failed: The file is larger than the Quick Jobs upload limit (${Math.round(QUICK_JOBS_MAX_FILE_SIZE / (1024 * 1024))} MB).`)
+    }
+
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9._\- ]/g, '_').trim() || 'file'
+    const fileDocId = generateSecureToken('qjf_')
+    const storagePath = `quick-jobs/${currentJob.id}/${fileDocId}/${sanitizedName}`
+
+    if (isSupabaseConfigured()) {
+      try {
+        if (onProgress) onProgress(10)
+        const supabase = getSupabaseClient()
+        const primaryBucket = STORAGE_BUCKETS.DELIVERY_FILES // 'Delivery files'
+
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from(primaryBucket)
+          .upload(storagePath, file, {
+            contentType: file.type || 'application/octet-stream',
+            upsert: true,
+          })
+
+        if (uploadError) {
+          throw new Error(uploadError.message || 'Supabase Storage upload failed.')
+        }
+
+        if (onProgress) onProgress(70)
+
+        const { data: urlData } = supabase.storage
+          .from(primaryBucket)
+          .getPublicUrl(uploadData?.path || storagePath)
+
+        const directUrl = urlData?.publicUrl || `/api/files?id=${fileDocId}`
+
+        if (onProgress) onProgress(85)
+
+        const res = await fetch('/api/quick-jobs/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jobId: currentJob.id,
+            clientId: currentJob.clientId || '',
+            clientName: currentJob.clientName || '',
+            fileDocId,
+            directUrl,
+            storagePath,
+            fileName: file.name,
+            fileSize: file.size,
+            fileType: file.type || file.name.split('.').pop() || 'application/octet-stream',
+          }),
+        })
+
+        const resData = await res.json()
+        if (!res.ok || !resData.success) {
+          throw new Error(resData.error || 'Server metadata registration failed.')
+        }
+
+        if (onProgress) onProgress(100)
+        return resData.file
+      } catch (supErr: any) {
+        console.warn('Direct upload error in Quick Jobs, falling back to legacy upload:', supErr?.message)
+        return await uploadQuickJobFileLegacy(file, onProgress)
+      }
+    } else {
+      return await uploadQuickJobFileLegacy(file, onProgress)
+    }
+  }
+
+  // Legacy fallback using XMLHttpRequest
+  const uploadQuickJobFileLegacy = (file: File, onProgress?: (percent: number) => void): Promise<any> => {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest()
       const formData = new FormData()
@@ -314,9 +385,9 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
         }
       })
 
-      xhr.timeout = 3 * 60 * 1000 // 3 minutes
+      xhr.timeout = 5 * 60 * 1000 // 5 minutes
       xhr.ontimeout = () => {
-        reject(new Error('Upload timed out. Please check your network connection.'))
+        reject(new Error('Upload failed: Your connection was interrupted or timed out. Please try again.'))
       }
 
       xhr.onload = () => {
@@ -336,13 +407,17 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
             const errRes = JSON.parse(xhr.responseText)
             reject(new Error(errRes.error || `Upload failed with HTTP ${xhr.status}`))
           } catch {
-            reject(new Error(`Upload failed with HTTP ${xhr.status}`))
+            if (xhr.status === 413) {
+              reject(new Error('Upload failed: The server rejected the upload because the request was too large (HTTP 413).'))
+            } else {
+              reject(new Error(`Upload failed with HTTP ${xhr.status}`))
+            }
           }
         }
       }
 
       xhr.onerror = () => {
-        reject(new Error('Network error during file upload. Please check storage connection.'))
+        reject(new Error('Upload failed: Network error during file upload. Please check storage connection.'))
       }
 
       xhr.open('POST', '/api/quick-jobs/upload')
