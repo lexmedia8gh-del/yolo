@@ -52,9 +52,9 @@ const actions: QuickAction[] = [
 export function QuickActions() {
   return (
     <Card padding="none">
-      <div className="p-4 sm:p-5 border-b border-gray-200">
-        <h3 className="text-sm font-semibold text-gray-900">Quick Actions</h3>
-        <p className="text-xs text-gray-500 mt-0.5">Common tasks at your fingertips</p>
+      <div className="p-4 sm:p-5 border-b border-gray-200 dark:border-gray-800">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Quick Actions</h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Common tasks at your fingertips</p>
       </div>
       <div className="p-4 grid grid-cols-2 gap-2.5">
         {actions.map((action) => {
@@ -63,16 +63,16 @@ export function QuickActions() {
             <Link
               key={action.href}
               href={action.href}
-              className="flex flex-col items-start gap-2.5 p-3 rounded-lg border border-gray-200 hover:border-gray-300 hover:bg-gray-50/60 transition-all duration-150 group"
+              className="flex flex-col items-start gap-2.5 p-3 rounded-lg border border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 hover:bg-gray-50/60 dark:hover:bg-gray-850/40 transition-all duration-150 group"
             >
-              <div className={`p-2 rounded-md ${action.bg}`}>
+              <div className={`p-2 rounded-md ${action.bg} dark:bg-opacity-10`}>
                 <Icon size={16} className={action.color} />
               </div>
               <div>
-                <p className="text-xs font-semibold text-gray-900 group-hover:text-indigo-600 transition-colors">
+                <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
                   {action.label}
                 </p>
-                <p className="text-[11px] text-gray-500 mt-0.5 leading-snug">
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 leading-snug">
                   {action.description}
                 </p>
               </div>

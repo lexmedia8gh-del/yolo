@@ -48,27 +48,27 @@ export function StatCard({
   return (
     <div
       className={cn(
-        'rounded-xl border border-gray-200/80 bg-white p-4 sm:p-5 shadow-sm',
+        'rounded-xl border border-gray-200/80 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 sm:p-5 shadow-sm',
         'transition-all duration-150',
-        onClick && 'cursor-pointer hover:border-gray-300 hover:shadow',
+        onClick && 'cursor-pointer hover:border-gray-300 dark:hover:border-gray-700 hover:shadow',
         className
       )}
       onClick={onClick}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider truncate">
+          <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider truncate">
             {title}
           </p>
           {loading ? (
-            <div className="mt-2 h-7 w-20 rounded-md bg-gray-100 animate-pulse" />
+            <div className="mt-2 h-7 w-20 rounded-md bg-gray-100 dark:bg-gray-800 animate-pulse" />
           ) : (
-            <p className="mt-1.5 text-2xl font-bold tracking-tight text-gray-900 truncate">
+            <p className="mt-1.5 text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100 truncate">
               {value}
             </p>
           )}
           {subtitle && !loading && (
-            <p className="text-xs text-gray-500 mt-1 truncate">{subtitle}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate">{subtitle}</p>
           )}
           {trend && !loading && (
             <div className={cn('flex items-center gap-1 mt-1.5', trendColor)}>
@@ -82,7 +82,7 @@ export function StatCard({
         </div>
         <div
           className={cn(
-            'p-2 rounded-lg shrink-0 border border-gray-100',
+            'p-2 rounded-lg shrink-0 border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50',
             iconBg
           )}
         >

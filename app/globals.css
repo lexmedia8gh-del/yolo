@@ -18,7 +18,7 @@
 .dark {
   --color-accent: #6366F1;
   --color-accent-light: #1E1B4B;
-  --color-background: #0B0F17;
+  --color-background: #090D16;
   --color-surface: #111827;
   --color-border: #1F2937;
   --color-muted: #9CA3AF;
@@ -28,6 +28,7 @@
 @layer base {
   * {
     box-sizing: border-box;
+    border-color: var(--color-border);
   }
 
   html {
@@ -41,10 +42,11 @@
     font-family: var(--font-inter);
     background-color: var(--color-background);
     color: #111827;
-    font-size: 0.875rem; /* 14px */
-    line-height: 1.5;
+    font-size: 1rem; /* 16px minimum base size for ultimate readability */
+    line-height: 1.6;
     letter-spacing: -0.011em;
     min-height: 100vh;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 
   .dark body {
@@ -52,21 +54,21 @@
     background-color: var(--color-background);
   }
 
-  /* Focus rings */
+  /* Exquisite Global Focus Rings */
   :focus-visible {
     outline: 2px solid #4F46E5;
     outline-offset: 2px;
-    border-radius: 6px;
+    border-radius: 8px;
   }
 
   .dark :focus-visible {
     outline: 2px solid #6366F1;
   }
 
-  /* Clean minimal scrollbars */
+  /* Ultra-modern Custom Scrollbars */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
 
   ::-webkit-scrollbar-track {
@@ -75,27 +77,35 @@
 
   ::-webkit-scrollbar-thumb {
     background: #E5E7EB;
-    border-radius: 3px;
+    border-radius: 4px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
 
   .dark ::-webkit-scrollbar-thumb {
     background: #374151;
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
 
   ::-webkit-scrollbar-thumb:hover {
     background: #D1D5DB;
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
 
   .dark ::-webkit-scrollbar-thumb:hover {
     background: #4B5563;
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
 
-  /* Typography Hierarchy */
+  /* Typography Hierarchy (Based on Major Second Scale 1.125 starting from 16px) */
   h1 {
-    font-size: 1.5rem; /* 24px */
-    font-weight: 700;
-    line-height: 1.25;
-    letter-spacing: -0.025em;
+    font-size: 2.027rem; /* ~32px */
+    font-weight: 800;
+    line-height: 1.2;
+    letter-spacing: -0.03em;
     color: #111827;
   }
 
@@ -104,10 +114,10 @@
   }
 
   h2 {
-    font-size: 1.25rem; /* 20px */
-    font-weight: 600;
-    line-height: 1.3;
-    letter-spacing: -0.02em;
+    font-size: 1.802rem; /* ~28px */
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: -0.025em;
     color: #111827;
   }
 
@@ -116,10 +126,10 @@
   }
 
   h3 {
-    font-size: 1rem; /* 16px */
-    font-weight: 600;
-    line-height: 1.4;
-    letter-spacing: -0.015em;
+    font-size: 1.602rem; /* ~25px */
+    font-weight: 650;
+    line-height: 1.3;
+    letter-spacing: -0.02em;
     color: #111827;
   }
 
@@ -127,15 +137,69 @@
     color: #F3F4F6;
   }
 
-  h4, h5, h6 {
-    font-size: 0.875rem; /* 14px */
+  h4 {
+    font-size: 1.424rem; /* ~22px */
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.015em;
+    color: #111827;
+  }
+
+  .dark h4 {
+    color: #E5E7EB;
+  }
+
+  h5 {
+    font-size: 1.266rem; /* ~20px */
     font-weight: 600;
     line-height: 1.4;
     color: #111827;
   }
 
-  .dark h4, .dark h5, .dark h6 {
+  .dark h5 {
     color: #E5E7EB;
+  }
+
+  h6 {
+    font-size: 1.125rem; /* ~18px */
+    font-weight: 600;
+    line-height: 1.4;
+    color: #111827;
+  }
+
+  .dark h6 {
+    color: #E5E7EB;
+  }
+
+  /* Standard form controls consistency */
+  input, select, textarea {
+    font-size: 0.875rem !important; /* Standardized label and input readability */
+  }
+
+  label {
+    letter-spacing: -0.01em;
+  }
+
+  /* Tables consistency across browser engines */
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  th {
+    font-weight: 600;
+    color: #4B5563;
+    background-color: #F9FAFB;
+  }
+
+  .dark th {
+    color: #9CA3AF;
+    background-color: #111827;
+  }
+
+  td, th {
+    border-bottom: 1px solid var(--color-border);
   }
 }
 
@@ -145,22 +209,96 @@
     background-color: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: 0.75rem; /* 12px */
-    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02), 0 1px 2px -1px rgba(0, 0, 0, 0.02);
   }
 
   .card-hover {
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   }
 
   .card-hover:hover {
     border-color: #D1D5DB;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.04), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
   }
 
   .dark .card-hover:hover {
-    border-color: #4B5563;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+    border-color: #374151;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.25);
   }
+}
+
+/* ─── Smart Theme Adaptability Guard ─── */
+/* This block automatically maps utility elements styled in components with raw light tailwind classes so that dark mode matches them with zero leakages */
+.dark .bg-white {
+  background-color: var(--color-surface) !important;
+}
+
+.dark .border-gray-200 {
+  border-color: var(--color-border) !important;
+}
+
+.dark .border-gray-200\/80 {
+  border-color: var(--color-border) !important;
+}
+
+.dark .border-gray-100 {
+  border-color: #1F2937 !important;
+}
+
+.dark .text-gray-900 {
+  color: #F9FAFB !important;
+}
+
+.dark .text-gray-850 {
+  color: #F3F4F6 !important;
+}
+
+.dark .text-gray-800 {
+  color: #E5E7EB !important;
+}
+
+.dark .text-gray-700 {
+  color: #D1D5DB !important;
+}
+
+.dark .text-gray-600 {
+  color: #9CA3AF !important;
+}
+
+.dark .text-gray-500 {
+  color: #9CA3AF !important;
+}
+
+.dark .bg-gray-50 {
+  background-color: #111827 !important;
+}
+
+.dark .bg-gray-50\/60 {
+  background-color: rgba(17, 24, 39, 0.4) !important;
+}
+
+.dark .bg-gray-100 {
+  background-color: #1F2937 !important;
+}
+
+.dark .hover\:bg-gray-50:hover {
+  background-color: #1F2937 !important;
+}
+
+.dark .hover\:bg-gray-50\/50:hover {
+  background-color: rgba(31, 41, 55, 0.4) !important;
+}
+
+.dark .hover\:bg-gray-55:hover {
+  background-color: #1F2937 !important;
+}
+
+.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--color-border) !important;
+}
+
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--color-border) !important;
 }
 
 /* ─── Print ──────────────────────────────────────────────────── */
@@ -171,5 +309,6 @@
 
   body {
     background: white !important;
+    color: black !important;
   }
 }
