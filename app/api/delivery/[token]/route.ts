@@ -165,7 +165,7 @@ export async function GET(
     let lockReason = ''
 
     if (deliveryDocData.requiresFullPayment && !deliveryDocData.isReleased) {
-      // If payment is required and not released, check if invoice is paid
+      // If payment is required and not released, check if invoice or quick job is paid
       if (deliveryDocData.invoiceId) {
         try {
           if (!isFallback) {
@@ -176,6 +176,20 @@ export async function GET(
               if (invData && invData.status !== 'Paid') {
                 isLocked = true
                 lockReason = 'Delivery files will become available once the project payment is completed.'
+              }
+            }
+          }
+        } catch {}
+      } else if (deliveryDocData.quickJobId) {
+        try {
+          if (!isFallback) {
+            const adminDb = getAdminDb()
+            const qjSnap = await adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(deliveryDocData.quickJobId).get()
+            if (qjSnap.exists) {
+              const qjData = qjSnap.data()
+              if (qjData && qjData.paymentStatus !== 'Paid' && (qjData.outstandingBalance ?? 1) > 0) {
+                isLocked = true
+                lockReason = 'Delivery files will become available once the quick job payment is completed.'
               }
             }
           }

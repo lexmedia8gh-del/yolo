@@ -1,5 +1,5 @@
 import * as tus from 'tus-js-client'
-import { isSupabaseConfigured } from './client'
+import { isSupabaseConfigured, cleanSupabaseUrl, cleanSupabaseKey } from './client'
 import { STORAGE_BUCKETS, uploadDeliveryFile } from './storage'
 
 export type UploadTaskStatus =
@@ -32,7 +32,8 @@ export interface UploadTaskProgress {
 }
 
 export interface ResumableUploadOptions {
-  projectId: string
+  projectId?: string
+  quickJobId?: string
   deliveryId: string
   fileId: string
   file: File
@@ -102,7 +103,8 @@ export class ResumableUploadTask {
   public fileName: string
   public fileSize: number
   public file: File
-  public projectId: string
+  public projectId?: string
+  public quickJobId?: string
   public deliveryId: string
   public clientId: string
   public storagePath: string
@@ -132,6 +134,7 @@ export class ResumableUploadTask {
 
   constructor(options: ResumableUploadOptions) {
     this.projectId = options.projectId
+    this.quickJobId = options.quickJobId
     this.deliveryId = options.deliveryId
     this.fileId = options.fileId
     this.file = options.file
@@ -143,7 +146,8 @@ export class ResumableUploadTask {
     this.onProgressCallback = options.onProgress
 
     const sanitizedName = this.file.name.replace(/[^a-zA-Z0-9._\- ]/g, '_').trim() || 'file'
-    this.storagePath = `deliveries/${this.projectId}/${this.deliveryId}/${this.fileId}/${sanitizedName}`
+    const parentId = this.projectId || this.quickJobId || 'unassigned'
+    this.storagePath = `deliveries/${parentId}/${this.deliveryId}/${this.fileId}/${sanitizedName}`
 
     if (typeof window !== 'undefined') {
       window.addEventListener('online', this.handleOnline)
@@ -199,8 +203,14 @@ export class ResumableUploadTask {
       })
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+    const rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+    const rawKey =
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+      ''
+
+    const supabaseUrl = cleanSupabaseUrl(rawUrl)
+    const supabaseAnonKey = cleanSupabaseKey(rawKey)
 
     if (isSupabaseConfigured() && supabaseUrl && supabaseAnonKey) {
       try {
@@ -258,7 +268,9 @@ export class ResumableUploadTask {
    */
   private startTusUpload(supabaseUrl: string, supabaseAnonKey: string): Promise<{ downloadUrl: string; storagePath: string }> {
     return new Promise((resolve, reject) => {
-      const endpoint = `${supabaseUrl.replace(/\/$/, '')}/storage/v1/upload/resumable`
+      const cleanUrl = cleanSupabaseUrl(supabaseUrl)
+      const cleanKey = cleanSupabaseKey(supabaseAnonKey)
+      const endpoint = `${cleanUrl.replace(/\/$/, '')}/storage/v1/upload/resumable`
       this.status = 'uploading'
       this.statusMessage = 'Uploading file...'
       this.startTime = Date.now()
@@ -272,8 +284,8 @@ export class ResumableUploadTask {
         retryDelays: [0, 1000, 2000, 4000, 8000, 16000, 30000],
         removeFingerprintOnSuccess: true,
         headers: {
-          authorization: `Bearer ${supabaseAnonKey}`,
-          apikey: supabaseAnonKey,
+          authorization: `Bearer ${cleanKey}`,
+          apikey: cleanKey,
           'x-upsert': 'true',
         },
         metadata: {
@@ -477,7 +489,8 @@ export class ResumableUploadTask {
           formData.append('fileName', this.fileName)
           formData.append('fileSize', String(this.fileSize))
           formData.append('fileType', this.file.type || 'application/octet-stream')
-          formData.append('projectId', this.projectId)
+          if (this.projectId) formData.append('projectId', this.projectId)
+          if (this.quickJobId) formData.append('quickJobId', this.quickJobId)
           formData.append('deliveryId', this.deliveryId)
           formData.append('clientId', this.clientId)
 
@@ -538,7 +551,8 @@ export class ResumableUploadTask {
    */
   private async registerFileMetadata(publicUrl: string): Promise<{ downloadUrl: string; storagePath: string }> {
     const formData = new FormData()
-    formData.append('projectId', this.projectId)
+    if (this.projectId) formData.append('projectId', this.projectId)
+    if (this.quickJobId) formData.append('quickJobId', this.quickJobId)
     formData.append('deliveryId', this.deliveryId)
     formData.append('clientId', this.clientId)
     formData.append('fileDocId', this.fileId)

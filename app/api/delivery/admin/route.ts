@@ -25,19 +25,39 @@ function deliveryScore(data: DocumentData): number {
 }
 
 async function ensureCanonicalDelivery(input: {
-  projectId: string
+  projectId?: string
+  quickJobId?: string
   clientId: string
   clientName: string
   projectName: string
   invoiceId: string
 }) {
   const db = getAdminDb()
-  const canonicalRef = db.collection(COLLECTIONS.DELIVERIES).doc(input.projectId)
+  const targetId = input.projectId || input.quickJobId || 'delivery'
+  const canonicalRef = db.collection(COLLECTIONS.DELIVERIES).doc(targetId)
   const existing = await canonicalRef.get()
   if (existing.exists) return { id: canonicalRef.id, data: existing.data()!, migrated: false }
 
-  const legacy = await db.collection(COLLECTIONS.DELIVERIES).where('projectId', '==', input.projectId).get()
-  const ordered = [...legacy.docs].sort((a, b) => {
+  // Check if legacy delivery exists with either projectId or quickJobId
+  let legacyDocs: any[] = []
+  if (input.projectId) {
+    const legacyProject = await db.collection(COLLECTIONS.DELIVERIES).where('projectId', '==', input.projectId).get()
+    legacyDocs.push(...legacyProject.docs)
+  }
+  if (input.quickJobId) {
+    const legacyQuick = await db.collection(COLLECTIONS.DELIVERIES).where('quickJobId', '==', input.quickJobId).get()
+    legacyDocs.push(...legacyQuick.docs)
+  }
+
+  // Deduplicate docs
+  const seen = new Set<string>()
+  const uniqueDocs = legacyDocs.filter((d) => {
+    if (seen.has(d.id)) return false
+    seen.add(d.id)
+    return true
+  })
+
+  const ordered = [...uniqueDocs].sort((a, b) => {
     const scoreDiff = deliveryScore(b.data()) - deliveryScore(a.data())
     if (scoreDiff) return scoreDiff
     const aTime = a.data().createdAt?.toMillis?.() || 0
@@ -54,7 +74,8 @@ async function ensureCanonicalDelivery(input: {
     const base = sourceData
       ? {
           ...sourceData,
-          projectId: input.projectId,
+          projectId: input.projectId || sourceData.projectId || null,
+          quickJobId: input.quickJobId || sourceData.quickJobId || null,
           clientId: sourceData.clientId || input.clientId,
           clientName: sourceData.clientName || input.clientName,
           projectName: sourceData.projectName || input.projectName,
@@ -65,7 +86,8 @@ async function ensureCanonicalDelivery(input: {
       : {
           clientId: input.clientId,
           clientName: input.clientName,
-          projectId: input.projectId,
+          projectId: input.projectId || null,
+          quickJobId: input.quickJobId || null,
           projectName: input.projectName,
           invoiceId: input.invoiceId || null,
           title: `${input.projectName} Final Files`,
@@ -84,17 +106,19 @@ async function ensureCanonicalDelivery(input: {
         }
 
     transaction.create(canonicalRef, base)
+
+    if (input.quickJobId && base.accessToken) {
+      const qjRef = db.collection(COLLECTIONS.QUICK_JOBS).doc(input.quickJobId)
+      transaction.set(qjRef, { deliveryAccessToken: base.accessToken }, { merge: true })
+    }
   })
 
-  // Move files to the canonical id before retiring legacy records.  Legacy records
-  // are retained with a pointer so prior activity/history remains auditable.
+  // Move files to the canonical id before retiring legacy records
   for (const legacyDoc of ordered) {
     if (legacyDoc.id === canonicalRef.id) continue
     const files = await db.collection(COLLECTIONS.DELIVERY_FILES).where('deliveryId', '==', legacyDoc.id).get()
     const batch = db.batch()
     files.docs.forEach((file) => batch.update(file.ref, { deliveryId: canonicalRef.id, updatedAt: FieldValue.serverTimestamp() }))
-    // The canonical record retains the legacy ids for audit.  Files move first, then
-    // the redundant record is removed so a project has exactly one delivery document.
     batch.delete(legacyDoc.ref)
     await batch.commit()
   }
@@ -113,14 +137,16 @@ export async function GET(req: NextRequest) {
 
   try {
     const { searchParams } = new URL(req.url)
-    const projectId = searchParams.get('projectId')
-    if (!projectId) return NextResponse.json({ error: 'Missing projectId' }, { status: 400 })
+    const projectId = searchParams.get('projectId') || ''
+    const quickJobId = searchParams.get('quickJobId') || ''
+    if (!projectId && !quickJobId) return NextResponse.json({ error: 'Missing projectId or quickJobId' }, { status: 400 })
 
     const result = await ensureCanonicalDelivery({
-      projectId,
+      projectId: projectId || undefined,
+      quickJobId: quickJobId || undefined,
       clientId: searchParams.get('clientId') || '',
       clientName: searchParams.get('clientName') || 'Client',
-      projectName: searchParams.get('projectName') || 'Project',
+      projectName: searchParams.get('projectName') || 'Deliverable',
       invoiceId: searchParams.get('invoiceId') || '',
     })
     const { id: deliveryId, data } = result

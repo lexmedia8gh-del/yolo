@@ -22,13 +22,14 @@ export async function POST(req: NextRequest) {
     const directFileType = (formData.get('fileType') as string) || ''
 
     const projectId = (formData.get('projectId') as string) || ''
+    const quickJobId = (formData.get('quickJobId') as string) || ''
     const deliveryId = (formData.get('deliveryId') as string) || ''
     const clientId = (formData.get('clientId') as string) || ''
     const fileDocId = (formData.get('fileDocId') as string) || ''
 
-    if (!projectId || !deliveryId) {
+    if ((!projectId && !quickJobId) || !deliveryId) {
       return NextResponse.json(
-        { error: 'Missing projectId or deliveryId' },
+        { error: 'Missing projectId/quickJobId or deliveryId' },
         { status: 400 }
       )
     }
@@ -39,8 +40,9 @@ export async function POST(req: NextRequest) {
     const sanitizedName = file ? file.name.replace(/[^a-zA-Z0-9._\- ]/g, '_').trim() || 'file' : 'file'
     const id = fileDocId || Math.random().toString(36).substring(2, 15)
 
+    const parentId = projectId || quickJobId || 'unassigned'
     let downloadUrl = directUrl
-    let storagePath = directStoragePath || `deliveries/${projectId}/${deliveryId}/${id}/${sanitizedName}`
+    let storagePath = directStoragePath || `deliveries/${parentId}/${deliveryId}/${id}/${sanitizedName}`
 
     if (!directUrl) {
       if (!buffer) {
@@ -92,7 +94,8 @@ export async function POST(req: NextRequest) {
     const adminDb = getAdminDb()
     const fileRecord = {
       deliveryId,
-      projectId,
+      projectId: projectId || null,
+      quickJobId: quickJobId || null,
       clientId,
       fileName,
       originalName: fileName,
@@ -106,6 +109,24 @@ export async function POST(req: NextRequest) {
     }
 
     await adminDb.collection(COLLECTIONS.DELIVERY_FILES).doc(id).set(fileRecord)
+
+    // If this is for a Quick Job, synchronize the Quick Job status
+    if (quickJobId) {
+      try {
+        const qjRef = adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(quickJobId)
+        const qjSnap = await qjRef.get()
+        if (qjSnap.exists) {
+          const qjData = qjSnap.data()!
+          const qjUpdates: any = { updatedAt: FieldValue.serverTimestamp() }
+          if (qjData.status === 'In Progress' || qjData.status === 'Draft' || !qjData.status) {
+            qjUpdates.status = 'Ready for Delivery'
+          }
+          await qjRef.set(qjUpdates, { merge: true })
+        }
+      } catch (qjErr) {
+        console.warn('[Delivery Upload] Failed to sync Quick Job status:', qjErr)
+      }
+    }
 
     // Atomically increment container metrics and update status
     let emailNotificationStatus: { sent: boolean; messageId?: string; error?: string; skipped?: boolean } = { sent: false }

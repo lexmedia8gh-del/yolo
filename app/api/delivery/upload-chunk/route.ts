@@ -24,10 +24,11 @@ export async function POST(req: NextRequest) {
     const fileSize = parseInt((formData.get('fileSize') as string) || '0', 10)
     const fileType = (formData.get('fileType') as string) || 'application/octet-stream'
     const projectId = (formData.get('projectId') as string) || ''
+    const quickJobId = (formData.get('quickJobId') as string) || ''
     const deliveryId = (formData.get('deliveryId') as string) || ''
     const clientId = (formData.get('clientId') as string) || ''
 
-    if (!chunkFile || !fileId || !projectId || !deliveryId) {
+    if (!chunkFile || !fileId || (!projectId && !quickJobId) || !deliveryId) {
       return NextResponse.json({ error: 'Missing required chunk parameter' }, { status: 400 })
     }
 
@@ -61,8 +62,9 @@ export async function POST(req: NextRequest) {
     const completeBuffer = Buffer.concat(fileEntry.chunks)
     fileChunksMap.delete(fileId) // Clean up memory
 
+    const parentId = projectId || quickJobId || 'unassigned'
     const sanitizedName = fileName.replace(/[^a-zA-Z0-9._\- ]/g, '_').trim() || 'file'
-    const storagePath = `deliveries/${projectId}/${deliveryId}/${fileId}/${sanitizedName}`
+    const storagePath = `deliveries/${parentId}/${deliveryId}/${fileId}/${sanitizedName}`
 
     // Upload complete assembled buffer to Supabase Storage
     const supabase = getSupabaseServerClient()
@@ -89,7 +91,8 @@ export async function POST(req: NextRequest) {
     const adminDb = getAdminDb()
     const fileRecord = {
       deliveryId,
-      projectId,
+      projectId: projectId || null,
+      quickJobId: quickJobId || null,
       clientId,
       fileName,
       originalName: fileName,
@@ -103,6 +106,24 @@ export async function POST(req: NextRequest) {
     }
 
     await adminDb.collection(COLLECTIONS.DELIVERY_FILES).doc(fileId).set(fileRecord)
+
+    // If this is for a Quick Job, synchronize the Quick Job status
+    if (quickJobId) {
+      try {
+        const qjRef = adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(quickJobId)
+        const qjSnap = await qjRef.get()
+        if (qjSnap.exists) {
+          const qjData = qjSnap.data()!
+          const qjUpdates: any = { updatedAt: FieldValue.serverTimestamp() }
+          if (qjData.status === 'In Progress' || qjData.status === 'Draft' || !qjData.status) {
+            qjUpdates.status = 'Ready for Delivery'
+          }
+          await qjRef.set(qjUpdates, { merge: true })
+        }
+      } catch (qjErr) {
+        console.warn('[Chunk Upload] Failed to sync Quick Job status:', qjErr)
+      }
+    }
 
     // Update delivery container record
     const deliveryRef = adminDb.collection(COLLECTIONS.DELIVERIES).doc(deliveryId)

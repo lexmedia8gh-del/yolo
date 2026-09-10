@@ -54,6 +54,7 @@ import {
 import { uploadDeliveryFile, deleteDeliveryFile } from '@/lib/firebase/storage'
 import type {
   Project,
+  QuickJob,
   Client,
   Invoice,
   Delivery,
@@ -74,10 +75,12 @@ import { Timestamp } from 'firebase/firestore'
 import toast from 'react-hot-toast'
 import { optimizeImageFile } from '@/lib/utils/image-optimizer'
 
-interface ProjectDeliveryManagerProps {
-  project: Project
-  client: Client | null
-  invoice: Invoice | null
+export interface ProjectDeliveryManagerProps {
+  project?: Project
+  quickJob?: QuickJob
+  client?: Client | null
+  invoice?: Invoice | null
+  onUpdate?: (updatedData: Partial<any>) => void
 }
 
 interface StagedFile {
@@ -93,9 +96,21 @@ interface StagedFile {
 
 export function ProjectDeliveryManager({
   project,
+  quickJob,
   client,
   invoice,
+  onUpdate,
 }: ProjectDeliveryManagerProps) {
+  const resolvedProjectId = project?.id || ''
+  const resolvedQuickJobId = quickJob?.id || ''
+  const resolvedTargetId = resolvedProjectId || resolvedQuickJobId
+  const resolvedClientId = project?.clientId || quickJob?.clientId || client?.id || ''
+  const resolvedClientName = project?.clientName || quickJob?.clientName || client?.fullName || 'Client'
+  const resolvedProjectName = project?.name || quickJob?.jobDescription || 'Deliverable'
+  const resolvedInvoiceId = project?.invoiceId || invoice?.id || ''
+  const resolvedClientPhone = client?.whatsappNumber || client?.phone || quickJob?.clientPhone || ''
+  const resolvedCurrency = project?.currency || quickJob?.currency || invoice?.currency || 'GHS'
+
   const [delivery, setDelivery] = useState<Delivery | null>(null)
   const [files, setFiles] = useState<DeliveryFile[]>([])
   const [loading, setLoading] = useState(true)
@@ -165,22 +180,23 @@ export function ProjectDeliveryManager({
     )
   }
 
-  // 1. Fetch or create Delivery record for this Project
+  // 1. Fetch or create Delivery record for this Project or Quick Job
   useEffect(() => {
-    if (!project?.id) return
+    if (!resolvedTargetId) return
     loadDeliveryData()
-  }, [project.id])
+  }, [resolvedTargetId])
 
   const loadDeliveryData = async () => {
     setLoading(true)
     try {
       // Fetch or initialize delivery via Server Admin API (guarantees server-side Firestore truth)
       const queryParams = new URLSearchParams({
-        projectId: project.id,
-        clientId: project.clientId || client?.id || '',
-        projectName: project.name || '',
-        clientName: project.clientName || client?.fullName || 'Client',
-        invoiceId: project.invoiceId || invoice?.id || '',
+        projectId: resolvedProjectId,
+        quickJobId: resolvedQuickJobId,
+        clientId: resolvedClientId,
+        projectName: resolvedProjectName,
+        clientName: resolvedClientName,
+        invoiceId: resolvedInvoiceId,
       })
 
       const res = await fetch(`/api/delivery/admin?${queryParams.toString()}`)
@@ -195,6 +211,10 @@ export function ProjectDeliveryManager({
       setCanonicalUrl(data.publicUrl || '')
       setSelectedExpOption(currentDelivery.expirationOption || 'never')
       setFiles(data.files || [])
+
+      if (quickJob && currentDelivery.accessToken && currentDelivery.accessToken !== quickJob.deliveryAccessToken) {
+        onUpdate?.({ deliveryAccessToken: currentDelivery.accessToken })
+      }
     } catch (err: any) {
       console.error('Error loading delivery manager:', err)
       const detail = err?.message || 'Please check your connection and try again.'
@@ -347,11 +367,12 @@ export function ProjectDeliveryManager({
         
         // Instantiate Resumable Upload Task
         const task = new ResumableUploadTask({
-          projectId: project.id,
+          projectId: resolvedProjectId || undefined,
+          quickJobId: resolvedQuickJobId || undefined,
           deliveryId: delivery.id,
           fileId: fileDocId,
           file: uploadFile,
-          clientId: project.clientId,
+          clientId: resolvedClientId,
           onProgress: (progress: UploadTaskProgress) => {
             setUploadProgress((prev) => ({
               ...prev,
@@ -458,12 +479,13 @@ export function ProjectDeliveryManager({
 
       // 2. Upload the new file to Supabase Storage
       const { downloadUrl, storagePath: newStoragePath } = await uploadDeliveryFile(
-        project.id,
+        resolvedProjectId || undefined,
         delivery.id,
         newFileId,
         uploadFile,
         undefined,
-        project.clientId
+        resolvedClientId,
+        resolvedQuickJobId || undefined
       )
 
       toast.loading(`Updating database...`, { id: toastId })
@@ -761,7 +783,7 @@ export function ProjectDeliveryManager({
 
   // 8. Send Delivery via WhatsApp (Secure Link ONLY)
   const handleSendWhatsAppDelivery = async () => {
-    if (!delivery || !client?.whatsappNumber) {
+    if (!delivery || !resolvedClientPhone) {
       toast.error('Missing WhatsApp phone number for this client.')
       return
     }
@@ -781,11 +803,12 @@ export function ProjectDeliveryManager({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          clientId: project.clientId,
-          projectId: project.id,
+          clientId: resolvedClientId,
+          projectId: resolvedProjectId || null,
+          quickJobId: resolvedQuickJobId || null,
           deliveryId: delivery.id,
           messageType: 'delivery_ready',
-          toNumber: client.whatsappNumber,
+          toNumber: resolvedClientPhone,
           messageBody,
         }),
       })
@@ -813,8 +836,8 @@ export function ProjectDeliveryManager({
   const isFullyPaid =
     invoice?.status === 'Paid' ||
     (invoice?.balanceDue !== undefined && invoice.balanceDue <= 0) ||
-    project.paymentStatus === 'Paid' ||
-    (project.outstandingBalance !== undefined && project.outstandingBalance <= 0)
+    (project && (project.paymentStatus === 'Paid' || (project.outstandingBalance !== undefined && project.outstandingBalance <= 0))) ||
+    (quickJob && (quickJob.paymentStatus === 'Paid' || (quickJob.outstandingBalance !== undefined && quickJob.outstandingBalance <= 0)))
 
   const isReleased = Boolean(delivery?.isReleased || delivery?.status === 'Delivered' || delivery?.status === 'Downloaded')
   const hasFiles = files.length > 0
@@ -831,7 +854,11 @@ export function ProjectDeliveryManager({
 
   const isPaymentLocked = deliveryStatus === 'Locked'
   const isAdminOverride = Boolean(delivery?.isReleased && (delivery?.adminOverride || !isFullyPaid))
-  const outstandingAmount = invoice?.balanceDue ?? project.outstandingBalance ?? 0
+  const outstandingAmount =
+    invoice?.balanceDue ??
+    project?.outstandingBalance ??
+    quickJob?.outstandingBalance ??
+    0
 
   const renderFileIcon = (fileName: string, mimeType?: string) => {
     const cat = getFileCategory(fileName, mimeType)
@@ -1545,7 +1572,7 @@ export function ProjectDeliveryManager({
               This project currently has an unpaid balance of{' '}
               <strong className="text-amber-950 font-bold">{formatCurrency(outstandingAmount)}</strong>.
               Releasing this delivery will allow the client (
-              <strong>{project.clientName || client?.fullName || 'Client'}</strong>) to immediately view and
+              <strong>{resolvedClientName}</strong>) to immediately view and
               download all final deliverables before full payment is recorded.
             </p>
           </div>
@@ -1553,20 +1580,20 @@ export function ProjectDeliveryManager({
           {/* Project & Client Details */}
           <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs divide-y divide-gray-200/80">
             <div className="pb-2 flex justify-between">
-              <span className="text-gray-500">Project:</span>
-              <span className="font-semibold text-gray-900">{project.name}</span>
+              <span className="text-gray-500">Project / Deliverable:</span>
+              <span className="font-semibold text-gray-900">{resolvedProjectName}</span>
             </div>
             <div className="py-2 flex justify-between">
               <span className="text-gray-500">Client:</span>
-              <span className="font-semibold text-gray-900">{project.clientName || client?.fullName}</span>
+              <span className="font-semibold text-gray-900">{resolvedClientName}</span>
             </div>
             <div className="py-2 flex justify-between">
               <span className="text-gray-500">Current Payment Status:</span>
-              <span className="font-semibold text-rose-600">{invoice?.status || project.paymentStatus || 'Unpaid'}</span>
+              <span className="font-semibold text-rose-600">{invoice?.status || project?.paymentStatus || quickJob?.paymentStatus || 'Unpaid'}</span>
             </div>
             <div className="pt-2 flex justify-between">
               <span className="text-gray-500">Outstanding Balance:</span>
-              <span className="font-bold text-rose-600">{formatCurrency(outstandingAmount)}</span>
+              <span className="font-bold text-rose-600">{formatCurrency(outstandingAmount, resolvedCurrency)}</span>
             </div>
           </div>
 

@@ -18,15 +18,17 @@ export interface UploadProgressCallback {
  * Upload a delivery file with resumable chunked support, network recovery, and auto retries.
  */
 export async function uploadDeliveryFile(
-  projectId: string,
+  projectId: string | undefined,
   deliveryId: string,
   fileId: string,
   file: File,
   onProgress?: UploadProgressCallback,
-  clientId?: string
+  clientId?: string,
+  quickJobId?: string
 ): Promise<{ downloadUrl: string; storagePath: string }> {
   const task = new ResumableUploadTask({
     projectId,
+    quickJobId,
     deliveryId,
     fileId,
     file,
