@@ -257,70 +257,90 @@ function PublicPaymentPageInner() {
               <div className="p-6 sm:p-8 space-y-6">
 
                 {/* Amount Header Banner */}
-                <div className="text-center p-6 rounded-2xl bg-gradient-to-b from-gray-50 to-white border border-gray-100 space-y-1">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                <div className="text-center p-6 rounded-2xl bg-gradient-to-b from-gray-50 to-white border border-gray-100 space-y-1.5 shadow-sm">
+                  <span className="text-[11px] font-bold uppercase tracking-widest text-gray-400">
                     {isAlreadyPaid ? 'Amount Paid' : 'Total Amount Due'}
                   </span>
-                  <div className="text-4xl sm:text-5xl font-extrabold tracking-tight text-gray-900 font-mono">
-                    {formatCurrency(linkData.amount || 0, linkData.currency)}
+                  <div className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900 font-mono">
+                    {formatCurrency(linkData.amount || invoiceData?.balanceDue || 0, linkData.currency || invoiceData?.currency)}
                   </div>
                   <div className="pt-2 flex justify-center">
                     {isAlreadyPaid ? (
-                      <Badge variant="success" className="px-3 py-1 font-semibold text-xs gap-1.5 shadow-sm">
+                      <Badge variant="success" className="px-3.5 py-1 font-semibold text-xs gap-1.5 shadow-sm">
                         <CheckCircle2 size={13} className="text-emerald-500" /> Payment Complete
                       </Badge>
                     ) : isCancelled ? (
-                      <Badge variant="danger" className="px-3 py-1 font-semibold text-xs">
+                      <Badge variant="danger" className="px-3.5 py-1 font-semibold text-xs">
                         Cancelled
                       </Badge>
                     ) : (
-                      <Badge variant="warning" className="px-3 py-1 font-semibold text-xs gap-1.5 shadow-sm">
-                        <Clock size={13} /> Awaiting Payment
+                      <Badge variant="warning" className="px-3.5 py-1 font-semibold text-xs gap-1.5 shadow-sm">
+                        <Clock size={13} /> Awaiting Secure Payment
                       </Badge>
                     )}
                   </div>
                 </div>
 
+                {/* Invoice Financial Breakdown (if invoice data exists) */}
+                {invoiceData && (
+                  <div className="bg-slate-50 rounded-2xl p-4 border border-gray-200/60 space-y-2.5 text-xs">
+                    <div className="flex items-center justify-between text-gray-600 font-medium pb-2 border-b border-gray-200/60">
+                      <span>Invoice Total</span>
+                      <span className="font-mono font-bold text-gray-900">{formatCurrency(invoiceData.total, invoiceData.currency)}</span>
+                    </div>
+                    {(invoiceData.amountPaid ?? 0) > 0 && (
+                      <div className="flex items-center justify-between text-gray-600 font-medium">
+                        <span>Already Paid</span>
+                        <span className="font-mono font-semibold text-emerald-600">-{formatCurrency(invoiceData.amountPaid || 0, invoiceData.currency)}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between text-gray-900 font-bold pt-1 border-t border-gray-200/60 text-sm">
+                      <span>Remaining Balance Due</span>
+                      <span className="font-mono text-indigo-600">{formatCurrency(invoiceData.balanceDue ?? invoiceData.total, invoiceData.currency)}</span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Summary Metadata */}
-                <StaggerContainer delayStart={0.18} className="space-y-3 pt-2">
+                <StaggerContainer delayStart={0.18} className="space-y-3 pt-1">
                   <StaggerItem>
-                    <div className="flex items-center justify-between text-sm py-2 border-b border-gray-100">
+                    <div className="flex items-center justify-between text-sm py-2.5 border-b border-gray-100">
                       <span className="text-gray-500 flex items-center gap-2">
                         <Building2 size={16} className="text-gray-400" /> Client
                       </span>
-                      <span className="font-semibold text-gray-900">{linkData.clientName || 'Valued Client'}</span>
+                      <span className="font-semibold text-gray-900 text-right">{linkData.clientName || invoiceData?.clientName || 'Valued Client'}</span>
                     </div>
                   </StaggerItem>
 
-                  {linkData.projectName && (
+                  {(linkData.projectName || invoiceData?.projectName) && (
                     <StaggerItem>
-                      <div className="flex items-center justify-between text-sm py-2 border-b border-gray-100">
+                      <div className="flex items-center justify-between text-sm py-2.5 border-b border-gray-100">
                         <span className="text-gray-500 flex items-center gap-2">
                           <FileText size={16} className="text-gray-400" /> Project
                         </span>
-                        <span className="font-semibold text-gray-900">{linkData.projectName}</span>
+                        <span className="font-semibold text-gray-900 text-right">{linkData.projectName || invoiceData?.projectName}</span>
                       </div>
                     </StaggerItem>
                   )}
 
-                  {linkData.invoiceNumber && (
+                  {(linkData.invoiceNumber || invoiceData?.invoiceNumber) && (
                     <StaggerItem>
-                      <div className="flex items-center justify-between text-sm py-2 border-b border-gray-100">
+                      <div className="flex items-center justify-between text-sm py-2.5 border-b border-gray-100">
                         <span className="text-gray-500 flex items-center gap-2">
                           <FileText size={16} className="text-gray-400" /> Invoice Reference
                         </span>
-                        <span className="font-mono font-bold text-gray-900">{linkData.invoiceNumber}</span>
+                        <span className="font-mono font-bold text-gray-900">{linkData.invoiceNumber || invoiceData?.invoiceNumber}</span>
                       </div>
                     </StaggerItem>
                   )}
 
-                  {linkData.title && !linkData.invoiceNumber && (
+                  {linkData.title && !linkData.invoiceNumber && !invoiceData && (
                     <StaggerItem>
-                      <div className="flex items-center justify-between text-sm py-2 border-b border-gray-100">
+                      <div className="flex items-center justify-between text-sm py-2.5 border-b border-gray-100">
                         <span className="text-gray-500 flex items-center gap-2">
                           <FileText size={16} className="text-gray-400" /> Description
                         </span>
-                        <span className="font-medium text-gray-900">{linkData.title}</span>
+                        <span className="font-medium text-gray-900 text-right">{linkData.title}</span>
                       </div>
                     </StaggerItem>
                   )}
@@ -328,9 +348,9 @@ function PublicPaymentPageInner() {
                   <StaggerItem>
                     <div className="flex items-center justify-between text-sm py-2">
                       <span className="text-gray-500 flex items-center gap-2">
-                        <ShieldCheck size={16} className="text-emerald-500" /> Payment Processing
+                        <ShieldCheck size={16} className="text-emerald-500" /> Payment Security
                       </span>
-                      <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                      <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
                         256-Bit SSL Encrypted
                       </span>
                     </div>
@@ -372,7 +392,7 @@ function PublicPaymentPageInner() {
                       ) : (
                         <>
                           <Lock size={18} />
-                          Pay {formatCurrency(linkData.amount || 0, linkData.currency)} with Paystack
+                          Pay {formatCurrency(linkData.amount || invoiceData?.balanceDue || 0, linkData.currency || invoiceData?.currency)} with Paystack
                         </>
                       )}
                     </Button>
