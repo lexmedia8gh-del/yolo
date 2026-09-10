@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sendWelcomeSms, validatePhoneNumber } from '@/lib/services/sms'
+import { getDocument, COLLECTIONS } from '@/lib/firebase/firestore'
+import type { BusinessSettings } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,12 +32,25 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    let templateToUse = customTemplate
+    if (!templateToUse) {
+      try {
+        const bizSettings = await getDocument<BusinessSettings>(COLLECTIONS.SETTINGS, 'business')
+        if (bizSettings && bizSettings.defaultWelcomeSmsTemplate) {
+          templateToUse = bizSettings.defaultWelcomeSmsTemplate
+        }
+      } catch {
+        // use fallback/default
+      }
+    }
+
     const result = await sendWelcomeSms({
       phone: validation.normalized,
       clientName: clientName || 'Valued Client',
+      phoneNumber: validation.normalized,
       clientId,
-      businessName: businessName || 'Ctrl Room',
-      customTemplate,
+      businessName: businessName || 'LEXMEDIA.GH',
+      customTemplate: templateToUse,
     })
 
     if (!result.success) {

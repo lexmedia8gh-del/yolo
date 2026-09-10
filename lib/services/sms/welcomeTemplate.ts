@@ -3,23 +3,29 @@
  */
 
 export const DEFAULT_WELCOME_TEMPLATE =
-  'Hello {name}, welcome to Ctrl Room. Thank you for choosing us. We are pleased to have you with us and will keep you updated regarding your service.'
+  'Hello {clientName}, welcome to LEXMEDIA.GH. We are happy to have you as our client.'
 
 /**
  * Generates the welcome message with dynamic placeholders replaced.
- * Supports: {name}, {client_name}, {business_name}, {company}
+ * Supports: {clientName}, {phoneNumber}, {name}, {client_name}, {businessName}, {company}
  */
 export function getWelcomeMessage(
   clientName?: string,
-  businessName = 'Ctrl Room',
+  phoneNumber?: string,
+  businessName = 'LEXMEDIA.GH',
   customTemplate?: string
 ): string {
   const template = customTemplate?.trim() || DEFAULT_WELCOME_TEMPLATE
   const displayName = clientName?.trim() || 'Valued Client'
+  const displayPhone = phoneNumber?.trim() || ''
 
   return template
+    .replace(/\{clientName\}/gi, displayName)
     .replace(/\{name\}/gi, displayName)
     .replace(/\{client_name\}/gi, displayName)
+    .replace(/\{phoneNumber\}/gi, displayPhone)
+    .replace(/\{phone\}/gi, displayPhone)
+    .replace(/\{businessName\}/gi, businessName)
     .replace(/\{business_name\}/gi, businessName)
     .replace(/\{company\}/gi, businessName)
 }

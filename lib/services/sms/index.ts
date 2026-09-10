@@ -47,9 +47,9 @@ export async function sendSms(params: SmsSendParams): Promise<SmsSendResponse> {
  * Sends a personalized Welcome SMS to a newly created client.
  */
 export async function sendWelcomeSms(params: WelcomeSmsParams): Promise<SmsSendResponse> {
-  const { phone, clientName, clientId, businessName, customTemplate, senderId } = params
+  const { phone, clientName, phoneNumber, clientId, businessName, customTemplate, senderId } = params
 
-  const message = getWelcomeMessage(clientName, businessName, customTemplate)
+  const message = getWelcomeMessage(clientName, phoneNumber || phone, businessName || 'LEXMEDIA.GH', customTemplate)
 
   return sendSms({
     to: phone,

@@ -32,13 +32,14 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
 import type { BusinessSettings, BrandingSettings } from '@/lib/types'
 import toast from 'react-hot-toast'
 
-type SettingsTab = 'business' | 'invoice' | 'payment' | 'messages' | 'account' | 'branding' | 'data_reset'
+type SettingsTab = 'business' | 'invoice' | 'payment' | 'messages' | 'sms' | 'account' | 'branding' | 'data_reset'
 
 const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
   { id: 'business', label: 'Business Info', icon: Building2 },
   { id: 'invoice', label: 'Invoice Settings', icon: FileText },
   { id: 'payment', label: 'Payment', icon: CreditCard },
   { id: 'messages', label: 'Messages & Terms', icon: MessageSquare },
+  { id: 'sms', label: 'SMS Settings', icon: MessageSquare },
   { id: 'branding', label: 'Branding', icon: Palette },
   { id: 'account', label: 'My Account', icon: User },
   { id: 'data_reset', label: 'Data & Reset', icon: RotateCcw },
@@ -53,6 +54,8 @@ const DEFAULT_SETTINGS: Partial<BusinessSettings> = {
   defaultTaxRate: 0,
   defaultWhatsAppMessage:
     'Hello {{clientName}}, your Lexmedia package is ready. Please review the details and complete your payment here: {{link}}',
+  defaultWelcomeSmsTemplate:
+    'Hello {clientName}, welcome to LEXMEDIA.GH. We are happy to have you as our client.',
 }
 
 const DEFAULT_BRANDING: BrandingSettings = {
@@ -475,6 +478,32 @@ export default function SettingsPage() {
                   <div className="space-y-4">
                     <Textarea label="Default WhatsApp Message Template" value={settings.defaultWhatsAppMessage ?? ''} onChange={(e) => update('defaultWhatsAppMessage', e.target.value)} rows={4} helperText="Use {{clientName}} and {{link}} as placeholders" />
                     <Textarea label="Default Terms & Conditions" value={settings.defaultTermsAndConditions ?? ''} onChange={(e) => update('defaultTermsAndConditions', e.target.value)} rows={6} placeholder="Enter your standard terms and conditions..." />
+                  </div>
+                </Card>
+              )}
+
+              {activeTab === 'sms' && (
+                <Card>
+                  <h3 className="text-base font-semibold text-gray-900 mb-1">SMS / Welcome Message Settings</h3>
+                  <p className="text-sm text-muted mb-6">
+                    Configure the automated welcome SMS message that is sent to newly created clients when the SMS welcome workflow is triggered via Textbelt.
+                  </p>
+                  <div className="space-y-4">
+                    <Textarea
+                      label="Welcome Message Template"
+                      value={settings.defaultWelcomeSmsTemplate ?? ''}
+                      onChange={(e) => update('defaultWelcomeSmsTemplate', e.target.value)}
+                      rows={5}
+                      helperText="Supports placeholders: {clientName} and {phoneNumber}"
+                    />
+                    <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
+                      <p className="text-xs font-semibold text-gray-700">Live Preview:</p>
+                      <p className="text-xs text-gray-800 italic bg-white p-3 rounded-lg border border-gray-100 font-sans">
+                        &ldquo;{(settings.defaultWelcomeSmsTemplate || 'Hello {clientName}, welcome to LEXMEDIA.GH.')
+                          .replace(/\{clientName\}/gi, 'John Doe')
+                          .replace(/\{phoneNumber\}/gi, '+233551515208')}&rdquo;
+                      </p>
+                    </div>
                   </div>
                 </Card>
               )}

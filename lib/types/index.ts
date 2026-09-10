@@ -478,6 +478,7 @@ export interface BusinessSettings {
   defaultPaymentInstructions?: string
   defaultThankYouMessage?: string
   defaultWhatsAppMessage: string
+  defaultWelcomeSmsTemplate?: string
   paystackPublicKey?: string
   updatedAt: Timestamp
 }

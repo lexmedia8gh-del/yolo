@@ -34,6 +34,7 @@ export interface SmsProvider {
 export interface WelcomeSmsParams {
   phone: string
   clientName: string
+  phoneNumber?: string
   clientId?: string
   businessName?: string
   customTemplate?: string

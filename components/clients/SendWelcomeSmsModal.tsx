@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   MessageSquare,
   Send,
@@ -16,6 +16,8 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { getWelcomeMessage, getDefaultWelcomeTemplate } from '@/lib/services/sms/welcomeTemplate'
 import { validatePhoneNumber } from '@/lib/services/sms/phoneUtils'
+import { getDocument, COLLECTIONS } from '@/lib/firebase/firestore'
+import type { BusinessSettings } from '@/lib/types'
 import toast from 'react-hot-toast'
 
 interface SendWelcomeSmsModalProps {
@@ -46,8 +48,25 @@ export function SendWelcomeSmsModal({
     phone?: string
   } | null>(null)
 
+  useEffect(() => {
+    if (isOpen) {
+      setRecipientPhone(phoneNumber || '')
+      setLastResult(null)
+      // Load saved template from settings
+      getDocument<BusinessSettings>(COLLECTIONS.SETTINGS, 'business')
+        .then((doc) => {
+          if (doc && doc.defaultWelcomeSmsTemplate) {
+            setTemplate(doc.defaultWelcomeSmsTemplate)
+          }
+        })
+        .catch(() => {
+          // ignore, keep default
+        })
+    }
+  }, [isOpen, phoneNumber])
+
   const validation = validatePhoneNumber(recipientPhone)
-  const renderedMessage = getWelcomeMessage(clientName, 'Ctrl Room', template)
+  const renderedMessage = getWelcomeMessage(clientName, validation.normalized || recipientPhone, 'LEXMEDIA.GH', template)
 
   const handleSend = async () => {
     if (!validation.isValid) {
@@ -173,7 +192,7 @@ export function SendWelcomeSmsModal({
             placeholder="Customize welcome message template... supports {name}"
           />
           <span className="text-[10px] text-gray-400 block px-1">
-            Available tag: <code className="text-indigo-600 bg-indigo-50 px-1 py-0.5 rounded font-mono">&#123;name&#125;</code>
+            Available tags: <code className="text-indigo-600 bg-indigo-50 px-1 py-0.5 rounded font-mono">&#123;clientName&#125;</code>, <code className="text-indigo-600 bg-indigo-50 px-1 py-0.5 rounded font-mono">&#123;phoneNumber&#125;</code>
           </span>
         </div>
 
