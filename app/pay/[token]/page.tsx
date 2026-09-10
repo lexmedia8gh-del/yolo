@@ -50,6 +50,7 @@ function PublicPaymentPageInner() {
   const [loading, setLoading] = useState(true)
   const [isProcessing, setIsProcessing] = useState(false)
   const [paymentSuccess, setPaymentSuccess] = useState(false)
+  const [verifiedAmount, setVerifiedAmount] = useState<number | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
 
   useEffect(() => {
@@ -134,7 +135,22 @@ function PublicPaymentPageInner() {
 
       if (res.ok && data.status === 'success') {
         setPaymentSuccess(true)
+        if (data.amount) {
+          setVerifiedAmount(data.amount)
+        }
         toast.success('Payment verified successfully!')
+
+        // Fetch latest updated client/payment data before rendering Thank You page
+        const refreshRes = await fetch(`/api/pay/${encodeURIComponent(token)}`)
+        if (refreshRes.ok) {
+          const refreshData = await refreshRes.json()
+          if (refreshData?.success && refreshData.link) {
+            setLinkData(refreshData.link)
+            if (refreshData.invoice) {
+              setInvoiceData(refreshData.invoice)
+            }
+          }
+        }
       } else {
         toast.error(data.error || 'Payment verification failed')
       }
@@ -221,6 +237,129 @@ function PublicPaymentPageInner() {
     linkData.paymentStatus === 'Paid' ||
     (invoiceData && invoiceData.status === 'Paid')
   const isCancelled = linkData.status === 'Cancelled'
+
+  const invoiceTotal = invoiceData?.total || linkData.amount || 0
+  const totalPaid = invoiceData?.amountPaid ?? (isAlreadyPaid ? invoiceTotal : (verifiedAmount || linkData.amount || 0))
+  const remainingBalance = invoiceData?.balanceDue ?? Math.max(0, invoiceTotal - totalPaid)
+  const isFullyPaid = remainingBalance <= 0 || invoiceData?.status === 'Paid' || linkData.status === 'Paid'
+  const paymentReceivedAmount = verifiedAmount || linkData.amount || 0
+
+  if (isAlreadyPaid || paymentSuccess) {
+    return (
+      <PageEnter>
+        <div className="min-h-screen bg-gray-50/80 flex flex-col justify-between p-4 sm:p-6 font-sans">
+          <div className="max-w-xl mx-auto w-full space-y-6 my-auto py-6">
+            
+            {/* Branding Header */}
+            <SlideUp delay={0.05} className="text-center space-y-2">
+              {branding.logoUrl ? (
+                <img
+                  src={branding.logoUrl}
+                  alt={branding.businessName}
+                  className="h-14 mx-auto object-contain"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div
+                  className="inline-flex items-center justify-center w-12 h-12 rounded-2xl shadow-md mb-1"
+                  style={{ backgroundColor: branding.buttonColor || '#0A0A0A' }}
+                >
+                  <Zap size={24} style={{ color: branding.buttonTextColor || '#FFFFFF' }} />
+                </div>
+              )}
+              <h1 className="text-2xl font-bold tracking-tight" style={{ color: branding.textColor || '#111827' }}>
+                {(branding.businessName || 'LEXMEDIA.GH').toUpperCase()}
+              </h1>
+              <p className="text-xs uppercase font-semibold tracking-wider" style={{ color: branding.mutedTextColor || '#6B7280' }}>
+                Official Payment Portal
+              </p>
+            </SlideUp>
+
+            {/* Dedicated Thank You Card */}
+            <CardReveal delay={0.12}>
+              <Card className="border border-gray-200/85 shadow-xl shadow-emerald-500/5 rounded-3xl overflow-hidden bg-white">
+                <div className="p-6 sm:p-8 space-y-6 text-center">
+                  
+                  {/* Success Icon Animation */}
+                  <div className="w-16 h-16 rounded-3xl bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center mx-auto shadow-sm">
+                    <CheckCircle2 size={32} className="animate-pulse" />
+                  </div>
+
+                  <div className="space-y-2">
+                    <h2 className="text-2xl font-black text-gray-900 tracking-tight">
+                      {isFullyPaid ? '🎉 Payment Complete!' : 'Thank You for Your Payment! 🎉'}
+                    </h2>
+                    <p className="text-sm text-gray-600 max-w-sm mx-auto leading-relaxed">
+                      {isFullyPaid
+                        ? 'Thank you for completing your payment. Your payment has been successfully received.'
+                        : 'Your payment has been successfully received.'}
+                    </p>
+                  </div>
+
+                  {/* Clean Relevant Information */}
+                  <div className="bg-gray-50/80 rounded-2xl p-5 border border-gray-200/70 text-left space-y-3">
+                    <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-200/65">
+                      <span className="text-gray-500 font-medium">Client</span>
+                      <span className="font-bold text-gray-900 text-right">{linkData.clientName || invoiceData?.clientName || 'Valued Client'}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-200/65">
+                      <span className="text-gray-500 font-medium">Project / Service</span>
+                      <span className="font-semibold text-gray-900 text-right">
+                        {linkData.projectName || invoiceData?.projectName || linkData.title || 'Professional Service'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-200/65">
+                      <span className="text-gray-500 font-medium">Payment Received</span>
+                      <span className="font-mono font-bold text-emerald-600">
+                        {formatCurrency(paymentReceivedAmount, linkData.currency || invoiceData?.currency)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-200/65">
+                      <span className="text-gray-500 font-medium">Total Paid</span>
+                      <span className="font-mono font-semibold text-gray-900">
+                        {formatCurrency(totalPaid, linkData.currency || invoiceData?.currency)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-200/65">
+                      <span className="text-gray-500 font-medium">Invoice Total</span>
+                      <span className="font-mono font-semibold text-gray-900">
+                        {formatCurrency(invoiceTotal, linkData.currency || invoiceData?.currency)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-sm py-2 font-bold pt-1">
+                      <span className="text-gray-800">Remaining Balance</span>
+                      <span className="font-mono text-indigo-600 text-base">
+                        {formatCurrency(remainingBalance, linkData.currency || invoiceData?.currency)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Security Badge */}
+                  <div className="flex items-center justify-center gap-2 text-xs text-emerald-700 bg-emerald-50/80 py-2.5 px-4 rounded-xl border border-emerald-200">
+                    <ShieldCheck size={16} /> Verified & Secured by Paystack
+                  </div>
+
+                </div>
+              </Card>
+            </CardReveal>
+
+            {/* Bottom Branding Footer */}
+            <FadeIn delay={0.25} className="text-center">
+              <p className="text-xs text-gray-400">
+                &copy; {new Date().getFullYear()} {branding.businessName || 'LEXMEDIA.GH'}. All rights reserved.
+              </p>
+            </FadeIn>
+
+          </div>
+        </div>
+      </PageEnter>
+    )
+  }
 
   return (
     <PageEnter>
