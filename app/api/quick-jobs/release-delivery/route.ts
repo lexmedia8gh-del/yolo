@@ -36,17 +36,10 @@ export async function POST(req: NextRequest) {
 
     const qjData = qjSnap.data()!
 
-    // 2. Verify payment status according to existing payment/delivery logic
+    // 2. Determine payment status and admin override release
     const isPaid =
       qjData.paymentStatus === 'Paid' ||
       (Number(qjData.outstandingBalance) <= 0 && Number(qjData.amountPaid) >= Number(qjData.originalAgreedPrice))
-
-    if (!isPaid) {
-      return NextResponse.json(
-        { error: 'Cannot release delivery. Quick Job payment must be completed or confirmed first.' },
-        { status: 400 }
-      )
-    }
 
     // 3. Find canonical delivery record or initialize one
     const deliveryRef = adminDb.collection(COLLECTIONS.DELIVERIES).doc(jobId)
@@ -81,9 +74,14 @@ export async function POST(req: NextRequest) {
       fileCount = deliveryData.files.length
     }
 
+    // Fallback: check Quick Job fileIds array
+    if (fileCount === 0 && Array.isArray(qjData.fileIds) && qjData.fileIds.length > 0) {
+      fileCount = qjData.fileIds.length
+    }
+
     if (fileCount === 0) {
       return NextResponse.json(
-        { error: 'No delivery files found for this Quick Job. Please upload at least one file before releasing delivery.' },
+        { error: 'Please upload delivery files before releasing this job.' },
         { status: 400 }
       )
     }
@@ -144,15 +142,17 @@ export async function POST(req: NextRequest) {
     } catch {}
 
     // 9. Dispatch Brevo Email using server-side configuration
+    const jobServiceName = qjData.serviceSnapshot?.name || qjData.jobDescription || 'Quick Job'
     const emailRes = await sendDeliveryReadyEmail({
       toEmail: clientEmail,
       clientName,
-      projectName: qjData.jobDescription || 'Quick Job Deliverables',
+      projectName: qjData.jobDescription || jobServiceName,
       deliveryUrl: deliveryLink,
       lexmediaLogoUrl,
       clientLogoUrl,
-      subject: 'Your Deliverables Are Ready',
-      primaryButtonText: 'Access Your Deliverables',
+      subject: 'Your deliverables are ready!',
+      introText: `Your files for <strong>${jobServiceName}</strong> are now ready for you.<br><br>Click the button below to securely access and download your deliverables.<br><br><span style="color: #475569; font-size: 13px;">Thank you for choosing LEXMEDIA.GH.</span>`,
+      primaryButtonText: 'Access Your Files',
     })
 
     // If Brevo email fails: DO NOT mark as successfully sent
@@ -182,6 +182,8 @@ export async function POST(req: NextRequest) {
         title: `Quick Job Delivery: ${qjData.jobDescription || 'Files'}`,
         status: 'Ready',
         isReleased: true,
+        requiresFullPayment: false,
+        adminOverride: !isPaid,
         accessToken,
         fileCount,
         releasedAt: FieldValue.serverTimestamp(),

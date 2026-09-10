@@ -31,6 +31,21 @@ const themeInitScript = `
       document.documentElement.style.colorScheme = 'light';
     }
   } catch (e) {}
+
+  // Auto-recover from stale Next.js/Webpack chunk load failures
+  if (typeof window !== 'undefined') {
+    window.addEventListener('error', function(e) {
+      if (e && e.message && (e.message.indexOf('Loading chunk') !== -1 || e.message.indexOf('ChunkLoadError') !== -1)) {
+        var key = 'last_chunk_reload';
+        var now = Date.now();
+        var last = parseInt(sessionStorage.getItem(key) || '0', 10);
+        if (now - last > 8000) {
+          sessionStorage.setItem(key, String(now));
+          window.location.reload();
+        }
+      }
+    });
+  }
 })();
 `
 
@@ -44,7 +59,10 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="font-sans antialiased bg-background text-gray-900 dark:text-gray-100 min-h-screen">
+      <body
+        className="font-sans antialiased bg-background text-gray-900 dark:text-gray-100 min-h-screen"
+        suppressHydrationWarning
+      >
         <ThemeProvider>
           <AuthProvider>
             {children}

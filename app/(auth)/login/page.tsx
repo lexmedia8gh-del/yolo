@@ -139,30 +139,36 @@ function LoginFormContent() {
 
   return (
     <div className="min-h-screen w-full lg:grid lg:grid-cols-12 bg-white dark:bg-gray-950 font-sans transition-colors duration-200">
-      <style dangerouslySetInnerHTML={{ __html: `
-        /* Dynamic Brand Overrides */
-        input:focus {
-          border-color: ${brandAccent} !important;
-          box-shadow: 0 0 0 2px ${brandAccent}25 !important;
-        }
-        input[type="checkbox"]:checked {
-          background-color: ${brandAccent} !important;
-          border-color: ${brandAccent} !important;
-        }
-        ::selection {
-          background-color: ${brandAccent} !important;
-          color: #ffffff !important;
-        }
-        .brand-text-accent {
-          color: ${brandAccent} !important;
-        }
-        .brand-bg-accent {
-          background-color: ${brandAccent} !important;
-        }
-        .brand-border-accent {
-          border-color: ${brandAccent} !important;
-        }
-      ` }} />
+      {branding && (
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `
+          /* Dynamic Brand Overrides */
+          input:focus {
+            border-color: ${brandAccent} !important;
+            box-shadow: 0 0 0 2px ${brandAccent}25 !important;
+          }
+          input[type="checkbox"]:checked {
+            background-color: ${brandAccent} !important;
+            border-color: ${brandAccent} !important;
+          }
+          ::selection {
+            background-color: ${brandAccent} !important;
+            color: #ffffff !important;
+          }
+          .brand-text-accent {
+            color: ${brandAccent} !important;
+          }
+          .brand-bg-accent {
+            background-color: ${brandAccent} !important;
+          }
+          .brand-border-accent {
+            border-color: ${brandAccent} !important;
+          }
+        `,
+          }}
+        />
+      )}
       
       {/* LEFT SIDE — BRAND EXPERIENCE */}
       <div className="hidden lg:flex lg:col-span-5 xl:col-span-6 relative overflow-hidden bg-gradient-to-br from-blue-950 via-slate-900 to-blue-900 text-white p-12 xl:p-16 flex-col justify-between">

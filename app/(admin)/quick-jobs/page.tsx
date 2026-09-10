@@ -25,6 +25,10 @@ import {
   Lock,
   Unlock,
   ShieldCheck,
+  Send,
+  RotateCcw,
+  PackageCheck,
+  CheckCheck,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -78,6 +82,11 @@ export default function QuickJobsPage() {
   const [isNewClientModalOpen, setIsNewClientModalOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+  // Release Delivery Modal State
+  const [releasingJob, setReleasingJob] = useState<QuickJob | null>(null)
+  const [isReleasingDirect, setIsReleasingDirect] = useState(false)
+  const [isResendModal, setIsResendModal] = useState(false)
+
   // Form State
   const [formData, setFormData] = useState({
     clientId: '',
@@ -100,6 +109,81 @@ export default function QuickJobsPage() {
     phone: '',
     company: '',
   })
+
+  // Release Delivery Handlers
+  const handlePromptRelease = (job: QuickJob, isResend = false) => {
+    setIsResendModal(isResend)
+    setReleasingJob(job)
+  }
+
+  const handleExecuteRelease = async () => {
+    if (!releasingJob) return
+    setIsReleasingDirect(true)
+    try {
+      const res = await fetch('/api/quick-jobs/release-delivery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobId: releasingJob.id,
+          resend: isResendModal,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to release delivery')
+      }
+
+      toast.success(
+        isResendModal
+          ? 'Delivery notification email resent via Brevo!'
+          : 'Delivery released! Client notification email sent via Brevo.'
+      )
+
+      // Update in local state
+      setQuickJobs((prev) =>
+        prev.map((j) =>
+          j.id === releasingJob.id
+            ? {
+                ...j,
+                deliveryStatus: 'Released',
+                status: 'Completed',
+                deliveryReleasedAt: data.releasedAt,
+                deliveryEmailSent: true,
+                deliveryLink: data.deliveryLink,
+                deliveryAccessToken: data.accessToken,
+              }
+            : j
+        )
+      )
+
+      if (viewingJob && viewingJob.id === releasingJob.id) {
+        setViewingJob((prev) =>
+          prev
+            ? {
+                ...prev,
+                deliveryStatus: 'Released',
+                status: 'Completed',
+                deliveryReleasedAt: data.releasedAt,
+                deliveryEmailSent: true,
+                deliveryLink: data.deliveryLink,
+                deliveryAccessToken: data.accessToken,
+              }
+            : null
+        )
+      }
+
+      setReleasingJob(null)
+    } catch (err: any) {
+      console.error('Release delivery error:', err)
+      toast.error(err?.message || 'Failed to release delivery.')
+      if (err?.message && err.message.includes('upload delivery files')) {
+        setViewingJob(releasingJob)
+        setReleasingJob(null)
+      }
+    } finally {
+      setIsReleasingDirect(false)
+    }
+  }
 
   // Load Data
   useEffect(() => {
@@ -508,20 +592,57 @@ export default function QuickJobsPage() {
                     </div>
                     <div className="flex items-center justify-between text-[11px] px-1">
                       <span className="text-gray-500">Deliverables:</span>
-                      {job.deliveryStatus === 'Sent' ? (
+                      {job.deliveryStatus === 'Released' || job.deliveryStatus === 'Sent' ? (
                         <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
-                          <CheckCircle2 size={12} /> Delivered
+                          <CheckCircle2 size={12} /> Released
                         </span>
-                      ) : job.paymentStatus === 'Paid' ? (
+                      ) : job.deliveryStatus === 'Downloaded' ? (
+                        <span className="text-purple-600 dark:text-purple-400 font-medium flex items-center gap-1">
+                          <CheckCheck size={12} /> Downloaded
+                        </span>
+                      ) : (job.fileIds?.length || 0) > 0 ? (
                         <span className="text-indigo-600 dark:text-indigo-400 font-medium flex items-center gap-1">
-                          <Unlock size={12} /> Upload Ready
+                          <PackageCheck size={12} /> {job.fileIds!.length} {job.fileIds!.length === 1 ? 'file' : 'files'} ready
                         </span>
                       ) : (
-                        <span className="text-rose-500 dark:text-rose-400 font-medium flex items-center gap-1">
-                          <Lock size={12} /> Upload Locked
+                        <span className="text-gray-400 dark:text-gray-500 font-medium flex items-center gap-1">
+                          No files uploaded
                         </span>
                       )}
                     </div>
+                  </div>
+
+                  {/* Release Delivery Button on Card */}
+                  <div className="pt-2">
+                    {job.deliveryStatus === 'Released' || job.deliveryStatus === 'Sent' ? (
+                      <div className="flex items-center justify-between gap-1.5 p-1.5 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30">
+                        <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1 truncate">
+                          <CheckCircle2 size={12} className="shrink-0" />
+                          Delivery Released
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handlePromptRelease(job, true)}
+                          icon={<RotateCcw size={11} />}
+                          className="text-[11px] h-6 px-2 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 shrink-0"
+                          title="Resend delivery link email to client"
+                        >
+                          Resend
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        onClick={() => handlePromptRelease(job, false)}
+                        icon={<Send size={13} />}
+                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-xs flex items-center justify-center gap-1.5 h-8"
+                        title="Release delivery files and email secure link to client"
+                      >
+                        Release Delivery
+                      </Button>
+                    )}
                   </div>
                 </div>
 
@@ -889,6 +1010,64 @@ export default function QuickJobsPage() {
                 loading={isSubmitting}
               >
                 Delete Job
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Release Delivery Confirmation Modal */}
+      {releasingJob && (
+        <Modal
+          isOpen={!!releasingJob}
+          onClose={() => !isReleasingDirect && setReleasingJob(null)}
+          title={isResendModal ? 'Resend Delivery Email' : 'Release Delivery'}
+          size="sm"
+        >
+          <div className="space-y-4 text-xs">
+            <div className="p-3.5 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 text-indigo-950 dark:text-indigo-200 space-y-2">
+              <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">
+                {isResendModal
+                  ? `Resend delivery link to ${releasingJob.clientName}?`
+                  : `Release delivery to ${releasingJob.clientName} and send the secure delivery link to their email?`}
+              </p>
+              <div className="text-gray-600 dark:text-gray-300 space-y-1 text-xs">
+                <p>
+                  <strong>Client:</strong> {releasingJob.clientName}
+                </p>
+                <p>
+                  <strong>Recipient Email:</strong> {releasingJob.clientEmail || 'Client registered email address'}
+                </p>
+                <p>
+                  <strong>Job:</strong> {releasingJob.jobDescription}
+                </p>
+              </div>
+              <p className="text-gray-500 dark:text-gray-400 text-[11px] leading-relaxed pt-1 border-t border-indigo-100 dark:border-indigo-900/50">
+                {isResendModal
+                  ? 'This will resend the client delivery portal notification email with their active download link.'
+                  : "This will activate the client's secure delivery portal and dispatch an email via Brevo with a direct button to access and download their files."}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100 dark:border-gray-800">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setReleasingJob(null)}
+                disabled={isReleasingDirect}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                loading={isReleasingDirect}
+                disabled={isReleasingDirect}
+                onClick={handleExecuteRelease}
+                icon={<Send size={13} />}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
+              >
+                {isResendModal ? 'Resend & Send Email' : 'Release & Send Email'}
               </Button>
             </div>
           </div>

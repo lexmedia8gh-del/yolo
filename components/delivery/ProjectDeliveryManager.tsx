@@ -702,7 +702,7 @@ export function ProjectDeliveryManager({
     }
 
     if (files.length === 0) {
-      toast.error('Please upload at least one file before releasing delivery.')
+      toast.error(quickJob ? 'Please upload delivery files before releasing this job.' : 'Please upload at least one file before releasing delivery.')
       return
     }
 
@@ -1363,10 +1363,11 @@ export function ProjectDeliveryManager({
                 <Button
                   size="sm"
                   variant="primary"
-                  disabled
-                  className="opacity-50 cursor-not-allowed text-xs bg-gray-100 text-gray-400 border border-gray-200"
+                  onClick={() => toast.error(quickJob ? 'Please upload delivery files before releasing this job.' : 'Please upload at least one file before submitting delivery.')}
+                  className="text-xs bg-indigo-600/80 hover:bg-indigo-600 text-white font-semibold shadow-xs"
+                  icon={<Send size={14} />}
                 >
-                  Upload files to continue
+                  {quickJob ? 'Release Delivery' : 'Submit Delivery'}
                 </Button>
               ) : (
                 <Button
@@ -1802,26 +1803,30 @@ export function ProjectDeliveryManager({
             </div>
             <Button
               size="md"
-              variant={files.length > 0 ? 'primary' : 'outline'}
+              variant="primary"
               loading={isSubmitting || isReleasing}
-              disabled={isSubmitting || isReleasing || files.length === 0}
-              onClick={() => promptReleaseConfirmation(false)}
-              icon={files.length > 0 ? <Send size={15} /> : undefined}
+              disabled={isSubmitting || isReleasing}
+              onClick={() => {
+                if (files.length === 0) {
+                  toast.error(quickJob ? 'Please upload delivery files before releasing this job.' : 'Please upload at least one file before submitting delivery.')
+                  return
+                }
+                promptReleaseConfirmation(false)
+              }}
+              icon={<Send size={15} />}
               className={`font-semibold text-xs shadow-xs shrink-0 w-full sm:w-auto ${
                 files.length > 0
                   ? 'bg-indigo-650 hover:bg-indigo-700 text-white'
-                  : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                  : 'bg-indigo-600/80 hover:bg-indigo-600 text-white'
               }`}
             >
               {isSubmitting || isReleasing
                 ? quickJob
                   ? '⟳ Releasing Delivery...'
                   : '⟳ Sending Delivery...'
-                : files.length > 0
-                ? quickJob
-                  ? 'Release Delivery'
-                  : 'Submit Delivery'
-                : 'Upload files to continue'}
+                : quickJob
+                ? 'Release Delivery'
+                : 'Submit Delivery'}
             </Button>
           </div>
         )}
