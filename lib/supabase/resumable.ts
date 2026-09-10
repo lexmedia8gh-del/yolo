@@ -1,6 +1,6 @@
 import * as tus from 'tus-js-client'
 import { isSupabaseConfigured } from './client'
-import { STORAGE_BUCKETS } from './storage'
+import { STORAGE_BUCKETS, uploadDeliveryFile } from './storage'
 
 export type UploadTaskStatus =
   | 'idle'
@@ -180,7 +180,7 @@ export class ResumableUploadTask {
   }
 
   /**
-   * Starts or resumes the file upload using TUS protocol or chunked fallback.
+   * Starts or resumes the file upload using standard direct upload, TUS protocol, or chunked fallback.
    */
   public async start(): Promise<{ downloadUrl: string; storagePath: string }> {
     this.isCancelled = false
@@ -203,6 +203,16 @@ export class ResumableUploadTask {
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
     if (isSupabaseConfigured() && supabaseUrl && supabaseAnonKey) {
+      // For files <= 6MB, fast direct browser upload to Supabase Storage
+      if (this.fileSize <= 6 * 1024 * 1024) {
+        try {
+          return await this.startDirectStandardUpload()
+        } catch (err: any) {
+          console.warn('[Direct Upload] Standard upload failed, falling back to TUS:', err?.message)
+        }
+      }
+
+      // For files > 6MB (10MB, 15MB, 25MB, 50MB+), TUS resumable upload with 2MB chunks
       try {
         return await this.startTusUpload(supabaseUrl, supabaseAnonKey)
       } catch (tusErr: any) {
@@ -211,6 +221,41 @@ export class ResumableUploadTask {
       }
     } else {
       return await this.startChunkedServerUpload()
+    }
+  }
+
+  /**
+   * Fast direct browser upload using Supabase JS SDK for smaller files (<= 6MB).
+   */
+  private async startDirectStandardUpload(): Promise<{ downloadUrl: string; storagePath: string }> {
+    this.status = 'uploading'
+    this.statusMessage = 'Uploading directly to Supabase Storage...'
+    this.notify()
+
+    const result = await uploadDeliveryFile({
+      path: this.storagePath,
+      file: this.file,
+      contentType: this.file.type || 'application/octet-stream',
+      upsert: true,
+    })
+
+    if (result.error || !result.data?.publicUrl) {
+      throw new Error(result.error?.message || 'Direct Supabase upload failed.')
+    }
+
+    this.bytesUploaded = this.fileSize
+    this.status = 'saving'
+    this.statusMessage = 'Saving file metadata...'
+    this.notify()
+
+    const metadataResult = await this.registerFileMetadata(result.data.publicUrl)
+    this.status = 'done'
+    this.statusMessage = 'Upload completed successfully'
+    this.notify()
+
+    return {
+      downloadUrl: metadataResult.downloadUrl || result.data.publicUrl,
+      storagePath: this.storagePath,
     }
   }
 
