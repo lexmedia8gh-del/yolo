@@ -187,7 +187,7 @@ export async function POST(req: NextRequest) {
         }
 
         if (clientEmail) {
-          const deliveryUrl = getDeliveryLink(deliveryData.accessToken || deliveryId)
+          const deliveryUrl = getDeliveryLink(deliveryData.accessToken || deliveryId, req)
           let finalPaymentUrl = ''
 
           if (amountDue > 0) {
@@ -269,7 +269,7 @@ export async function POST(req: NextRequest) {
               await adminDb.collection(COLLECTIONS.CLIENT_LINKS).add(newLinkPayload)
             }
 
-            finalPaymentUrl = getPaymentLink(paymentToken)
+            finalPaymentUrl = getPaymentLink(paymentToken, req)
           } else {
             // If there's no balance due, point directly to the delivery portal
             finalPaymentUrl = deliveryUrl

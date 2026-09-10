@@ -5,11 +5,11 @@
  * Never import this file into client components or client-side code.
  */
 
-import { getAppUrl } from '@/lib/utils'
+import { getAppUrl, getProductionUrl } from '@/lib/utils'
 import { senderName, getEmailSender } from '@/lib/config/email'
 
-// Re-export centralized email sender configuration
-export { senderName, getEmailSender }
+// Re-export centralized email sender configuration and production URL utility
+export { senderName, getEmailSender, getProductionUrl }
 
 interface SendDeliveryEmailParams {
   toEmail: string
@@ -35,6 +35,22 @@ interface SendPaymentReminderEmailParams {
   clientLogoUrl?: string
 }
 
+export interface SendPaymentRequestEmailParams {
+  toEmail: string
+  clientName: string
+  paymentUrl: string
+  amount: number
+  currency?: string
+  currencySymbol?: string
+  projectName?: string
+  invoiceNumber?: string
+  title?: string
+  dueDate?: string
+  personalMessage?: string
+  businessName?: string
+  businessLogoUrl?: string
+}
+
 export interface SendInvoiceEmailParams {
   toEmail: string
   clientName: string
@@ -49,32 +65,6 @@ export interface SendInvoiceEmailParams {
   items?: Array<{ description: string; quantity: number; total: number }>
   businessName?: string
   businessLogoUrl?: string
-}
-
-/**
- * Replaces localhost or dynamic IP origins with official production URL if set
- */
-function getProductionUrl(urlStr: string): string {
-  if (!urlStr) return ''
-  const prodBase = getAppUrl()
-
-  try {
-    const urlObj = new URL(urlStr)
-    const isLocal =
-      urlObj.hostname === 'localhost' ||
-      urlObj.hostname === '127.0.0.1' ||
-      urlObj.hostname.startsWith('192.168.') ||
-      urlObj.hostname.includes('vercel.app')
-
-    if (isLocal && prodBase && !prodBase.includes('localhost') && !prodBase.includes('127.0.0.1')) {
-      const normalizedBase = prodBase.startsWith('http') ? prodBase : `https://${prodBase}`
-      const baseObj = new URL(normalizedBase)
-      urlObj.protocol = baseObj.protocol
-      urlObj.host = baseObj.host
-      return urlObj.toString()
-    }
-  } catch {}
-  return urlStr
 }
 
 /**
@@ -346,6 +336,7 @@ export async function sendDeliveryReadyEmail({
   const apiKey = process.env.BREVO_API_KEY
 
   const { email: senderEmail } = getEmailSender()
+  const safeDeliveryUrl = getProductionUrl(deliveryUrl)
 
   const htmlContent = renderEmailTemplate({
     clientName,
@@ -354,7 +345,7 @@ export async function sendDeliveryReadyEmail({
     statusBadgeBg: '#dcfce7',
     statusBadgeColor: '#15803d',
     primaryButtonText: primaryButtonText || 'Access Your Deliverables',
-    primaryButtonUrl: deliveryUrl,
+    primaryButtonUrl: safeDeliveryUrl,
     primaryButtonBg: '#2563eb',
     introText:
       introText ||
@@ -391,6 +382,8 @@ export async function sendDeliveryPaymentRequiredEmail({
 
   const hasBalance = amountDue > 0
   const formattedAmount = `${currencySymbol}${amountDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const safePaymentUrl = getProductionUrl(paymentUrl)
+  const safeDeliveryUrl = deliveryUrl ? getProductionUrl(deliveryUrl) : undefined
 
   const htmlContent = renderEmailTemplate({
     clientName,
@@ -401,10 +394,10 @@ export async function sendDeliveryPaymentRequiredEmail({
     amountDue: hasBalance ? amountDue : undefined,
     currencySymbol,
     primaryButtonText: hasBalance ? 'Complete Payment & View Deliverables' : 'View Your Deliverables',
-    primaryButtonUrl: paymentUrl,
+    primaryButtonUrl: safePaymentUrl,
     primaryButtonBg: hasBalance ? '#16a34a' : '#2563eb',
-    secondaryButtonText: (hasBalance && deliveryUrl) ? 'View Deliverables Portal (Locked)' : undefined,
-    secondaryButtonUrl: (hasBalance && deliveryUrl) ? deliveryUrl : undefined,
+    secondaryButtonText: (hasBalance && safeDeliveryUrl) ? 'View Deliverables Portal (Locked)' : undefined,
+    secondaryButtonUrl: (hasBalance && safeDeliveryUrl) ? safeDeliveryUrl : undefined,
     introText: hasBalance
       ? `Your deliverables for <strong>${escapeHtml(projectName)}</strong> have been prepared. Complete your remaining balance to immediately unlock high-resolution file downloads.`
       : `Your project deliverables for <strong>${escapeHtml(projectName)}</strong> are now ready. You can access your completed files using the button below.`,
@@ -595,6 +588,147 @@ export async function sendInvoiceEmail({
   const subject = balanceDue > 0
     ? `Invoice ${invoiceNumber} from ${senderName} — Balance Due: ${formattedBalance}`
     : `Invoice ${invoiceNumber} from ${senderName}`
+
+  return sendBrevoEmail({
+    toEmail,
+    clientName,
+    subject,
+    htmlContent,
+    apiKey,
+    senderEmail,
+    senderName,
+  })
+}
+
+export async function sendPaymentRequestEmail({
+  toEmail,
+  clientName,
+  paymentUrl,
+  amount,
+  currency = 'GHS',
+  currencySymbol = 'GH₵',
+  projectName,
+  invoiceNumber,
+  title,
+  dueDate,
+  personalMessage,
+  businessName = 'LexMedia',
+  businessLogoUrl,
+}: SendPaymentRequestEmailParams): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const apiKey = process.env.BREVO_API_KEY
+  const { email: senderEmail } = getEmailSender()
+
+  const cleanPaymentUrl = getProductionUrl(paymentUrl)
+  const formattedAmount = `${currencySymbol}${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const activeLogo = makeAbsoluteLogoUrl(businessLogoUrl)
+
+  const paymentTitle = title || (invoiceNumber ? `Invoice #${invoiceNumber}` : (projectName ? `Payment for ${projectName}` : 'Payment Request'))
+
+  const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Request from ${escapeHtml(senderName)}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f1f5f9; padding: 40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 580px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;">
+          
+          <!-- Header -->
+          <tr>
+            <td style="background-color: #0f172a; padding: 28px 36px; text-align: center;">
+              ${
+                activeLogo
+                  ? `<img src="${escapeHtml(activeLogo)}" alt="${escapeHtml(businessName)}" style="max-height: 48px; max-width: 180px; object-fit: contain; margin: 0 auto 8px auto; display: block;" />`
+                  : ''
+              }
+              <h1 style="margin: 0; font-size: 20px; font-weight: 800; color: #ffffff; letter-spacing: 0.5px; text-transform: uppercase;">
+                ${escapeHtml(senderName)}
+              </h1>
+              <p style="margin: 4px 0 0 0; font-size: 11px; font-weight: 600; color: #38bdf8; text-transform: uppercase; letter-spacing: 1px;">
+                Secure Client Payment Portal
+              </p>
+            </td>
+          </tr>
+
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 36px 36px 28px 36px;">
+              <p style="margin: 0 0 16px 0; font-size: 15px; color: #334155;">
+                Hello <strong>${escapeHtml(clientName)}</strong>,
+              </p>
+              <p style="margin: 0 0 24px 0; font-size: 14px; color: #64748b; line-height: 1.6;">
+                A secure payment request has been generated for you regarding <strong>${escapeHtml(paymentTitle)}</strong>. You can review the details and complete payment online via Mobile Money, Debit/Credit Card, or Bank transfer.
+              </p>
+
+              ${
+                personalMessage
+                  ? `
+              <div style="background-color: #f8fafc; border-left: 4px solid #3b82f6; border-radius: 0 8px 8px 0; padding: 14px 18px; margin-bottom: 24px;">
+                <p style="margin: 0; font-size: 13px; color: #475569; font-style: italic; line-height: 1.5;">&ldquo;${escapeHtml(personalMessage)}&rdquo;</p>
+              </div>
+              `
+                  : ''
+              }
+
+              <!-- Amount Banner -->
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 1px solid #bfdbfe; border-radius: 12px; margin: 0 0 24px 0; padding: 20px; text-align: center;">
+                <tr>
+                  <td>
+                    <p style="margin: 0; font-size: 12px; font-weight: 600; color: #1e40af; text-transform: uppercase; letter-spacing: 0.5px;">Amount Due</p>
+                    <p style="margin: 6px 0 2px 0; font-size: 32px; font-weight: 800; color: #1e3a8a; letter-spacing: -0.5px;">${escapeHtml(formattedAmount)}</p>
+                    <p style="margin: 0; font-size: 12px; color: #3b82f6;">${escapeHtml(paymentTitle)}${dueDate ? ` &bull; Due by ${escapeHtml(dueDate)}` : ''}</p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Primary CTA Button -->
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin: 24px 0 16px 0;">
+                <tr>
+                  <td align="center">
+                    <a href="${escapeHtml(cleanPaymentUrl)}" target="_blank" style="display: inline-block; width: 85%; max-width: 320px; background-color: #16a34a; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 24px; border-radius: 10px; text-align: center; box-shadow: 0 4px 12px rgba(22, 163, 74, 0.25);">
+                      Proceed to Secure Payment &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="font-size: 12px; color: #94a3b8; text-align: center; line-height: 1.5; margin-top: 16px;">
+                Direct payment link:<br>
+                <a href="${escapeHtml(cleanPaymentUrl)}" style="color: #2563eb; text-decoration: none; word-break: break-all;">${escapeHtml(cleanPaymentUrl)}</a>
+              </p>
+
+              <!-- Trust & Security Badge -->
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-top: 24px; padding-top: 16px; border-top: 1px dashed #e2e8f0;">
+                <tr>
+                  <td align="center" style="font-size: 11px; color: #64748b;">
+                    🔒 256-Bit SSL Encrypted &bull; Instant Verification &bull; Powered by Paystack
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 20px 28px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="margin: 0 0 4px 0; font-size: 12px; color: #64748b;">
+                Thank you for choosing ${escapeHtml(businessName)}. If you have questions, reach out to <a href="mailto:${escapeHtml(senderEmail)}" style="color: #2563eb; text-decoration: none;">${escapeHtml(senderEmail)}</a>.
+              </p>
+              <p style="margin: 8px 0 0 0; font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase;">&copy; ${escapeHtml(senderName)} &mdash; Professional Media &amp; Digital Services</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
+
+  const subject = `Payment Request from ${senderName} — ${formattedAmount} (${paymentTitle})`
 
   return sendBrevoEmail({
     toEmail,

@@ -354,7 +354,24 @@ export function getAppUrl(context?: any): string {
   // 2. Browser context: Authoritative for client-side interactions in the web app
   if (typeof window !== 'undefined' && window.location?.origin) {
     const origin = window.location.origin.replace(/\/$/, '')
-    if (origin) return origin
+    const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1')
+    
+    // If not running on localhost, browser origin is authoritative
+    if (!isLocalhost) {
+      return origin
+    }
+
+    // If on localhost, check if an authoritative public URL is configured
+    const configuredPublicUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL
+    if (configuredPublicUrl) {
+      const trimmed = configuredPublicUrl.trim()
+      if (trimmed && !trimmed.includes('localhost') && !trimmed.includes('127.0.0.1')) {
+        const normalized = trimmed.startsWith('http') ? trimmed : `https://${trimmed}`
+        return normalized.replace(/\/$/, '')
+      }
+    }
+
+    return origin
   }
 
   // 3. Request context (Server-side dynamic host detection from headers)
@@ -441,8 +458,8 @@ export function getAppUrl(context?: any): string {
     return normalized.replace(/\/$/, '')
   }
 
-  // Fallback for local development or relative links
-  return ''
+  // Fallback default for client-facing links
+  return 'https://lexmedia-client-system.web.app'
 }
 
 /**
@@ -456,13 +473,78 @@ export function appUrl(path = '', context?: any): string {
 }
 
 /**
+ * Canonical URL sanitizer for customer-facing links (Brevo emails, client payment links).
+ * Guarantees that any localhost or invalid link is transformed into an absolute,
+ * secure production URL. Preserves exact token, route, and query params.
+ */
+export function getProductionUrl(urlStr: string, context?: any): string {
+  if (!urlStr || typeof urlStr !== 'string') return ''
+  const trimmed = urlStr.trim()
+  if (!trimmed) return ''
+
+  // 1. If it's a bare token (e.g., "pay_abc123" or "p_xyz"), form the full /pay/[token] path
+  let targetPath = trimmed
+  if (!targetPath.startsWith('/') && !targetPath.startsWith('http://') && !targetPath.startsWith('https://')) {
+    targetPath = `/pay/${targetPath}`
+  }
+
+  // 2. Resolve authoritative base URL
+  let prodBase = getAppUrl(context)
+  if (!prodBase || prodBase.includes('localhost') || prodBase.includes('127.0.0.1')) {
+    const candidate =
+      process.env.APP_URL ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      process.env.VERCEL_URL ||
+      process.env.NEXT_PUBLIC_VERCEL_URL
+    if (candidate && !candidate.includes('localhost') && !candidate.includes('127.0.0.1')) {
+      prodBase = candidate.startsWith('http') ? candidate : `https://${candidate}`
+    } else {
+      prodBase = 'https://lexmedia-client-system.web.app'
+    }
+  }
+  const cleanBase = prodBase.replace(/\/$/, '')
+
+  // 3. If relative path (e.g. "/pay/token" or "/delivery/token")
+  if (targetPath.startsWith('/')) {
+    return `${cleanBase}${targetPath}`
+  }
+
+  // 4. If full URL (e.g. "http://localhost:3000/pay/token")
+  try {
+    const parsed = new URL(targetPath)
+    const isLocalHost =
+      parsed.hostname === 'localhost' ||
+      parsed.hostname === '127.0.0.1' ||
+      parsed.hostname.startsWith('192.168.') ||
+      parsed.port === '3000'
+
+    // If external third-party payment URL (like paystack.com), leave untouched
+    if (!isLocalHost && (parsed.hostname.includes('paystack.com') || parsed.hostname.includes('hubtel.com'))) {
+      return targetPath
+    }
+
+    if (isLocalHost) {
+      const baseObj = new URL(cleanBase.startsWith('http') ? cleanBase : `https://${cleanBase}`)
+      parsed.protocol = baseObj.protocol
+      parsed.host = baseObj.host
+      parsed.port = baseObj.port
+      return parsed.toString()
+    }
+
+    return targetPath
+  } catch {
+    return `${cleanBase}/${targetPath.replace(/^\//, '')}`
+  }
+}
+
+/**
  * Centralized payment-link generator for Ctrl Room.
  * Generates the authoritative customer-facing payment URL across the app:
  * Admin dashboard, Copy button, WhatsApp messages, Email, Invoices, and Projects.
  */
 export function getPaymentLink(tokenOrId: string, context?: any): string {
   const cleanToken = (tokenOrId || 'sample').trim()
-  return appUrl(`/pay/${cleanToken}`, context)
+  return getProductionUrl(`/pay/${cleanToken}`, context)
 }
 
 /**
@@ -472,6 +554,6 @@ export function getPaymentLink(tokenOrId: string, context?: any): string {
  */
 export function getDeliveryLink(accessToken: string, context?: any): string {
   const cleanToken = (accessToken || '').trim()
-  return appUrl(`/delivery/${encodeURIComponent(cleanToken)}`, context)
+  return getProductionUrl(`/delivery/${encodeURIComponent(cleanToken)}`, context)
 }
 

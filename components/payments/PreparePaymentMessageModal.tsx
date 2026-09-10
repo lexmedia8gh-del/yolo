@@ -13,11 +13,13 @@ import {
   DollarSign,
   Link2,
   ShieldCheck,
+  Mail,
+  Loader2,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import type { Client, Project, Invoice } from '@/lib/types'
-import { formatCurrency, copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone } from '@/lib/utils'
+import { formatCurrency, copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone, getProductionUrl } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface PreparePaymentMessageModalProps {
@@ -51,36 +53,42 @@ export function PreparePaymentMessageModal({
   currency = 'GHS',
   isDeposit = false,
 }: PreparePaymentMessageModalProps) {
-  let rawUrl = paymentUrl || paymentLinkUrl || ''
-  if (typeof window !== 'undefined' && (rawUrl.includes('localhost') || rawUrl.includes('127.0.0.1')) && !window.location.origin.includes('localhost')) {
-    rawUrl = rawUrl.replace(/https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/, window.location.origin)
-  }
-  const effectiveUrl = rawUrl
+  // Authoritative production payment link — never contains localhost
+  const effectiveUrl = getProductionUrl(paymentUrl || paymentLinkUrl || '')
+
   const [template, setTemplate] = useState<MessageTemplate>(
     isDeposit ? 'deposit_request' : 'whatsapp_standard'
   )
   const [recipientPhone, setRecipientPhone] = useState<string>('')
+  const [recipientEmail, setRecipientEmail] = useState<string>('')
   const [customMessage, setCustomMessage] = useState<string>('')
   const [copiedMessage, setCopiedMessage] = useState(false)
   const [copiedLink, setCopiedLink] = useState(false)
+  const [isSendingEmail, setIsSendingEmail] = useState(false)
 
   const phoneValidation = formatWhatsAppPhone(recipientPhone)
 
-  // Initialize recipient phone
+  // Initialize recipient phone and email from client or invoice
   useEffect(() => {
     if (client?.whatsappNumber) {
       setRecipientPhone(client.whatsappNumber)
     } else if (client?.phone) {
       setRecipientPhone(client.phone)
     }
-  }, [client])
+
+    const emailCandidate = client?.email || (invoice as any)?.clientEmail || ''
+    if (emailCandidate) {
+      setRecipientEmail(emailCandidate)
+    }
+  }, [client, invoice])
+
+  const dueAmount = amount ?? invoice?.balanceDue ?? project?.outstandingBalance ?? 0
 
   // Generate message based on template
   useEffect(() => {
     const clientName = client?.fullName || 'Valued Client'
     const projName = project?.name || linkTitle || 'your project'
     const invNum = invoice?.invoiceNumber ? ` #${invoice.invoiceNumber}` : invoiceNumber ? ` #${invoiceNumber}` : ''
-    const dueAmount = amount ?? invoice?.balanceDue ?? project?.outstandingBalance ?? 0
     const formattedAmount = `${currency} ${dueAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     const linkStr = effectiveUrl || '[Payment Link]'
 
@@ -105,7 +113,7 @@ export function PreparePaymentMessageModal({
     }
 
     setCustomMessage(text)
-  }, [template, client, project, invoice, effectiveUrl, invoiceNumber, linkTitle, amount, currency, isOpen])
+  }, [template, client, project, invoice, effectiveUrl, invoiceNumber, linkTitle, dueAmount, currency, isOpen])
 
   const handleCopyMessage = async () => {
     if (!customMessage.trim()) {
@@ -152,6 +160,47 @@ export function PreparePaymentMessageModal({
     window.open(url, '_blank', 'noopener,noreferrer')
   }
 
+  const handleSendEmailViaBrevo = async () => {
+    if (!recipientEmail.trim() || !recipientEmail.includes('@')) {
+      toast.error('Please enter a valid client email address')
+      return
+    }
+    if (!effectiveUrl) {
+      toast.error('Payment URL is missing')
+      return
+    }
+
+    try {
+      setIsSendingEmail(true)
+      const res = await fetch('/api/payments/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          toEmail: recipientEmail.trim(),
+          clientName: client?.fullName || (invoice as any)?.clientName || 'Valued Client',
+          paymentUrl: effectiveUrl,
+          amount: dueAmount,
+          currency: currency,
+          currencySymbol: currency === 'GHS' ? 'GH₵' : currency,
+          projectName: project?.name || linkTitle,
+          invoiceNumber: invoice?.invoiceNumber || invoiceNumber,
+          personalMessage: customMessage,
+        }),
+      })
+
+      const data = await res.json()
+      if (res.ok && data.success) {
+        toast.success(`Payment email successfully sent via Brevo to ${recipientEmail}!`)
+      } else {
+        toast.error(data.error || 'Failed to dispatch email via Brevo')
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Error communicating with Brevo service')
+    } finally {
+      setIsSendingEmail(false)
+    }
+  }
+
   return (
     <Modal
       isOpen={isOpen}
@@ -187,7 +236,7 @@ export function PreparePaymentMessageModal({
           </div>
         </div>
 
-        {/* Recipient Phone & Payment Link Pill */}
+        {/* Recipient Phone & Email */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1">
             <label className="block text-[11px] font-semibold text-gray-600">
@@ -223,24 +272,44 @@ export function PreparePaymentMessageModal({
           </div>
 
           <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <label className="block text-[11px] font-semibold text-gray-600">Payment Link</label>
-              {effectiveUrl && (
-                <button
-                  type="button"
-                  onClick={handleCopyLinkOnly}
-                  className="text-[11px] text-indigo-600 hover:underline flex items-center gap-1 font-medium"
-                >
-                  {copiedLink ? 'Copied!' : 'Copy Link Only'}
-                </button>
-              )}
+            <label className="block text-[11px] font-semibold text-gray-600">
+              Recipient Email (for Brevo)
+            </label>
+            <div className="relative">
+              <Mail size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="email"
+                value={recipientEmail}
+                onChange={(e) => setRecipientEmail(e.target.value)}
+                placeholder="client@example.com"
+                className="w-full h-8 pl-8 pr-3 rounded-lg border border-gray-300 bg-white text-xs text-gray-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none"
+              />
             </div>
-            <div className="flex items-center gap-1.5 h-8 px-2.5 bg-gray-50 rounded-lg border border-gray-200 text-xs">
-              <Link2 size={12} className="text-gray-400 shrink-0" />
-              <span className="truncate font-mono text-gray-700 text-[11px]">
-                {effectiveUrl || 'No link associated yet'}
-              </span>
-            </div>
+            <p className="text-[11px] text-gray-500 pt-0.5">
+              Email will be delivered with verified branding via Brevo.
+            </p>
+          </div>
+        </div>
+
+        {/* Payment Link Pill */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <label className="block text-[11px] font-semibold text-gray-600">Authoritative Payment Link</label>
+            {effectiveUrl && (
+              <button
+                type="button"
+                onClick={handleCopyLinkOnly}
+                className="text-[11px] text-indigo-600 hover:underline flex items-center gap-1 font-medium"
+              >
+                {copiedLink ? 'Copied!' : 'Copy Link Only'}
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 h-8 px-2.5 bg-emerald-50/60 rounded-lg border border-emerald-200 text-xs">
+            <ShieldCheck size={13} className="text-emerald-600 shrink-0" />
+            <span className="truncate font-mono text-emerald-900 text-[11px] font-medium">
+              {effectiveUrl || 'No link associated yet'}
+            </span>
           </div>
         </div>
 
@@ -251,7 +320,7 @@ export function PreparePaymentMessageModal({
             <span className="text-[11px] text-gray-400">{customMessage.length} characters</span>
           </div>
           <textarea
-            rows={7}
+            rows={6}
             value={customMessage}
             onChange={(e) => setCustomMessage(e.target.value)}
             className="w-full p-3 rounded-xl border border-gray-300 bg-white text-xs font-sans leading-relaxed focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-colors resize-none text-gray-800"
@@ -265,15 +334,25 @@ export function PreparePaymentMessageModal({
               Cancel
             </Button>
 
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleCopyMessage}
                 icon={copiedMessage ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />}
-                className="flex-1 sm:flex-initial"
               >
-                {copiedMessage ? 'Copied Message!' : 'Copy Message'}
+                {copiedMessage ? 'Copied!' : 'Copy Text'}
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSendEmailViaBrevo}
+                disabled={isSendingEmail || !recipientEmail}
+                icon={isSendingEmail ? <Loader2 size={14} className="animate-spin text-blue-600" /> : <Mail size={14} className="text-blue-600" />}
+                className="border-blue-200 text-blue-700 hover:bg-blue-50"
+              >
+                {isSendingEmail ? 'Sending via Brevo...' : 'Send Email (Brevo)'}
               </Button>
 
               <Button
@@ -281,14 +360,14 @@ export function PreparePaymentMessageModal({
                 size="sm"
                 onClick={handleOpenWhatsApp}
                 icon={<MessageSquare size={14} />}
-                className="flex-1 sm:flex-initial bg-emerald-600 hover:bg-emerald-700 border-emerald-600 text-white"
+                className="bg-emerald-600 hover:bg-emerald-700 border-emerald-600 text-white"
               >
                 Open in WhatsApp
               </Button>
             </div>
           </div>
           <p className="text-[10px] text-gray-400 italic text-center sm:text-right">
-            * Clicking &quot;Open in WhatsApp&quot; launches WhatsApp with this pre-filled message for you to review and send manually.
+            * Direct links sent via Brevo or WhatsApp route clients to the official payment portal powered by Paystack.
           </p>
         </div>
       </div>

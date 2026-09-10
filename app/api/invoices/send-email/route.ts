@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { sendInvoiceEmail } from '@/lib/services/brevo'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
+import { getProductionUrl, getPaymentLink } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,6 +19,7 @@ export async function POST(req: NextRequest) {
       balanceDue,
       currencySymbol,
       paymentUrl,
+      paymentToken,
       personalMessage,
       items,
       businessName,
@@ -31,6 +33,29 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Resolve authoritative production payment URL
+    let resolvedPaymentUrl = paymentUrl ? getProductionUrl(paymentUrl, req) : ''
+    if (!resolvedPaymentUrl && paymentToken) {
+      resolvedPaymentUrl = getPaymentLink(paymentToken, req)
+    }
+
+    // If still no payment URL and invoiceId is present, attempt to retrieve linked payment token
+    if (!resolvedPaymentUrl && invoiceId) {
+      try {
+        const adminDb = getAdminDb()
+        const invSnap = await adminDb.collection(COLLECTIONS.INVOICES).doc(invoiceId).get()
+        if (invSnap.exists) {
+          const invData = invSnap.data()
+          const token = invData?.paymentToken || invData?.clientLinkId || invData?.paymentLinkId
+          if (token) {
+            resolvedPaymentUrl = getPaymentLink(token, req)
+          }
+        }
+      } catch (e) {
+        console.warn('Could not lookup payment token for invoice:', e)
+      }
+    }
+
     const result = await sendInvoiceEmail({
       toEmail,
       clientName: clientName || 'Valued Client',
@@ -39,7 +64,7 @@ export async function POST(req: NextRequest) {
       totalAmount: Number(totalAmount) || 0,
       balanceDue: Number(balanceDue) !== undefined ? Number(balanceDue) : Number(totalAmount) || 0,
       currencySymbol: currencySymbol || 'GH₵',
-      paymentUrl: paymentUrl || '',
+      paymentUrl: resolvedPaymentUrl,
       personalMessage,
       items,
       businessName,
