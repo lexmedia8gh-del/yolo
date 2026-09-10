@@ -3,6 +3,7 @@ import { getAdminDb } from '@/lib/firebase/admin'
 import { FieldValue } from 'firebase-admin/firestore'
 import { generateSecureToken, appUrl, getDeliveryLink } from '@/lib/utils'
 import { senderName, getEmailSender } from '@/lib/config/email'
+import { sendDeliveryReadyEmail } from '@/lib/services/brevo'
 
 export async function POST(req: NextRequest) {
   try {
@@ -157,65 +158,36 @@ export async function POST(req: NextRequest) {
 
     const deliveryLink = getDeliveryLink(accessToken, baseContext)
 
-    // 3. Send email via Brevo API directly using centralized sender configuration
-    const apiKey = process.env.BREVO_API_KEY
-    const sender = getEmailSender()
+    // Fetch brand logo
+    let lexmediaLogoUrl = ''
+    const brandingSnap = await adminDb.collection('settings').doc('branding').get()
+    if (brandingSnap.exists) {
+      const bData = brandingSnap.data()!
+      if (bData.logoUrl) lexmediaLogoUrl = bData.logoUrl
+    }
 
-    const htmlContent = `
-      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1e293b; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px;">
-        <div style="margin-bottom: 24px; border-bottom: 1px solid #f1f5f9; padding-bottom: 16px;">
-          <h2 style="margin: 0; color: #4338ca; font-size: 20px; font-weight: 700; letter-spacing: -0.02em;">${senderName}</h2>
-          <p style="margin: 4px 0 0 0; font-size: 12px; color: #64748b;">Project & Deliverable Management</p>
-        </div>
-        
-        <p style="font-size: 15px; line-height: 1.6; margin-bottom: 16px;">Hello <strong>${clientName}</strong>,</p>
-        <p style="font-size: 15px; line-height: 1.6; margin-bottom: 16px;">Great news! 🎉 Your payment has been confirmed, and your deliverables for <strong>${qjData.jobDescription}</strong> are now ready for download.</p>
-        
-        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 24px 0; text-align: center;">
-          <p style="margin: 0 0 16px 0; font-size: 14px; color: #475569;">Access your secure deliverables anytime:</p>
-          <a href="${deliveryLink}" style="display: inline-block; background-color: #4338ca; color: #ffffff; padding: 12px 28px; font-size: 14px; font-weight: 600; text-decoration: none; border-radius: 8px; box-shadow: 0 2px 4px rgba(67, 56, 202, 0.2);">
-            Open Delivery Portal & Download Files
-          </a>
-        </div>
-
-        <p style="font-size: 13px; color: #64748b; margin-bottom: 24px;">Direct Link: <br><a href="${deliveryLink}" style="color: #4338ca; word-break: break-all;">${deliveryLink}</a></p>
-        
-        <div style="border-top: 1px solid #f1f5f9; padding-top: 16px; margin-top: 24px; font-size: 13px; color: #94a3b8;">
-          <p style="margin: 0 0 4px 0;">Thank you for choosing ${senderName}.</p>
-          <p style="margin: 0;">Best regards,<br><strong style="color: #475569;">${senderName}</strong></p>
-        </div>
-      </div>
-    `
-
-    if (apiKey) {
-      const brevoPayload = {
-        sender: { name: senderName, email: sender.email },
-        to: [{ email: clientEmail, name: clientName }],
-        replyTo: { name: senderName, email: sender.email },
-        subject: `Your Deliverables Are Ready – ${senderName}`,
-        htmlContent,
+    // Fetch client photoURL
+    let clientLogoUrl = ''
+    if (qjData.clientId) {
+      const clientSnap = await adminDb.collection('clients').doc(qjData.clientId).get()
+      if (clientSnap.exists) {
+        const clientData = clientSnap.data()!
+        if (clientData.photoURL) clientLogoUrl = clientData.photoURL
       }
+    }
 
-      const emailRes = await fetch('https://api.brevo.com/v3/smtp/email', {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'api-key': apiKey,
-        },
-        body: JSON.stringify(brevoPayload),
-      })
+    // 3. Send email via Brevo API directly using the reused premium delivery-ready email template
+    const emailRes = await sendDeliveryReadyEmail({
+      toEmail: clientEmail,
+      clientName,
+      projectName: qjData.jobDescription || 'Quick Job Delivery',
+      deliveryUrl: deliveryLink,
+      lexmediaLogoUrl,
+      clientLogoUrl,
+    })
 
-      if (!emailRes.ok) {
-        const errText = await emailRes.text()
-        console.error('Brevo Error:', errText)
-        throw new Error('Failed to send email via Brevo')
-      }
-    } else {
-      console.log(`[Quick Jobs Delivery Email - Preview Mode] Continuing without Brevo API key:`)
-      console.log(`  To: ${clientName} <${clientEmail}>`)
-      console.log(`  From: ${senderName} <${sender.email}>`)
-      console.log(`  Subject: Your Deliverables Are Ready – ${senderName}`)
+    if (!emailRes.success) {
+      console.warn('[Quick Jobs Delivery Email] Brevo email notification failed:', emailRes.error)
     }
 
     return NextResponse.json({ success: true, deliveryLink, accessToken })
