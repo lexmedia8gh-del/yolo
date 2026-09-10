@@ -105,24 +105,62 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Create Admin Notification and Activity Log upon successful and verified download confirmation
+    // 3. Update Delivery / Quick Job Download Status
+    const adminDb = getAdminDb()
+    let isFullyDownloaded = false
+    try {
+      if (adminDb && deliveryId) {
+        const remainingSnap = await adminDb
+          .collection(COLLECTIONS.DELIVERY_FILES)
+          .where('deliveryId', '==', deliveryId)
+          .get()
+
+        isFullyDownloaded = remainingSnap.empty
+
+        if (isFullyDownloaded) {
+          await adminDb.collection(COLLECTIONS.DELIVERIES).doc(deliveryId).update({
+            status: 'Downloaded',
+            updatedAt: FieldValue.serverTimestamp(),
+          })
+        }
+
+        // Check if this delivery belongs to a Quick Job
+        const quickJobId = deliveryData.quickJobId || (deliveryId.startsWith('qj_') ? deliveryId : null)
+        if (quickJobId) {
+          const qjRef = adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(quickJobId)
+          await qjRef.update({
+            deliveryStatus: isFullyDownloaded ? 'Downloaded' : 'Released',
+            lastDownloadedAt: FieldValue.serverTimestamp(),
+            downloadCount: FieldValue.increment(1),
+            updatedAt: FieldValue.serverTimestamp(),
+          })
+        }
+      }
+    } catch (statusErr) {
+      console.warn('Failed to update download status:', statusErr)
+    }
+
+    // 4. Create Admin Notification and Activity Log upon successful and verified download confirmation
     try {
       const clientName = deliveryData.clientName || 'Client'
       const clientId = deliveryData.clientId || ''
-      const fileName = fileData.name || 'a file'
+      const fileName = fileData.fileName || fileData.originalName || fileData.name || 'a file'
+      const quickJobId = deliveryData.quickJobId || (deliveryId.startsWith('qj_') ? deliveryId : null)
 
       const now = new Date()
-      const formattedDate = now.toLocaleDateString('en-US', {
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric',
-      }) + ' at ' + now.toLocaleTimeString('en-US', {
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true,
-      })
+      const formattedDate =
+        now.toLocaleDateString('en-US', {
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric',
+        }) +
+        ' at ' +
+        now.toLocaleTimeString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+        })
 
-      const adminDb = getAdminDb()
       if (adminDb) {
         // Create Admin Notification
         await adminDb.collection(COLLECTIONS.NOTIFICATIONS).add({
@@ -134,11 +172,15 @@ export async function POST(req: NextRequest) {
           clientId,
           clientName,
           deliveryId,
+          quickJobId: quickJobId || null,
           fileName,
           createdAt: FieldValue.serverTimestamp(),
           metadata: {
             fileId,
+            fileName,
             downloadDate: now.toISOString(),
+            quickJobId: quickJobId || null,
+            isFullyDownloaded,
           },
         })
 
@@ -153,6 +195,8 @@ export async function POST(req: NextRequest) {
           metadata: {
             fileId,
             fileName,
+            quickJobId: quickJobId || null,
+            isFullyDownloaded,
           },
         })
       }

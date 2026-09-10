@@ -14,6 +14,9 @@ export interface NotificationItem {
   isRead: boolean
   clientId?: string
   clientName?: string
+  quickJobId?: string
+  deliveryId?: string
+  fileName?: string
   invoiceId?: string
   invoiceNumber?: string
   projectId?: string
@@ -132,7 +135,9 @@ export function NotificationBell() {
               </div>
             ) : (
               notifications.slice(0, 15).map((n) => {
-                const linkHref = n.clientId
+                const linkHref = n.quickJobId
+                  ? `/quick-jobs`
+                  : n.clientId
                   ? `/clients/${n.clientId}`
                   : n.invoiceId
                   ? `/invoices`

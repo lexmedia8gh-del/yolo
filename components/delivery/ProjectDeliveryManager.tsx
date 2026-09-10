@@ -149,6 +149,10 @@ export function ProjectDeliveryManager({
   const [waSent, setWaSent] = useState(false)
   const [canonicalUrl, setCanonicalUrl] = useState('')
 
+  // Delivery Release Confirmation & Resend States
+  const [showReleaseConfirmModal, setShowReleaseConfirmModal] = useState(false)
+  const [pendingIsResend, setPendingIsResend] = useState(false)
+
   // Admin Release & Confirmation Modal States
   const [showAdminReleaseModal, setShowAdminReleaseModal] = useState(false)
   const [showRevokeReleaseModal, setShowRevokeReleaseModal] = useState(false)
@@ -214,11 +218,14 @@ export function ProjectDeliveryManager({
       setDelivery(currentDelivery)
       setCanonicalUrl(data.publicUrl || '')
       setSelectedExpOption(currentDelivery.expirationOption || 'never')
-      setFiles(data.files || [])
+      const loadedFiles = data.files || []
+      setFiles(loadedFiles)
 
-      if (quickJob && currentDelivery.accessToken && currentDelivery.accessToken !== quickJob.deliveryAccessToken) {
-        onUpdate?.({ deliveryAccessToken: currentDelivery.accessToken })
-      }
+      onUpdate?.({
+        deliveryAccessToken: currentDelivery.accessToken,
+        fileCount: loadedFiles.length,
+        deliveryStatus: currentDelivery.isReleased ? 'Released' : loadedFiles.length > 0 ? 'Ready' : 'Not Ready',
+      })
     } catch (err: any) {
       console.error('Error loading delivery manager:', err)
       const detail = err?.message || 'Please check your connection and try again.'
@@ -543,6 +550,7 @@ export function ProjectDeliveryManager({
 
       const remainingFiles = files.filter((f) => f.id !== file.id)
       setFiles(remainingFiles)
+      onUpdate?.({ fileCount: remainingFiles.length })
 
       if (delivery) {
         const nextSize = Math.max(0, (delivery.totalSize || 0) - (file.fileSize || 0))
@@ -682,6 +690,11 @@ export function ProjectDeliveryManager({
     }
   }
 
+  const promptReleaseConfirmation = (isResend: boolean) => {
+    setPendingIsResend(isResend)
+    setShowReleaseConfirmModal(true)
+  }
+
   const handleSubmitDelivery = async (isResend = false) => {
     if (!delivery) {
       toast.error('Delivery record is still initializing.')
@@ -689,7 +702,7 @@ export function ProjectDeliveryManager({
     }
 
     if (files.length === 0) {
-      toast.error('Please upload at least one file before submitting delivery.')
+      toast.error('Please upload at least one file before releasing delivery.')
       return
     }
 
@@ -701,60 +714,106 @@ export function ProjectDeliveryManager({
     }
 
     try {
-      const res = await fetch('/api/delivery/release', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deliveryId: delivery.id,
-          release: true,
-          resendEmail: isResend,
-          quickJobId: resolvedQuickJobId || undefined,
-          projectId: resolvedProjectId || undefined,
-        }),
-      })
+      if (resolvedQuickJobId) {
+        const res = await fetch('/api/quick-jobs/release-delivery', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jobId: resolvedQuickJobId,
+            resend: isResend,
+          }),
+        })
 
-      const data = await res.json()
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to submit delivery')
-      }
+        const data = await res.json()
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Failed to release quick job delivery')
+        }
 
-      setCanonicalUrl(data.publicUrl || '')
-      setDelivery((prev) =>
-        prev
-          ? {
-              ...prev,
-              isReleased: true,
-              accessToken: data.accessToken || prev.accessToken,
-              status: data.status || 'Delivered',
-              releasedAt: Timestamp.now() as any,
-              notifyEmailSent: data.emailNotification?.sent ?? prev.notifyEmailSent,
-              notifyEmailError: data.emailNotification?.error ?? null,
-              notifyEmailMessageId: data.emailNotification?.messageId ?? prev.notifyEmailMessageId,
-            }
-          : null
-      )
+        setCanonicalUrl(data.deliveryLink || '')
+        setDelivery((prev) =>
+          prev
+            ? {
+                ...prev,
+                isReleased: true,
+                accessToken: data.accessToken || prev.accessToken,
+                status: 'Delivered',
+                releasedAt: Timestamp.now() as any,
+                notifyEmailSent: true,
+                notifyEmailError: null,
+              }
+            : null
+        )
 
-      if (data.emailNotification?.sent) {
         toast.success(
           isResend
             ? 'Delivery notification email resent via Brevo!'
-            : 'Delivery submitted! Client notification email sent via Brevo.'
+            : 'Delivery released! Client notification email sent via Brevo.'
         )
-      } else if (data.emailNotification?.skipped) {
-        toast.success('Delivery finalized! (Notification was previously sent)')
-      } else if (data.emailNotification?.error) {
-        toast.error(`Delivery created, but email could not be sent: ${data.emailNotification.error}`)
-      } else {
-        toast.success('Delivery submitted and finalized!')
-      }
 
-      onUpdate?.({
-        deliveryStatus: 'Sent',
-        status: 'Completed',
-      })
+        onUpdate?.({
+          deliveryStatus: 'Released',
+          status: 'Completed',
+          deliveryReleasedAt: data.releasedAt,
+          deliveryEmailSent: true,
+          deliveryLink: data.deliveryLink,
+          fileCount: files.length,
+        })
+      } else {
+        const res = await fetch('/api/delivery/release', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            deliveryId: delivery.id,
+            release: true,
+            resendEmail: isResend,
+            projectId: resolvedProjectId || undefined,
+          }),
+        })
+
+        const data = await res.json()
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Failed to submit delivery')
+        }
+
+        setCanonicalUrl(data.publicUrl || '')
+        setDelivery((prev) =>
+          prev
+            ? {
+                ...prev,
+                isReleased: true,
+                accessToken: data.accessToken || prev.accessToken,
+                status: data.status || 'Delivered',
+                releasedAt: Timestamp.now() as any,
+                notifyEmailSent: data.emailNotification?.sent ?? prev.notifyEmailSent,
+                notifyEmailError: data.emailNotification?.error ?? null,
+                notifyEmailMessageId: data.emailNotification?.messageId ?? prev.notifyEmailMessageId,
+              }
+            : null
+        )
+
+        if (data.emailNotification?.sent) {
+          toast.success(
+            isResend
+              ? 'Delivery notification email resent via Brevo!'
+              : 'Delivery submitted! Client notification email sent via Brevo.'
+          )
+        } else if (data.emailNotification?.skipped) {
+          toast.success('Delivery finalized! (Notification was previously sent)')
+        } else if (data.emailNotification?.error) {
+          toast.error(`Delivery created, but email could not be sent: ${data.emailNotification.error}`)
+        } else {
+          toast.success('Delivery submitted and finalized!')
+        }
+
+        onUpdate?.({
+          deliveryStatus: 'Sent',
+          status: 'Completed',
+          fileCount: files.length,
+        })
+      }
     } catch (err: any) {
       console.error('Submit delivery error:', err)
-      toast.error(err?.message || 'Failed to submit delivery.')
+      toast.error(err?.message || 'Failed to release delivery.')
     } finally {
       setIsSubmitting(false)
       setIsReleasing(false)
@@ -1299,7 +1358,7 @@ export function ProjectDeliveryManager({
               </Button>
             )}
 
-            {!quickJob && (deliveryStatus !== 'Locked' || isQuickJobFullyPaidNoFiles) && deliveryStatus !== 'Released' && (
+            {(deliveryStatus !== 'Locked' || isQuickJobFullyPaidNoFiles) && deliveryStatus !== 'Released' && (
               files.length === 0 ? (
                 <Button
                   size="sm"
@@ -1315,11 +1374,17 @@ export function ProjectDeliveryManager({
                   variant="primary"
                   loading={isSubmitting || isReleasing}
                   disabled={isSubmitting || isReleasing}
-                  onClick={() => handleSubmitDelivery(false)}
+                  onClick={() => promptReleaseConfirmation(false)}
                   icon={<Send size={14} />}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-xs"
                 >
-                  {isSubmitting ? '⟳ Sending Delivery...' : 'Submit Delivery'}
+                  {isSubmitting
+                    ? quickJob
+                      ? '⟳ Releasing Delivery...'
+                      : '⟳ Sending Delivery...'
+                    : quickJob
+                    ? 'Release Delivery'
+                    : 'Submit Delivery'}
                 </Button>
               )
             )}
@@ -1328,14 +1393,14 @@ export function ProjectDeliveryManager({
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
                   <CheckCircle2 size={13} className="text-emerald-600" />
-                  Delivery Sent
+                  Delivery Released
                 </span>
                 <Button
                   size="sm"
                   variant="outline"
                   loading={resendingEmail}
                   disabled={resendingEmail}
-                  onClick={() => handleSubmitDelivery(true)}
+                  onClick={() => promptReleaseConfirmation(true)}
                   icon={<Mail size={12} />}
                   className="text-xs text-gray-700 bg-white hover:bg-gray-50 border-gray-300"
                   title="Resend delivery email notification to client"
@@ -1709,8 +1774,8 @@ export function ProjectDeliveryManager({
           )}
         </div>
 
-        {/* SUBMIT DELIVERY ACTION / STATUS PANEL */}
-        {!quickJob && !isReleased && (deliveryStatus !== 'Locked' || isQuickJobFullyPaidNoFiles) && (
+        {/* SUBMIT / RELEASE DELIVERY ACTION / STATUS PANEL */}
+        {!isReleased && (deliveryStatus !== 'Locked' || isQuickJobFullyPaidNoFiles) && (
           <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in shadow-xs">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
@@ -1719,11 +1784,17 @@ export function ProjectDeliveryManager({
                 </div>
                 <div>
                   <h4 className="text-xs font-bold text-indigo-950 uppercase tracking-wider">
-                    {files.length > 0 ? `Ready to Submit Delivery (${files.length} ${files.length === 1 ? 'file' : 'files'} ready)` : 'Awaiting Delivery Files'}
+                    {files.length > 0
+                      ? quickJob
+                        ? `Ready to Release Delivery (${files.length} ${files.length === 1 ? 'file' : 'files'} ready)`
+                        : `Ready to Submit Delivery (${files.length} ${files.length === 1 ? 'file' : 'files'} ready)`
+                      : 'Awaiting Delivery Files'}
                   </h4>
                   <p className="text-xs text-indigo-800">
                     {files.length > 0
-                      ? `Submitting will lock in deliverables, activate client portal access, and dispatch the Brevo delivery notification email to ${resolvedClientName}.`
+                      ? quickJob
+                        ? `Releasing will activate secure client portal access and dispatch the Brevo delivery notification email to ${resolvedClientName}.`
+                        : `Submitting will lock in deliverables, activate client portal access, and dispatch the Brevo delivery notification email to ${resolvedClientName}.`
                       : 'Please upload or select required delivery files to continue.'}
                   </p>
                 </div>
@@ -1734,7 +1805,7 @@ export function ProjectDeliveryManager({
               variant={files.length > 0 ? 'primary' : 'outline'}
               loading={isSubmitting || isReleasing}
               disabled={isSubmitting || isReleasing || files.length === 0}
-              onClick={() => handleSubmitDelivery(false)}
+              onClick={() => promptReleaseConfirmation(false)}
               icon={files.length > 0 ? <Send size={15} /> : undefined}
               className={`font-semibold text-xs shadow-xs shrink-0 w-full sm:w-auto ${
                 files.length > 0
@@ -1743,9 +1814,13 @@ export function ProjectDeliveryManager({
               }`}
             >
               {isSubmitting || isReleasing
-                ? '⟳ Sending Delivery...'
+                ? quickJob
+                  ? '⟳ Releasing Delivery...'
+                  : '⟳ Sending Delivery...'
                 : files.length > 0
-                ? 'Submit Delivery'
+                ? quickJob
+                  ? 'Release Delivery'
+                  : 'Submit Delivery'
                 : 'Upload files to continue'}
             </Button>
           </div>
@@ -1761,7 +1836,7 @@ export function ProjectDeliveryManager({
                 </div>
                 <div>
                   <h4 className="text-xs font-bold text-emerald-950 uppercase tracking-wider">
-                    ✓ Delivery Sent
+                    ✓ Delivery Released
                   </h4>
                   <p className="text-xs text-emerald-800">
                     The deliverables are active and available for client download.
@@ -1770,7 +1845,7 @@ export function ProjectDeliveryManager({
               </div>
               <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
                 <Check size={12} />
-                ✓ Delivery Sent
+                ✓ Delivery Released
               </span>
             </div>
 
@@ -1788,7 +1863,7 @@ export function ProjectDeliveryManager({
                   variant="outline"
                   loading={resendingEmail}
                   disabled={resendingEmail}
-                  onClick={() => handleSubmitDelivery(true)}
+                  onClick={() => promptReleaseConfirmation(true)}
                   icon={<RotateCcw size={12} />}
                   className="text-xs text-emerald-800 border-emerald-300 hover:bg-emerald-50 bg-white"
                 >
@@ -2048,6 +2123,55 @@ export function ProjectDeliveryManager({
               icon={<Lock size={14} />}
             >
               Confirm Revocation
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* RELEASE DELIVERY / RESEND EMAIL CONFIRMATION MODAL */}
+      <Modal
+        isOpen={showReleaseConfirmModal}
+        onClose={() => !isSubmitting && !resendingEmail && setShowReleaseConfirmModal(false)}
+        title={pendingIsResend ? 'Resend Delivery Email' : 'Release Delivery'}
+        size="sm"
+      >
+        <div className="space-y-4 text-xs">
+          <div className="p-3.5 rounded-xl bg-indigo-50/80 border border-indigo-200 text-indigo-950 space-y-2">
+            <p className="font-semibold text-gray-900 text-sm">
+              {pendingIsResend
+                ? `Resend delivery link to ${resolvedClientName}?`
+                : `Release delivery to ${resolvedClientName} and send the secure delivery link to their email?`}
+            </p>
+            <p className="text-gray-600 leading-relaxed text-xs">
+              Recipient Email: <strong>{client?.email || quickJob?.clientEmail || 'Client email'}</strong>
+            </p>
+            <p className="text-gray-500 text-[11px] leading-relaxed">
+              This will generate or retrieve the client&apos;s secure delivery portal link and send a branded delivery notification email via Brevo.
+            </p>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowReleaseConfirmModal(false)}
+              disabled={isSubmitting || resendingEmail}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              loading={isSubmitting || resendingEmail}
+              disabled={isSubmitting || resendingEmail}
+              onClick={() => {
+                setShowReleaseConfirmModal(false)
+                handleSubmitDelivery(pendingIsResend)
+              }}
+              icon={<Send size={13} />}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
+            >
+              {pendingIsResend ? 'Resend & Send Email' : 'Release & Send Email'}
             </Button>
           </div>
         </div>

@@ -18,6 +18,9 @@ interface SendDeliveryEmailParams {
   deliveryUrl: string
   lexmediaLogoUrl?: string
   clientLogoUrl?: string
+  subject?: string
+  introText?: string
+  primaryButtonText?: string
 }
 
 interface SendPaymentReminderEmailParams {
@@ -336,6 +339,9 @@ export async function sendDeliveryReadyEmail({
   deliveryUrl,
   lexmediaLogoUrl,
   clientLogoUrl,
+  subject,
+  introText,
+  primaryButtonText,
 }: SendDeliveryEmailParams): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const apiKey = process.env.BREVO_API_KEY
 
@@ -347,10 +353,12 @@ export async function sendDeliveryReadyEmail({
     statusText: 'Files Ready for Download',
     statusBadgeBg: '#dcfce7',
     statusBadgeColor: '#15803d',
-    primaryButtonText: 'View Your Deliverables',
+    primaryButtonText: primaryButtonText || 'Access Your Deliverables',
     primaryButtonUrl: deliveryUrl,
     primaryButtonBg: '#2563eb',
-    introText: `Your project deliverables for <strong>${escapeHtml(projectName)}</strong> are now ready.<br><br>You can access your completed files using the button below.`,
+    introText:
+      introText ||
+      `Great news! Your deliverables for <strong>${escapeHtml(projectName)}</strong> are now ready.<br><br>You can securely access and download your files using the button or secure link below.<br><br><span style="color: #64748b; font-size: 13px;">Please keep this link secure.</span>`,
     lexmediaLogoUrl,
     clientLogoUrl,
   })
@@ -358,7 +366,7 @@ export async function sendDeliveryReadyEmail({
   return sendBrevoEmail({
     toEmail,
     clientName,
-    subject: `Your Deliverables — ${senderName}`,
+    subject: subject || 'Your Deliverables Are Ready',
     htmlContent,
     apiKey,
     senderEmail,

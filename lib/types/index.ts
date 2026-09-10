@@ -551,6 +551,7 @@ export interface QuickJobServiceSnapshot {
 }
 
 export type QuickJobPaymentStatus = 'Unpaid' | 'Partially Paid' | 'Pending' | 'Payment Link Generated' | 'Payment Link Sent' | 'Paid' | 'Failed' | 'Cancelled'
+export type QuickJobDeliveryStatus = 'Not Ready' | 'Ready' | 'Released' | 'Downloaded' | 'Not Sent' | 'Sent' | 'Failed'
 
 export interface QuickJob {
   id: string
@@ -573,9 +574,14 @@ export interface QuickJob {
   currency: string
   fileIds?: string[]
   paymentToken?: string
-  deliveryStatus?: 'Not Sent' | 'Sent' | 'Failed'
-  deliveryEmailSentAt?: string
+  deliveryStatus?: QuickJobDeliveryStatus
+  deliveryReleasedAt?: string | Timestamp
+  deliveryEmailSent?: boolean
+  deliveryEmailSentAt?: string | Timestamp
   deliveryAccessToken?: string
+  deliveryLink?: string
+  lastDownloadedAt?: string | Timestamp
+  downloadCount?: number
   createdAt: Timestamp | string
   updatedAt: Timestamp | string
   createdBy?: string

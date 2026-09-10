@@ -1,24 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAdminDb } from '@/lib/firebase/admin'
+import { getAdminDb, requireAdmin } from '@/lib/firebase/admin'
 import { FieldValue } from 'firebase-admin/firestore'
-import { generateSecureToken, appUrl, getDeliveryLink } from '@/lib/utils'
-import { senderName, getEmailSender } from '@/lib/config/email'
+import { generateSecureToken, getDeliveryLink } from '@/lib/utils'
 import { sendDeliveryReadyEmail } from '@/lib/services/brevo'
+import { COLLECTIONS } from '@/lib/firebase/firestore'
+
+export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
+  const auth = await requireAdmin(req)
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status })
+  }
+
   try {
     const body = await req.json()
-    const { jobId, clientName, clientEmail, files, resend, origin: clientOrigin } = body
+    const { jobId, clientName, clientEmail, files, resend } = body
 
-    if (!jobId || !clientEmail) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+    if (!jobId) {
+      return NextResponse.json({ error: 'Missing jobId' }, { status: 400 })
     }
 
-    const baseContext = clientOrigin || req
     const adminDb = getAdminDb()
     
     // 1. Verify Quick Job Payment Status
-    const qjRef = adminDb.collection('quickJobs').doc(jobId)
+    const qjRef = adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(jobId)
     const qjSnap = await qjRef.get()
     
     if (!qjSnap.exists) {
@@ -31,166 +37,149 @@ export async function POST(req: NextRequest) {
       (Number(qjData.outstandingBalance) <= 0 && Number(qjData.amountPaid) >= Number(qjData.originalAgreedPrice))
 
     if (!isPaid) {
-      return NextResponse.json({ error: 'Payment must be completed before sending delivery' }, { status: 403 })
+      return NextResponse.json({ error: 'Payment must be completed before releasing delivery' }, { status: 403 })
     }
     
-    if (qjData.deliveryStatus === 'Sent' && !resend) {
-      // If already sent and not explicitly a resend, find existing delivery link
-      const existingDelivSnap = await adminDb
-        .collection('deliveries')
-        .where('quickJobId', '==', jobId)
-        .limit(1)
-        .get()
+    const isAlreadyReleased =
+      (qjData.deliveryStatus === 'Released' || qjData.deliveryStatus === 'Sent') &&
+      Boolean(qjData.deliveryEmailSent)
 
-      if (!existingDelivSnap.empty) {
-        const existingToken = existingDelivSnap.docs[0].data().accessToken
-        return NextResponse.json({
-          success: true,
-          deliveryLink: getDeliveryLink(existingToken, baseContext),
-          message: 'Delivery already sent.',
-        })
+    // 2. Access token resolution
+    let accessToken = qjData.deliveryAccessToken || ''
+    let deliveryId = jobId
+
+    const existingDelivSnap = await adminDb.collection(COLLECTIONS.DELIVERIES).doc(jobId).get()
+    if (existingDelivSnap.exists) {
+      const data = existingDelivSnap.data()!
+      accessToken = data.accessToken || accessToken
+    }
+
+    if (!accessToken) {
+      accessToken = generateSecureToken(24)
+    }
+
+    const deliveryLink = getDeliveryLink(accessToken, req)
+
+    if (isAlreadyReleased && !resend) {
+      return NextResponse.json({
+        success: true,
+        alreadyReleased: true,
+        deliveryLink,
+        message: 'Delivery has already been released.',
+      })
+    }
+
+    // 3. Resolve client email
+    let resolvedEmail = clientEmail || qjData.clientEmail || ''
+    let resolvedName = clientName || qjData.clientName || 'Valued Client'
+    let clientLogoUrl = ''
+
+    if (qjData.clientId) {
+      try {
+        const clientSnap = await adminDb.collection(COLLECTIONS.CLIENTS).doc(qjData.clientId).get()
+        if (clientSnap.exists) {
+          const clientData = clientSnap.data()!
+          if (!resolvedEmail && clientData.email) resolvedEmail = clientData.email
+          if (!resolvedName && clientData.fullName) resolvedName = clientData.fullName
+          if (clientData.photoURL) clientLogoUrl = clientData.photoURL
+        }
+      } catch {}
+    }
+
+    if (!resolvedEmail) {
+      return NextResponse.json({ error: 'Missing client email for delivery dispatch' }, { status: 400 })
+    }
+
+    // 4. Fetch brand logo
+    let lexmediaLogoUrl = ''
+    try {
+      const brandingSnap = await adminDb.collection(COLLECTIONS.SETTINGS).doc('branding').get()
+      if (brandingSnap.exists) {
+        const bData = brandingSnap.data()!
+        if (bData.logoUrl) lexmediaLogoUrl = bData.logoUrl
       }
+    } catch {}
+
+    // 5. Send Brevo email first
+    const emailRes = await sendDeliveryReadyEmail({
+      toEmail: resolvedEmail,
+      clientName: resolvedName,
+      projectName: qjData.jobDescription || 'Quick Job Deliverables',
+      deliveryUrl: deliveryLink,
+      lexmediaLogoUrl,
+      clientLogoUrl,
+      subject: 'Your Deliverables Are Ready',
+      primaryButtonText: 'Access Your Deliverables',
+    })
+
+    if (!emailRes.success) {
+      console.error('[Quick Jobs Delivery Email] Brevo send failed:', emailRes.error)
+      return NextResponse.json(
+        { error: `Brevo email failed to send: ${emailRes.error || 'Unknown error'}. Delivery not released.`, emailFailed: true },
+        { status: 502 }
+      )
     }
 
-    // 2. Create or update delivery record to generate an access token
-    let accessToken = generateSecureToken('dlv_')
-    let deliveryId = ''
-
-    // Check if delivery already exists for this quick job
-    const existingSnap = await adminDb
-      .collection('deliveries')
-      .where('quickJobId', '==', jobId)
-      .limit(1)
-      .get()
-
-    if (!existingSnap.empty) {
-      const existingDoc = existingSnap.docs[0]
-      deliveryId = existingDoc.id
-      accessToken = existingDoc.data().accessToken || accessToken
-    } else {
-      const newDelivRef = adminDb.collection('deliveries').doc()
-      deliveryId = newDelivRef.id
-    }
-
-    // Map uploaded files to delivery files structure
-    const deliveryFiles = (files || []).map((f: any) => ({
-      id: f.id || generateSecureToken('file_'),
-      deliveryId,
-      quickJobId: jobId,
-      clientId: qjData.clientId || '',
-      fileName: f.name || f.fileName || 'file',
-      originalName: f.name || f.originalName || 'file',
-      url: f.url || f.downloadUrl || '',
-      downloadUrl: f.url || f.downloadUrl || '',
-      path: f.path || f.storagePath || '',
-      storagePath: f.path || f.storagePath || '',
-      fileSize: f.size || f.fileSize || 0,
-      fileType: (f.name || f.fileName || '').split('.').pop() || 'file',
-      downloadCount: 0,
-      uploadedAt: new Date().toISOString(),
-    }))
-
+    // 6. Atomically persist release state
     const batch = adminDb.batch()
-    const delivDocRef = adminDb.collection('deliveries').doc(deliveryId)
+    const delivDocRef = adminDb.collection(COLLECTIONS.DELIVERIES).doc(deliveryId)
 
     batch.set(
       delivDocRef,
       {
         id: deliveryId,
         clientId: qjData.clientId || '',
-        clientName: qjData.clientName || clientName,
+        clientName: resolvedName,
         quickJobId: jobId,
         projectName: qjData.jobDescription || 'Quick Job Delivery',
         title: `Quick Job Delivery: ${qjData.jobDescription || 'Files'}`,
         status: 'Ready',
         isReleased: true,
         accessToken,
-        files: deliveryFiles,
-        createdAt: FieldValue.serverTimestamp(),
+        releasedAt: FieldValue.serverTimestamp(),
+        notifyEmailSent: true,
+        notifyEmailSentAt: FieldValue.serverTimestamp(),
+        notifyEmailMessageId: emailRes.messageId || null,
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true }
     )
 
-    // Save each file into deliveryFiles collection
-    for (const f of deliveryFiles) {
-      const fRef = adminDb.collection('deliveryFiles').doc(f.id)
-      batch.set(fRef, {
-        id: f.id,
-        deliveryId,
-        quickJobId: jobId,
-        clientId: qjData.clientId || '',
-        fileName: f.fileName,
-        originalName: f.originalName,
-        downloadUrl: f.downloadUrl,
-        storagePath: f.storagePath,
-        fileSize: f.fileSize,
-        fileType: f.fileType,
-        downloadCount: 0,
-        uploadedAt: FieldValue.serverTimestamp(),
-      }, { merge: true })
-    }
+    // Update Quick Job
+    batch.update(qjRef, {
+      deliveryStatus: 'Released',
+      status: 'Completed',
+      deliveryReleasedAt: FieldValue.serverTimestamp(),
+      deliveryEmailSent: true,
+      deliveryEmailSentAt: FieldValue.serverTimestamp(),
+      deliveryAccessToken: accessToken,
+      deliveryLink,
+      updatedAt: FieldValue.serverTimestamp(),
+    })
 
     // Activity Log
-    const actRef = adminDb.collection('activityLogs').doc()
+    const actRef = adminDb.collection(COLLECTIONS.ACTIVITY_LOGS).doc()
     batch.set(actRef, {
       event: 'delivery_released',
-      description: `Delivery sent for Quick Job: ${qjData.jobDescription}`,
+      description: `${resend ? 'Resent delivery' : 'Released delivery'} and sent email via Brevo to ${resolvedEmail} for Quick Job: ${qjData.jobDescription}`,
       entityId: jobId,
       entityType: 'quickJob',
       clientId: qjData.clientId || '',
-      clientName: qjData.clientName || clientName,
-      performedBy: 'admin',
-      metadata: { fileCount: deliveryFiles.length, accessToken },
+      clientName: resolvedName,
+      performedBy: auth.email || 'admin',
+      metadata: { deliveryLink, accessToken, isResend: !!resend },
       createdAt: FieldValue.serverTimestamp(),
-    })
-
-    // Update Quick Job
-    batch.update(qjRef, {
-      deliveryStatus: 'Sent',
-      status: 'Completed',
-      deliveryEmailSentAt: FieldValue.serverTimestamp(),
-      deliveryAccessToken: accessToken,
-      updatedAt: FieldValue.serverTimestamp(),
     })
 
     await batch.commit()
 
-    const deliveryLink = getDeliveryLink(accessToken, baseContext)
-
-    // Fetch brand logo
-    let lexmediaLogoUrl = ''
-    const brandingSnap = await adminDb.collection('settings').doc('branding').get()
-    if (brandingSnap.exists) {
-      const bData = brandingSnap.data()!
-      if (bData.logoUrl) lexmediaLogoUrl = bData.logoUrl
-    }
-
-    // Fetch client photoURL
-    let clientLogoUrl = ''
-    if (qjData.clientId) {
-      const clientSnap = await adminDb.collection('clients').doc(qjData.clientId).get()
-      if (clientSnap.exists) {
-        const clientData = clientSnap.data()!
-        if (clientData.photoURL) clientLogoUrl = clientData.photoURL
-      }
-    }
-
-    // 3. Send email via Brevo API directly using the reused premium delivery-ready email template
-    const emailRes = await sendDeliveryReadyEmail({
-      toEmail: clientEmail,
-      clientName,
-      projectName: qjData.jobDescription || 'Quick Job Delivery',
-      deliveryUrl: deliveryLink,
-      lexmediaLogoUrl,
-      clientLogoUrl,
+    return NextResponse.json({
+      success: true,
+      deliveryLink,
+      accessToken,
+      emailSentTo: resolvedEmail,
+      releasedAt: new Date().toISOString(),
     })
-
-    if (!emailRes.success) {
-      console.warn('[Quick Jobs Delivery Email] Brevo email notification failed:', emailRes.error)
-    }
-
-    return NextResponse.json({ success: true, deliveryLink, accessToken })
   } catch (error: any) {
     console.error('Send Quick Job Delivery Error:', error)
     return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 })
