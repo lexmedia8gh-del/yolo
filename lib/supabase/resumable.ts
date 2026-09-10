@@ -112,7 +112,7 @@ export class ResumableUploadTask {
   private bytesUploaded = 0
   private retryAttempt = 0
   private maxRetries = 5
-  private chunkSize: number = 2 * 1024 * 1024 // 2MB default safe chunk size to prevent 413 Payload Too Large
+  private chunkSize: number = 1 * 1024 * 1024 // 1MB default safe chunk size
   private onProgressCallback?: (progress: UploadTaskProgress) => void
 
   private startTime = 0
@@ -139,7 +139,7 @@ export class ResumableUploadTask {
     this.fileSize = options.file.size
     this.clientId = options.clientId || ''
     this.maxRetries = options.maxRetries ?? 5
-    this.chunkSize = options.chunkSize ?? 2 * 1024 * 1024 // 2MB default chunks
+    this.chunkSize = options.chunkSize ?? 1 * 1024 * 1024 // 1MB default chunks
     this.onProgressCallback = options.onProgress
 
     const sanitizedName = this.file.name.replace(/[^a-zA-Z0-9._\- ]/g, '_').trim() || 'file'
@@ -292,6 +292,12 @@ export class ResumableUploadTask {
           if (this.isCancelled) return
 
           console.warn('[Resumable Upload] TUS onError triggered:', err)
+          console.warn('[Resumable Upload] Error details:', {
+            status: err.originalResponse ? err.originalResponse.getStatus() : (err.status || 0),
+            message: err.message,
+            chunkSize: this.chunkSize,
+            fileSize: this.fileSize
+          })
 
           if (!navigator.onLine) {
             this.onNetworkLost()
@@ -360,6 +366,11 @@ export class ResumableUploadTask {
         onProgress: (bytesUploaded, bytesTotal) => {
           if (this.isCancelled) return
 
+          // Log periodically to avoid flooding
+          if (Math.round(bytesUploaded / 1024 / 1024) > Math.round((this.bytesUploaded) / 1024 / 1024)) {
+            console.log(`[Resumable Upload] Progress: ${bytesUploaded}/${bytesTotal}`);
+          }
+          
           this.bytesUploaded = bytesUploaded
           this.fileSize = bytesTotal
           this.status = 'uploading'
