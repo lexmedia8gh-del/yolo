@@ -61,16 +61,53 @@ export async function GET(req: NextRequest) {
     }
     // ─────────────────────────────────────────────────────────
 
-    // 2. Look up the ClientLink by token
+    // 2. Look up the ClientLink by token or delivery accessToken
     const linksRef = adminDb.collection('clientLinks')
-    const linksSnapshot = await linksRef.where('token', '==', token).limit(1).get()
+    let linksSnapshot = await linksRef.where('token', '==', token).limit(1).get()
 
-    if (linksSnapshot.empty) {
-      return NextResponse.json({ error: 'Invalid payment link' }, { status: 404 })
+    let linkDoc: any = null
+    let linkData: any = null
+
+    if (!linksSnapshot.empty) {
+      linkDoc = linksSnapshot.docs[0]
+      linkData = linkDoc.data()
+    } else {
+      // Check deliveries by accessToken
+      const deliveriesSnap = await adminDb.collection('deliveries').where('accessToken', '==', token).limit(1).get()
+      if (!deliveriesSnap.empty) {
+        const deliveryData = deliveriesSnap.docs[0].data()
+        if (deliveryData.invoiceId) {
+          const invLinks = await linksRef.where('invoiceId', '==', deliveryData.invoiceId).limit(1).get()
+          if (!invLinks.empty) {
+            linkDoc = invLinks.docs[0]
+            linkData = linkDoc.data()
+          }
+        }
+        if (!linkData && deliveryData.quickJobId) {
+          const qjLinks = await linksRef.where('quickJobId', '==', deliveryData.quickJobId).limit(1).get()
+          if (!qjLinks.empty) {
+            linkDoc = qjLinks.docs[0]
+            linkData = linkDoc.data()
+          }
+        }
+        if (!linkData) {
+          // If no clientLink exists, create/use a synthetic linkData object referencing invoiceId / quickJobId / projectId
+          linkData = {
+            invoiceId: deliveryData.invoiceId || null,
+            quickJobId: deliveryData.quickJobId || null,
+            projectId: deliveryData.projectId || null,
+            clientId: deliveryData.clientId || '',
+            clientName: deliveryData.clientName || 'Client',
+            invoiceNumber: deliveryData.invoiceNumber || '',
+            status: 'Pending',
+          }
+        }
+      }
     }
 
-    const linkDoc = linksSnapshot.docs[0]
-    const linkData = linkDoc.data()
+    if (!linkData) {
+      return NextResponse.json({ error: 'Invalid payment link or delivery access token' }, { status: 404 })
+    }
 
     // 3. Secondary duplicate check
     if (linkData.status === 'Paid' && linkData.paystackReference === reference) {
@@ -84,13 +121,15 @@ export async function GET(req: NextRequest) {
     // 4. Build the batch
     const batch = adminDb.batch()
 
-    // Update ClientLink
-    batch.update(linkDoc.ref, {
-      status: 'Paid',
-      paymentStatus: 'Paid',
-      paystackReference: reference,
-      updatedAt: FieldValue.serverTimestamp(),
-    })
+    // Update ClientLink if linkDoc exists
+    if (linkDoc) {
+      batch.update(linkDoc.ref, {
+        status: 'Paid',
+        paymentStatus: 'Paid',
+        paystackReference: reference,
+        updatedAt: FieldValue.serverTimestamp(),
+      })
+    }
 
     let invoiceNumber = linkData.invoiceNumber || ''
 

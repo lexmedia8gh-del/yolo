@@ -246,6 +246,64 @@ export async function GET(
 
     const totalSize = formattedFiles.reduce((sum, f) => sum + (f.fileSize || 0), 0)
 
+    let invoiceTotal = 0
+    let totalPaid = 0
+    let remainingBalance = 0
+    let currency = 'GHS'
+    let clientEmail = deliveryDocData.clientEmail || ''
+    let invoiceNumber = ''
+    let paymentLinkToken = token
+
+    if (deliveryDocData.invoiceId) {
+      try {
+        const adminDb = getAdminDb()
+        const invSnap = await adminDb.collection(COLLECTIONS.INVOICES).doc(deliveryDocData.invoiceId).get()
+        if (invSnap.exists) {
+          const inv = invSnap.data()!
+          invoiceTotal = inv.total || 0
+          totalPaid = inv.amountPaid || 0
+          remainingBalance = inv.balanceDue !== undefined ? inv.balanceDue : Math.max(0, invoiceTotal - totalPaid)
+          currency = inv.currency || 'GHS'
+          clientEmail = inv.clientEmail || clientEmail
+          invoiceNumber = inv.invoiceNumber || ''
+          if (inv.paymentLinkToken) {
+            paymentLinkToken = inv.paymentLinkToken
+          }
+        }
+      } catch {}
+    } else if (deliveryDocData.quickJobId) {
+      try {
+        const adminDb = getAdminDb()
+        const qjSnap = await adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(deliveryDocData.quickJobId).get()
+        if (qjSnap.exists) {
+          const qj = qjSnap.data()!
+          invoiceTotal = qj.originalAgreedPrice || qj.total || 0
+          totalPaid = qj.amountPaid || 0
+          remainingBalance = qj.outstandingBalance !== undefined ? qj.outstandingBalance : Math.max(0, invoiceTotal - totalPaid)
+          currency = qj.currency || 'GHS'
+          clientEmail = qj.clientEmail || clientEmail
+          if (qj.deliveryAccessToken) {
+            paymentLinkToken = qj.deliveryAccessToken
+          }
+        }
+      } catch {}
+    }
+
+    if (deliveryDocData.invoiceId) {
+      try {
+        const adminDb = getAdminDb()
+        const linksSnap = await adminDb.collection(COLLECTIONS.CLIENT_LINKS).where('invoiceId', '==', deliveryDocData.invoiceId).limit(1).get()
+        if (!linksSnap.empty) {
+          const linkData = linksSnap.docs[0].data()
+          if (linkData.token) {
+            paymentLinkToken = linkData.token
+          }
+        }
+      } catch {}
+    }
+
+    const isFullyPaid = deliveryDocData.isReleased || (remainingBalance <= 0) || (invoiceTotal > 0 && totalPaid >= invoiceTotal) || !deliveryDocData.requiresFullPayment
+
     return NextResponse.json({
       delivery: {
         id: deliveryId,
@@ -257,10 +315,22 @@ export async function GET(
         expiresAt: toISO(deliveryDocData.expiresAt),
         releasedAt: toISO(deliveryDocData.releasedAt),
         notes: deliveryDocData.notes || '',
+        requiresFullPayment: deliveryDocData.requiresFullPayment ?? true,
         fileCount: formattedFiles.length,
         totalSize: deliveryDocData.totalSize || totalSize,
       },
+      financials: {
+        invoiceTotal,
+        totalPaid,
+        remainingBalance: Math.max(0, remainingBalance),
+        currency,
+        clientEmail,
+        invoiceNumber,
+        paymentLinkToken,
+        isFullyPaid,
+      },
       files: formattedFiles,
+      isLocked: deliveryDocData.requiresFullPayment && !isFullyPaid,
     })
   } catch (error: any) {
     console.error('[Delivery] Lookup error:', error)

@@ -4,7 +4,7 @@ import { getAppUrl } from '@/lib/utils'
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { token, email, amount, invoiceNumber, clientName } = body
+    const { token, email, amount, invoiceNumber, clientName, callbackPath } = body
 
     if (!amount || amount <= 0) {
       return NextResponse.json({ error: 'Invalid payment amount' }, { status: 400 })
@@ -30,7 +30,8 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       )
     }
-    const callbackUrl = `${baseAppUrl}/pay/${token}?reference=${reference}`
+    const prefix = callbackPath || '/pay/'
+    const callbackUrl = `${baseAppUrl}${prefix}${token}?reference=${reference}`
 
     const response = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',

@@ -23,6 +23,7 @@ import {
   Layers,
   ArrowDownToLine,
   RefreshCw,
+  CreditCard,
 } from 'lucide-react'
 import { formatCurrency, formatFileSize, formatDate, getFileCategory } from '@/lib/utils'
 import { Spinner } from '@/components/ui/Spinner'
@@ -63,6 +64,18 @@ interface DeliveryDTO {
   notes: string
   fileCount: number
   totalSize: number
+  requiresFullPayment?: boolean
+}
+
+interface FinancialsDTO {
+  invoiceTotal: number
+  totalPaid: number
+  remainingBalance: number
+  currency: string
+  clientEmail: string
+  invoiceNumber: string
+  paymentLinkToken: string
+  isFullyPaid: boolean
 }
 
 export default function ClientDeliveryPage() {
@@ -81,12 +94,14 @@ function ClientDeliveryPageInner() {
   const [loading, setLoading] = useState(true)
   const [delivery, setDelivery] = useState<DeliveryDTO | null>(null)
   const [files, setFiles] = useState<DeliveryFileDTO[]>([])
+  const [financials, setFinancials] = useState<FinancialsDTO | null>(null)
 
   // Status states
   const [isExpired, setIsExpired] = useState(false)
   const [isLocked, setIsLocked] = useState(false)
-  const [lockReason, setLockReason] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
+  const [showFilesPortal, setShowFilesPortal] = useState(false)
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false)
 
   // Download progress states
   const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null)
@@ -95,8 +110,35 @@ function ClientDeliveryPageInner() {
 
   useEffect(() => {
     if (!token) return
-    loadDelivery()
+    const urlParams = new URLSearchParams(window.location.search)
+    const ref = urlParams.get('reference')
+    if (ref) {
+      verifyAndLoad(ref)
+    } else {
+      loadDelivery()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
+
+  const verifyAndLoad = async (reference: string) => {
+    setLoading(true)
+    try {
+      const verifyRes = await fetch(
+        `/api/paystack/verify?reference=${encodeURIComponent(reference)}&token=${encodeURIComponent(token)}`
+      )
+      const verifyData = await verifyRes.json()
+      if (verifyRes.ok && verifyData.status === 'success') {
+        toast.success('Payment verified successfully!')
+        window.history.replaceState({}, '', window.location.pathname)
+      } else {
+        toast.error(verifyData.error || 'Payment verification failed')
+      }
+    } catch (err) {
+      console.error('Verification error:', err)
+    } finally {
+      loadDelivery()
+    }
+  }
 
   const loadDelivery = async () => {
     setLoading(true)
@@ -113,22 +155,23 @@ function ClientDeliveryPageInner() {
         return
       }
 
-      if (res.status === 403 || data.isLocked) {
-        setIsLocked(true)
-        setLockReason(data.lockReason || 'Delivery files are currently locked.')
-        if (data.delivery) {
-          setDelivery(data.delivery)
-        }
-        return
-      }
-
-      if (!res.ok) {
+      if (!res.ok && res.status !== 200) {
         setErrorMsg(data.error || 'Failed to load project delivery details.')
         return
       }
 
-      setDelivery(data.delivery)
-      setFiles(data.files || [])
+      if (data.delivery) {
+        setDelivery(data.delivery)
+      }
+      if (data.files) {
+        setFiles(data.files)
+      }
+      if (data.financials) {
+        setFinancials(data.financials)
+      }
+      if (data.isLocked !== undefined) {
+        setIsLocked(data.isLocked)
+      }
     } catch (err) {
       console.error('Error loading delivery:', err)
       setErrorMsg('A network error occurred while connecting to the server.')
@@ -137,10 +180,37 @@ function ClientDeliveryPageInner() {
     }
   }
 
+  const handlePayRemaining = async () => {
+    if (!financials || financials.remainingBalance <= 0) return
+    setIsProcessingPayment(true)
+    try {
+      const res = await fetch('/api/paystack/initialize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: financials.paymentLinkToken || token,
+          email: financials.clientEmail || 'client@lexmedia.com',
+          amount: financials.remainingBalance,
+          invoiceNumber: financials.invoiceNumber,
+          clientName: delivery?.clientName || 'Client',
+          callbackPath: '/delivery/',
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.authorization_url) {
+        throw new Error(data.error || 'Failed to initialize payment')
+      }
+      window.location.href = data.authorization_url
+    } catch (err: any) {
+      console.error('Payment initialization error:', err)
+      toast.error(err.message || 'Failed to start payment. Please try again.')
+      setIsProcessingPayment(false)
+    }
+  }
+
   const handleDownloadSingle = async (file: DeliveryFileDTO) => {
     setDownloadingFileId(file.id)
     try {
-      // Call server to track download & obtain signed URL
       const res = await fetch('/api/delivery/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -153,7 +223,6 @@ function ClientDeliveryPageInner() {
         return
       }
 
-      // Sanitize downloadUrl to always prefer current origin/relative stream if localhost is present
       let downloadTarget = data.downloadUrl || `/api/files?id=${file.id}`
       if (
         downloadTarget.includes('localhost') ||
@@ -163,12 +232,10 @@ function ClientDeliveryPageInner() {
         downloadTarget = `/api/files?id=${file.id}`
       }
 
-      // Update local download count
       setFiles((prev) =>
         prev.map((f) => (f.id === file.id ? { ...f, downloadCount: (f.downloadCount || 0) + 1 } : f))
       )
 
-      // Trigger browser download
       const link = document.createElement('a')
       link.href = downloadTarget
       link.download = data.fileName || file.fileName
@@ -190,7 +257,7 @@ function ClientDeliveryPageInner() {
 
   const handleConfirmDownload = async (fileId: string) => {
     try {
-      setDownloadingFileId(fileId) // Reuse loading state for the button
+      setDownloadingFileId(fileId)
       const res = await fetch('/api/delivery/confirm-download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -204,7 +271,6 @@ function ClientDeliveryPageInner() {
       }
 
       toast.success('Download confirmed and file securely removed.')
-      // AnimatePresence will handle the exit animation before removing from DOM
       setFiles((prev) => prev.filter((f) => f.id !== fileId))
       setDownloadingConfirmFileId(null)
     } catch (err) {
@@ -223,7 +289,6 @@ function ClientDeliveryPageInner() {
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
       await handleDownloadSingle(file)
-      // Slight delay between files to avoid browser popup blocks
       if (i < files.length - 1) {
         await new Promise((resolve) => setTimeout(resolve, 800))
       }
@@ -290,36 +355,6 @@ function ClientDeliveryPageInner() {
     )
   }
 
-  // ── Payment Locked State ──────────────────────────────────────────────────
-  if (isLocked) {
-    return (
-      <PageEnter>
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6">
-          <CardReveal className="max-w-md w-full bg-slate-900 border border-amber-500/20 rounded-2xl p-8 text-center space-y-5 shadow-2xl">
-            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400">
-              <Lock size={32} />
-            </div>
-            <div className="space-y-2">
-              <h1 className="text-xl font-bold text-white">Delivery Pending Release</h1>
-              <p className="text-sm text-slate-400 leading-relaxed">
-                {lockReason}
-              </p>
-            </div>
-            {delivery?.projectName && (
-              <div className="bg-slate-800/60 rounded-xl p-3.5 border border-slate-700/60 text-left">
-                <p className="text-xs text-slate-400">Project</p>
-                <p className="text-sm font-semibold text-white">{delivery.projectName}</p>
-              </div>
-            )}
-            <div className="pt-4 border-t border-slate-800">
-              <p className="text-xs text-slate-500 font-mono">LexMedia Studio Delivery System</p>
-            </div>
-          </CardReveal>
-        </div>
-      </PageEnter>
-    )
-  }
-
   // ── Invalid Token / Not Found ─────────────────────────────────────────────
   if (errorMsg || !delivery) {
     return (
@@ -341,7 +376,248 @@ function ClientDeliveryPageInner() {
     )
   }
 
-  // ── Active Delivery Portal View ───────────────────────────────────────────
+  // ── Payment Required / Locked State ───────────────────────────────────────
+  const remainingBal = financials?.remainingBalance ?? 0
+  if (isLocked && remainingBal > 0) {
+    const currency = financials?.currency || 'GHS'
+    const totalPaid = financials?.totalPaid || 0
+    const invoiceTotal = financials?.invoiceTotal || 0
+
+    return (
+      <PageEnter>
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
+          {/* Header */}
+          <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20">
+            <div className="max-w-3xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                {branding.logoLightUrl ? (
+                  <img src={branding.logoLightUrl} alt={branding.businessName} className="h-8 object-contain" />
+                ) : (
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md"
+                    style={{ backgroundColor: branding.buttonColor || '#4F46E5' }}
+                  >
+                    {(branding.shortName || 'LX').slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <span className="font-bold tracking-tight text-white text-base">
+                    {branding.businessName || 'LexMedia'}
+                  </span>
+                  <span className="hidden sm:inline-block text-[11px] text-slate-400 font-mono ml-2 px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700">
+                    Payment & Delivery Portal
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  <Lock size={13} />
+                  Payment Required
+                </span>
+              </div>
+            </div>
+          </header>
+
+          {/* Main Payment Required Content */}
+          <main className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-16 w-full flex-1 flex flex-col items-center justify-center space-y-8">
+            <CardReveal className="w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-10 shadow-2xl space-y-8 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-48 h-48 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
+
+              <div className="text-center space-y-3 relative z-10">
+                <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400">
+                  <Lock size={30} />
+                </div>
+                <div className="space-y-1.5">
+                  <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                    Complete Your Payment
+                  </h1>
+                  <p className="text-sm sm:text-base text-slate-300 max-w-lg mx-auto leading-relaxed">
+                    Your delivery files are ready. Please complete your remaining payment to access them.
+                  </p>
+                </div>
+              </div>
+
+              {/* Payment Summary Box */}
+              <div className="bg-slate-950/80 rounded-2xl p-5 sm:p-6 border border-slate-800/80 space-y-4 relative z-10">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Payment Summary</h3>
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800/60">
+                    <span className="text-slate-400">Client Information</span>
+                    <span className="font-semibold text-white">{delivery.clientName}</span>
+                  </div>
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800/60">
+                    <span className="text-slate-400">Project / Service</span>
+                    <span className="font-semibold text-white">{delivery.projectName || delivery.title}</span>
+                  </div>
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800/60">
+                    <span className="text-slate-400">Payment Received</span>
+                    <span className="font-semibold text-emerald-400">{formatCurrency(totalPaid, currency)}</span>
+                  </div>
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800/60">
+                    <span className="text-slate-400">Total Paid</span>
+                    <span className="font-semibold text-emerald-400">{formatCurrency(totalPaid, currency)}</span>
+                  </div>
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800/60">
+                    <span className="text-slate-400">Invoice Total</span>
+                    <span className="font-semibold text-white">{formatCurrency(invoiceTotal, currency)}</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-sm font-bold text-amber-400">Remaining Balance</span>
+                    <span className="text-lg font-extrabold text-amber-400 font-mono">
+                      {formatCurrency(remainingBal, currency)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment Action Button */}
+              <div className="space-y-3 relative z-10">
+                <button
+                  onClick={handlePayRemaining}
+                  disabled={isProcessingPayment}
+                  className="w-full py-4 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-base transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50 active:scale-[0.99]"
+                >
+                  {isProcessingPayment ? (
+                    <>
+                      <Spinner size="sm" />
+                      <span>Initializing Secure Paystack Payment...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard size={20} />
+                      <span>Pay Remaining Balance – {formatCurrency(remainingBal, currency)}</span>
+                    </>
+                  )}
+                </button>
+                <p className="text-center text-xs text-slate-500 flex items-center justify-center gap-1.5 pt-1">
+                  <ShieldCheck size={14} className="text-emerald-400" />
+                  Secured by Paystack · Instant File Unlock Upon Verification
+                </p>
+              </div>
+            </CardReveal>
+          </main>
+
+          {/* Footer */}
+          <footer className="border-t border-slate-800/80 bg-slate-900/40 py-6 px-4 sm:px-6 text-center text-xs text-slate-400 space-y-1">
+            <p className="font-semibold text-slate-300">Thank you for choosing {branding.businessName || 'LexMedia'} Studio.</p>
+            <p>© {new Date().getFullYear()} {branding.businessName || 'LexMedia'}. All rights reserved.</p>
+          </footer>
+        </div>
+      </PageEnter>
+    )
+  }
+
+  // ── Payment Complete / Fully Paid Screen (Before Opening Portal) ───────────
+  if (!showFilesPortal) {
+    const currency = financials?.currency || 'GHS'
+    const totalPaid = financials?.totalPaid || 0
+    const invoiceTotal = financials?.invoiceTotal || 0
+
+    return (
+      <PageEnter>
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
+          {/* Header */}
+          <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20">
+            <div className="max-w-3xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                {branding.logoLightUrl ? (
+                  <img src={branding.logoLightUrl} alt={branding.businessName} className="h-8 object-contain" />
+                ) : (
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md"
+                    style={{ backgroundColor: branding.buttonColor || '#4F46E5' }}
+                  >
+                    {(branding.shortName || 'LX').slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <span className="font-bold tracking-tight text-white text-base">
+                    {branding.businessName || 'LexMedia'}
+                  </span>
+                  <span className="hidden sm:inline-block text-[11px] text-slate-400 font-mono ml-2 px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700">
+                    Payment & Delivery Portal
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <ShieldCheck size={13} />
+                  Fully Paid
+                </span>
+              </div>
+            </div>
+          </header>
+
+          {/* Main Success Content */}
+          <main className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-16 w-full flex-1 flex flex-col items-center justify-center space-y-8">
+            <CardReveal className="w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-10 shadow-2xl space-y-8 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
+
+              <div className="text-center space-y-3 relative z-10">
+                <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400">
+                  <CheckCircle2 size={32} />
+                </div>
+                <div className="space-y-1.5">
+                  <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                    Payment Complete! 🎉
+                  </h1>
+                  <p className="text-sm sm:text-base text-slate-300 max-w-lg mx-auto leading-relaxed">
+                    Thank you! Your payment has been successfully received and your delivery files are now available.
+                  </p>
+                </div>
+              </div>
+
+              {/* Success Info Box */}
+              <div className="bg-slate-950/80 rounded-2xl p-5 sm:p-6 border border-slate-800/80 space-y-4 relative z-10">
+                <p className="text-sm font-semibold text-emerald-400 text-center">
+                  Your payment is complete! Your delivery files are now ready for you.
+                </p>
+                <div className="space-y-2.5 text-xs sm:text-sm pt-2 border-t border-slate-800/60">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Client</span>
+                    <span className="font-medium text-white">{delivery.clientName}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Project</span>
+                    <span className="font-medium text-white">{delivery.projectName || delivery.title}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Total Paid</span>
+                    <span className="font-semibold text-emerald-400">
+                      {formatCurrency(financials?.totalPaid || invoiceTotal, currency)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Remaining Balance</span>
+                    <span className="font-semibold text-emerald-400 font-mono">GH₵0.00</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* View Files Button */}
+              <div className="space-y-3 relative z-10">
+                <button
+                  onClick={() => setShowFilesPortal(true)}
+                  className="w-full py-4 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-base transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2.5 cursor-pointer active:scale-[0.99]"
+                >
+                  <Layers size={18} />
+                  <span>View My Delivery Files</span>
+                </button>
+              </div>
+            </CardReveal>
+          </main>
+
+          {/* Footer */}
+          <footer className="border-t border-slate-800/80 bg-slate-900/40 py-6 px-4 sm:px-6 text-center text-xs text-slate-400 space-y-1">
+            <p className="font-semibold text-slate-300">Thank you for choosing {branding.businessName || 'LexMedia'} Studio.</p>
+            <p>© {new Date().getFullYear()} {branding.businessName || 'LexMedia'}. All rights reserved.</p>
+          </footer>
+        </div>
+      </PageEnter>
+    )
+  }
+
+  // ── Active Delivery Files Portal View (Unlocked) ───────────────────────────
   return (
     <PageEnter>
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
@@ -373,7 +649,7 @@ function ClientDeliveryPageInner() {
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   <ShieldCheck size={13} />
-                  Secure Transfer
+                  Secure Transfer · Paid
                 </span>
               </div>
             </div>
@@ -390,9 +666,9 @@ function ClientDeliveryPageInner() {
 
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 relative z-10">
                 <SlideUp delay={0.1} className="space-y-2.5">
-                  <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20">
+                  <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
                     <Sparkles size={12} />
-                    Project Complete
+                    Project Complete & Paid
                   </div>
                   <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
                     {delivery.title || 'Your Project Is Ready'}
