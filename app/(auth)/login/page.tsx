@@ -132,10 +132,10 @@ function LoginFormContent() {
   }
 
   // Brand color calculations
-  const brandButtonBg = branding?.buttonColor || '#4f46e5'
+  const brandButtonBg = branding?.buttonColor || '#2563eb'
   const brandButtonText = branding?.buttonTextColor || '#ffffff'
-  const brandAccent = branding?.accentColor || '#6366f1'
-  const brandPrimary = branding?.primaryColor || '#0a0a0a'
+  const brandAccent = branding?.accentColor || '#3b82f6'
+  const brandPrimary = branding?.primaryColor || '#1e3a8a'
 
   return (
     <div className="min-h-screen w-full lg:grid lg:grid-cols-12 bg-white dark:bg-gray-950 font-sans transition-colors duration-200">
@@ -165,10 +165,10 @@ function LoginFormContent() {
       ` }} />
       
       {/* LEFT SIDE — BRAND EXPERIENCE */}
-      <div className="hidden lg:flex lg:col-span-5 xl:col-span-6 relative overflow-hidden bg-gradient-to-br from-gray-950 via-slate-900 to-indigo-950 text-white p-12 xl:p-16 flex-col justify-between">
-        {/* Ambient subtle glowing nodes to match modern SaaS aesthetics */}
-        <div className="absolute -top-40 -left-40 w-96 h-96 rounded-full blur-3xl pointer-events-none opacity-40 transition-colors" style={{ backgroundColor: brandAccent }} />
-        <div className="absolute -bottom-40 -right-40 w-96 h-96 rounded-full blur-3xl pointer-events-none opacity-20 transition-colors" style={{ backgroundColor: brandButtonBg }} />
+      <div className="hidden lg:flex lg:col-span-5 xl:col-span-6 relative overflow-hidden bg-gradient-to-br from-blue-950 via-slate-900 to-blue-900 text-white p-12 xl:p-16 flex-col justify-between">
+        {/* Ambient subtle glowing nodes to match modern SaaS aesthetics with a distinct premium blue feel */}
+        <div className="absolute -top-40 -left-40 w-96 h-96 rounded-full blur-3xl pointer-events-none opacity-40 bg-blue-600" />
+        <div className="absolute -bottom-40 -right-40 w-96 h-96 rounded-full blur-3xl pointer-events-none opacity-25 bg-sky-500" />
         
         {/* Brand Header */}
         <div className="relative z-10 flex items-center gap-3">
@@ -176,14 +176,14 @@ function LoginFormContent() {
             {branding?.logoLightUrl || branding?.logoUrl ? (
               <img src={branding.logoLightUrl || branding.logoUrl} alt={branding.businessName} className="h-6 w-auto object-contain" />
             ) : (
-              <Zap size={20} style={{ color: brandAccent }} />
+              <Zap size={20} className="text-blue-400" />
             )}
           </div>
           <div>
             <span className="font-bold text-base tracking-wider uppercase text-white block leading-none">
               {branding?.businessName || 'CTRL ROOM'}
             </span>
-            <span className="text-[10px] text-gray-400 tracking-widest uppercase font-semibold mt-1 block">
+            <span className="text-[10px] text-blue-200 tracking-widest uppercase font-semibold mt-1 block">
               {branding?.tagline || 'Creative Operations Platform'}
             </span>
           </div>
@@ -192,8 +192,8 @@ function LoginFormContent() {
         {/* Center Dynamic Brand Experience Mockup */}
         <div className="relative z-10 my-auto space-y-10 max-w-md xl:max-w-lg">
           <div className="space-y-4">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/[0.04] border border-white/[0.08] text-xs font-semibold backdrop-blur-sm" style={{ color: brandAccent }}>
-              <Sparkles size={13} style={{ color: brandAccent }} />
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-xs font-semibold backdrop-blur-sm text-blue-300">
+              <Sparkles size={13} className="text-blue-300" />
               <span>Workspace & Client Portal Ecosystem</span>
             </div>
             
@@ -201,7 +201,7 @@ function LoginFormContent() {
               Everything your business needs, in one room.
             </h1>
             
-            <p className="text-gray-400 text-sm leading-relaxed font-medium">
+            <p className="text-blue-200/75 text-sm leading-relaxed font-medium">
               Manage clients, projects, payments, final deliverables, and your team workflow from one central control deck.
             </p>
           </div>
@@ -214,7 +214,7 @@ function LoginFormContent() {
                 <div className="w-2.5 h-2.5 rounded-full bg-amber-500/50" />
                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/50" />
               </div>
-              <div className="px-3 py-0.5 rounded-full bg-white/[0.04] text-[9px] font-mono text-gray-400 tracking-wider">
+              <div className="px-3 py-0.5 rounded-full bg-white/[0.04] text-[9px] font-mono text-blue-300 tracking-wider">
                 workspace.ctrl-room
               </div>
             </div>
@@ -231,8 +231,8 @@ function LoginFormContent() {
                 <span className="text-xs font-bold font-mono text-white">Active</span>
               </div>
               <div className="rounded-xl bg-white/[0.02] border border-white/[0.04] p-3 flex flex-col justify-between h-14" style={{ borderColor: `${brandAccent}20` }}>
-                <span className="text-[9px] text-gray-500 uppercase font-bold tracking-wider">Projects</span>
-                <span className="text-xs font-bold font-mono" style={{ color: brandAccent }}>Live</span>
+                <span className="text-[9px] text-blue-400 uppercase font-bold tracking-wider">Projects</span>
+                <span className="text-xs font-bold font-mono text-blue-300">Live</span>
               </div>
               <div className="rounded-xl bg-white/[0.02] border border-white/[0.04] p-3 flex flex-col justify-between h-14">
                 <span className="text-[9px] text-emerald-400 uppercase font-bold tracking-wider">Payments</span>
@@ -244,35 +244,35 @@ function LoginFormContent() {
           {/* Minimal visual stats alignment */}
           <div className="grid grid-cols-2 gap-4 pt-6 border-t border-white/[0.06]">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-gray-300 shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-blue-200 shrink-0">
                 <ShieldCheck size={16} />
               </div>
               <div>
                 <p className="text-xs font-bold text-white">Secure Access</p>
-                <p className="text-[10px] text-gray-400">Two-factor protection</p>
+                <p className="text-[10px] text-blue-200/60">Two-factor protection</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-gray-300 shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-blue-200 shrink-0">
                 <Layers size={16} />
               </div>
               <div>
                 <p className="text-xs font-bold text-white">Cloud Delivery</p>
-                <p className="text-[10px] text-gray-400">Instant file portals</p>
+                <p className="text-[10px] text-blue-200/60">Instant file portals</p>
               </div>
             </div>
           </div>
         </div>
 
         {/* Bottom Trust Statement */}
-        <div className="relative z-10 pt-6 border-t border-white/[0.06] flex items-center justify-between text-[11px] text-gray-400">
+        <div className="relative z-10 pt-6 border-t border-white/[0.06] flex items-center justify-between text-[11px] text-blue-200/60">
           <span>Protected by enterprise-grade Firebase security</span>
-          <span className="font-mono text-[10px] tracking-widest font-bold uppercase" style={{ color: brandAccent }}>v2.5 Workspace</span>
+          <span className="font-mono text-[10px] tracking-widest font-bold uppercase text-blue-400">v2.5 Workspace</span>
         </div>
       </div>
 
       {/* RIGHT SIDE — LOGIN FORM */}
-      <div className="lg:col-span-7 xl:col-span-6 flex flex-col items-center justify-center p-6 sm:p-12 xl:p-16 bg-gray-50/50 dark:bg-gray-950 transition-colors">
+      <div className="lg:col-span-7 xl:col-span-6 flex flex-col items-center justify-center p-6 sm:p-12 xl:p-16 bg-blue-50/10 dark:bg-gray-950 transition-colors">
         <div className="w-full max-w-[440px] animate-fade-in flex flex-col">
           
           {/* Dynamic Top Brand Logo Header */}
