@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
-import { Bell, Check, CheckCheck, CreditCard, ExternalLink, Sparkles, X } from 'lucide-react'
+import { Bell, Check, CheckCheck, CreditCard, Download, ExternalLink, Sparkles, X } from 'lucide-react'
 import Link from 'next/link'
 import { COLLECTIONS, subscribeToCollection, updateDocument } from '@/lib/firebase/firestore'
 import { formatDate } from '@/lib/utils'
@@ -138,6 +138,12 @@ export function NotificationBell() {
                   ? `/invoices`
                   : `/dashboard`
 
+                const isDownload = n.type === 'delivery_download'
+                const Icon = isDownload ? Download : CreditCard
+                const badgeColor = isDownload
+                  ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400'
+                  : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+
                 return (
                   <div
                     key={n.id}
@@ -145,8 +151,8 @@ export function NotificationBell() {
                       !n.isRead ? 'bg-indigo-50/30 dark:bg-indigo-950/30' : ''
                     }`}
                   >
-                    <div className="mt-0.5 w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-                      <CreditCard size={15} />
+                    <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${badgeColor}`}>
+                      <Icon size={15} />
                     </div>
                     <div className="flex-1 min-w-0 pr-6">
                       <div className="flex items-center gap-1.5">

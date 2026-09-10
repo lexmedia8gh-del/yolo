@@ -12,6 +12,7 @@ import {
   Link2,
   Eye,
   Upload,
+  Download,
   RefreshCw,
 } from 'lucide-react'
 
@@ -24,6 +25,7 @@ const eventIcons: Record<string, React.ComponentType<any>> = {
   client_link_generated: Link2,
   client_link_opened: Eye,
   file_uploaded: Upload,
+  file_downloaded: Download,
   project_status_changed: RefreshCw,
 }
 
@@ -36,6 +38,7 @@ const eventColors: Record<string, string> = {
   client_link_generated: 'bg-purple-50 text-purple-600',
   client_link_opened: 'bg-gray-100 text-gray-600',
   file_uploaded: 'bg-teal-50 text-teal-600',
+  file_downloaded: 'bg-indigo-50 text-indigo-600',
 }
 
 interface RecentActivityProps {

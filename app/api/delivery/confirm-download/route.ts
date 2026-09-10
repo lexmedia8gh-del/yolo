@@ -105,6 +105,61 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 3. Create Admin Notification and Activity Log upon successful and verified download confirmation
+    try {
+      const clientName = deliveryData.clientName || 'Client'
+      const clientId = deliveryData.clientId || ''
+      const fileName = fileData.name || 'a file'
+
+      const now = new Date()
+      const formattedDate = now.toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+      }) + ' at ' + now.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      })
+
+      const adminDb = getAdminDb()
+      if (adminDb) {
+        // Create Admin Notification
+        await adminDb.collection(COLLECTIONS.NOTIFICATIONS).add({
+          type: 'delivery_download',
+          title: 'File Downloaded',
+          message: `${clientName} successfully downloaded ${fileName}`,
+          isRead: false,
+          read: false,
+          clientId,
+          clientName,
+          deliveryId,
+          fileName,
+          createdAt: FieldValue.serverTimestamp(),
+          metadata: {
+            fileId,
+            downloadDate: now.toISOString(),
+          },
+        })
+
+        // Create Activity Log
+        await adminDb.collection(COLLECTIONS.ACTIVITY_LOGS).add({
+          event: 'file_downloaded',
+          description: `${clientName} successfully downloaded ${fileName} on ${formattedDate}.`,
+          createdAt: FieldValue.serverTimestamp(),
+          performedByName: clientName,
+          clientId,
+          deliveryId,
+          metadata: {
+            fileId,
+            fileName,
+          },
+        })
+      }
+    } catch (logErr) {
+      console.error('Failed to create download notification or activity log:', logErr)
+    }
+
     return NextResponse.json({ success: true })
   } catch (error: any) {
     console.error('Error in confirm-download:', error)
