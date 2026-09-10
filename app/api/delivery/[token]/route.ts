@@ -197,23 +197,6 @@ export async function GET(
       }
     }
 
-    if (isLocked) {
-      return NextResponse.json(
-        {
-          isLocked: true,
-          lockReason,
-          delivery: {
-            title: deliveryDocData.title,
-            projectName: deliveryDocData.projectName,
-            clientName: deliveryDocData.clientName,
-            projectId: deliveryDocData.projectId,
-            invoiceId: deliveryDocData.invoiceId,
-          },
-        },
-        { status: 403 }
-      )
-    }
-
     const toISO = (ts: any): string | null => {
       if (!ts) return null
       if (typeof ts.toDate === 'function') return ts.toDate().toISOString()

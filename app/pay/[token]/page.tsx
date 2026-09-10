@@ -52,6 +52,7 @@ function PublicPaymentPageInner() {
   const [paymentSuccess, setPaymentSuccess] = useState(false)
   const [verifiedAmount, setVerifiedAmount] = useState<number | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
+  const [deliveryAccessToken, setDeliveryAccessToken] = useState<string | null>(null)
 
   useEffect(() => {
     if (!token) return
@@ -70,6 +71,9 @@ function PublicPaymentPageInner() {
             }
             if (apiData.isAlreadyPaid) {
               setPaymentSuccess(true)
+            }
+            if (apiData.deliveryAccessToken) {
+              setDeliveryAccessToken(apiData.deliveryAccessToken)
             }
 
             if (refQuery) {
@@ -343,6 +347,20 @@ function PublicPaymentPageInner() {
                   <div className="flex items-center justify-center gap-2 text-xs text-emerald-700 bg-emerald-50/80 py-2.5 px-4 rounded-xl border border-emerald-200">
                     <ShieldCheck size={16} /> Verified & Secured by Paystack
                   </div>
+                  
+                  {isFullyPaid && deliveryAccessToken && (
+                    <div className="pt-2">
+                      <Button
+                        onClick={() => {
+                          window.location.href = `/delivery/${deliveryAccessToken}`
+                        }}
+                        className="w-full py-6 text-base font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg shadow-indigo-500/20"
+                      >
+                        <FileText className="w-5 h-5 mr-2" />
+                        View My Deliverables
+                      </Button>
+                    </div>
+                  )}
 
                 </div>
               </Card>

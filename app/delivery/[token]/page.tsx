@@ -429,10 +429,10 @@ function ClientDeliveryPageInner() {
                 </div>
                 <div className="space-y-1.5">
                   <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-                    Complete Your Payment
+                    Your Deliverables Are Ready 🎉
                   </h1>
                   <p className="text-sm sm:text-base text-slate-300 max-w-lg mx-auto leading-relaxed">
-                    Your delivery files are ready. Please complete your remaining payment to access them.
+                    Your files are ready for delivery. Please complete your outstanding payment to access and download your deliverables.
                   </p>
                 </div>
               </div>
@@ -473,21 +473,14 @@ function ClientDeliveryPageInner() {
               {/* Payment Action Button */}
               <div className="space-y-3 relative z-10">
                 <button
-                  onClick={handlePayRemaining}
-                  disabled={isProcessingPayment}
-                  className="w-full py-4 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-base transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50 active:scale-[0.99]"
+                  onClick={() => {
+                    const payToken = financials?.paymentLinkToken || token
+                    window.location.href = `/pay/${payToken}`
+                  }}
+                  className="w-full py-4 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-base transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2.5 cursor-pointer active:scale-[0.99]"
                 >
-                  {isProcessingPayment ? (
-                    <>
-                      <Spinner size="sm" />
-                      <span>Initializing Secure Paystack Payment...</span>
-                    </>
-                  ) : (
-                    <>
-                      <CreditCard size={20} />
-                      <span>Pay Remaining Balance – {formatCurrency(remainingBal, currency)}</span>
-                    </>
-                  )}
+                  <CreditCard size={20} />
+                  <span>Complete Payment & View Deliverables</span>
                 </button>
                 <p className="text-center text-xs text-slate-500 flex items-center justify-center gap-1.5 pt-1">
                   <ShieldCheck size={14} className="text-emerald-400" />

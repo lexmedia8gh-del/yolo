@@ -122,6 +122,22 @@ export async function GET(
       linkData.paymentStatus === 'Paid' ||
       invoiceData?.status === 'Paid'
 
+    let deliveryAccessToken: string | null = null
+    try {
+      const adminDb = getAdminDb()
+      if (linkData.quickJobId) {
+        const qjSnap = await adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(linkData.quickJobId).get()
+        if (qjSnap.exists) {
+          deliveryAccessToken = qjSnap.data()?.deliveryAccessToken || null
+        }
+      } else if (linkData.invoiceId) {
+        const delSnap = await adminDb.collection(COLLECTIONS.DELIVERIES).where('invoiceId', '==', linkData.invoiceId).limit(1).get()
+        if (!delSnap.empty) {
+          deliveryAccessToken = delSnap.docs[0].data()?.accessToken || null
+        }
+      }
+    } catch {}
+
     return NextResponse.json({
       success: true,
       link: {
@@ -153,6 +169,7 @@ export async function GET(
           }
         : null,
       isAlreadyPaid,
+      deliveryAccessToken,
     })
   } catch (error: any) {
     console.error('[Payment API] Token lookup error:', error)

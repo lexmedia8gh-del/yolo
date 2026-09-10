@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb, requireAdmin } from '@/lib/firebase/admin'
 import { FieldValue } from 'firebase-admin/firestore'
 import { generateSecureToken, getDeliveryLink } from '@/lib/utils'
-import { sendDeliveryReadyEmail } from '@/lib/services/brevo'
+import { sendDeliveryPaymentRequiredEmail } from '@/lib/services/brevo'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 
 export const dynamic = 'force-dynamic'
@@ -35,11 +35,8 @@ export async function POST(req: NextRequest) {
     const isPaid =
       qjData.paymentStatus === 'Paid' ||
       (Number(qjData.outstandingBalance) <= 0 && Number(qjData.amountPaid) >= Number(qjData.originalAgreedPrice))
+    const amountDue = isPaid ? 0 : Number(qjData.outstandingBalance || qjData.originalAgreedPrice || 0)
 
-    if (!isPaid) {
-      return NextResponse.json({ error: 'Payment must be completed before releasing delivery' }, { status: 403 })
-    }
-    
     const isAlreadyReleased =
       (qjData.deliveryStatus === 'Released' || qjData.deliveryStatus === 'Sent') &&
       Boolean(qjData.deliveryEmailSent)
@@ -100,16 +97,17 @@ export async function POST(req: NextRequest) {
       }
     } catch {}
 
-    // 5. Send Brevo email first
-    const emailRes = await sendDeliveryReadyEmail({
+    // 5. Send Brevo email
+    const emailRes = await sendDeliveryPaymentRequiredEmail({
       toEmail: resolvedEmail,
       clientName: resolvedName,
       projectName: qjData.jobDescription || 'Quick Job Deliverables',
+      amountDue,
+      currencySymbol: qjData.currency || 'GH₵',
+      paymentUrl: deliveryLink,
       deliveryUrl: deliveryLink,
       lexmediaLogoUrl,
       clientLogoUrl,
-      subject: 'Your Deliverables Are Ready',
-      primaryButtonText: 'Access Your Deliverables',
     })
 
     if (!emailRes.success) {

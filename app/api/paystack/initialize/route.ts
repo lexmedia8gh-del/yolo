@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAppUrl } from '@/lib/utils'
+import { getAppUrl, getProductionUrl } from '@/lib/utils'
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,7 +31,8 @@ export async function POST(req: NextRequest) {
       )
     }
     const prefix = callbackPath || '/pay/'
-    const callbackUrl = `${baseAppUrl}${prefix}${token}?reference=${reference}`
+    const rawCallbackUrl = `${baseAppUrl}${prefix}${token}?reference=${reference}`
+    const callbackUrl = getProductionUrl(rawCallbackUrl, req)
 
     const response = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
