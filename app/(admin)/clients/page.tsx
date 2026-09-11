@@ -33,6 +33,7 @@ import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { Badge } from '@/components/ui/Badge'
 import { Spinner } from '@/components/ui/Spinner'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { QuickClientCreationModal } from '@/components/clients/QuickClientCreationModal'
 import { ClientInformationTemplatesModal } from '@/components/clients/ClientInformationTemplatesModal'
 import {
@@ -329,39 +330,39 @@ export default function ClientsPage() {
       />
 
       {/* Controls & Filters */}
-      <div className="flex flex-col sm:flex-row gap-4 justify-between items-stretch sm:items-center bg-white p-4 rounded-2xl border border-border shadow-sm">
+      <div className="flex flex-col sm:flex-row gap-3 justify-between items-stretch sm:items-center bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200/80 dark:border-gray-800 shadow-xs">
         <div className="relative flex-1 max-w-md">
           <Input
             placeholder="Search by name, email, company, or phone..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            leftIcon={<Search size={18} className="text-gray-400" />}
+            leftIcon={<Search size={16} className="text-gray-400" />}
           />
         </div>
 
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <Filter size={16} />
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+            <Filter size={14} />
             <span>Status:</span>
           </div>
           <select
             value={statusFilter}
             onChange={(e: any) => setStatusFilter(e.target.value)}
-            className="px-3.5 py-2 rounded-xl border border-border bg-white text-sm font-medium focus:ring-2 focus:ring-accent-500 outline-none"
+            className="h-9 px-3 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs font-medium text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600"
           >
             <option value="all">All Clients</option>
             <option value="active">Active Only</option>
             <option value="inactive">Inactive Only</option>
           </select>
 
-          <div className="flex items-center gap-2 text-sm text-gray-500 ml-1">
-            <ArrowUpDown size={15} />
+          <div className="flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 ml-1">
+            <ArrowUpDown size={14} />
             <span>Sort:</span>
           </div>
           <select
             value={sortBy}
             onChange={(e: any) => setSortBy(e.target.value)}
-            className="px-3.5 py-2 rounded-xl border border-border bg-white text-sm font-medium focus:ring-2 focus:ring-accent-500 outline-none"
+            className="h-9 px-3 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs font-medium text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600"
           >
             <option value="recent">Most Recent</option>
             <option value="name">Name (A-Z)</option>
@@ -372,81 +373,88 @@ export default function ClientsPage() {
       </div>
 
       {/* Client Table / Content */}
-      <div className="bg-white rounded-2xl border border-border shadow-card overflow-hidden">
+      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200/80 dark:border-gray-800 shadow-xs overflow-hidden">
         {loading ? (
           <div className="py-16 flex flex-col items-center justify-center gap-3">
             <Spinner size="lg" />
-            <p className="text-sm text-muted">Loading clients database...</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500">Loading clients database...</p>
           </div>
         ) : filteredClients.length === 0 ? (
-          <div className="py-16 px-4 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-accent-50 text-accent-600 flex items-center justify-center mx-auto mb-3">
-              <Users size={24} />
-            </div>
-            <h3 className="text-lg font-bold text-gray-900 mb-1">
-              {search || statusFilter !== 'all' ? 'No clients match your filter' : 'No clients added yet'}
-            </h3>
-            <p className="text-sm text-muted max-w-sm mx-auto mb-6">
-              {search || statusFilter !== 'all'
-                ? 'Try adjusting your search query or status filter.'
-                : 'Get started by creating your first client record.'}
-            </p>
-            {!search && statusFilter === 'all' && (
-              <Button onClick={openAddModal} variant="primary" icon={<UserPlus size={18} />}>
-                Add First Client
-              </Button>
-            )}
+          <div className="p-8">
+            <EmptyState
+              icon={Users}
+              title={search || statusFilter !== 'all' ? 'No clients match your filter' : 'No clients added yet'}
+              description={
+                search || statusFilter !== 'all'
+                  ? 'Try adjusting your search query or status filter.'
+                  : 'Get started by creating your first client record.'
+              }
+              action={
+                !search && statusFilter === 'all'
+                  ? {
+                      label: 'Add First Client',
+                      onClick: openAddModal,
+                      icon: <UserPlus size={16} />,
+                    }
+                  : undefined
+              }
+            />
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-border bg-gray-50/50 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  <th className="py-4 px-6">Client Name</th>
-                  <th className="py-4 px-6">Contact Info</th>
-                  <th className="py-4 px-6">Company</th>
-                  <th className="py-4 px-6">Status</th>
-                  <th className="py-4 px-6">Projects</th>
-                  <th className="py-4 px-6">Total Paid</th>
-                  <th className="py-4 px-6">Outstanding</th>
-                  <th className="py-4 px-6 text-right">Actions</th>
+                <tr className="border-b border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-850/40 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  <th className="py-3 px-4">Client Name</th>
+                  <th className="py-3 px-4">Contact Info</th>
+                  <th className="py-3 px-4">Company</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Projects</th>
+                  <th className="py-3 px-4">Total Paid</th>
+                  <th className="py-3 px-4">Outstanding</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border text-sm">
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-sm">
                 {filteredClients.map((client) => (
-                  <tr key={client.id} className="hover:bg-gray-50/60 transition-colors">
-                    <td className="py-4 px-6">
-                      <div className="font-semibold text-gray-900">{client.fullName}</div>
-                      <div className="text-xs text-muted">
+                  <tr key={client.id} className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors">
+                    <td className="py-3 px-4">
+                      <Link
+                        href={`/clients/${client.id}`}
+                        className="font-semibold text-gray-900 dark:text-gray-100 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                      >
+                        {client.fullName}
+                      </Link>
+                      <div className="text-xs text-gray-400 dark:text-gray-500">
                         Added {client.createdAt ? formatDate(client.createdAt) : 'Recently'}
                       </div>
                     </td>
 
-                    <td className="py-4 px-6 space-y-1">
-                      <div className="flex items-center gap-1.5 text-gray-600 text-xs">
-                        <Mail size={13} className="text-gray-400 shrink-0" />
+                    <td className="py-3 px-4 space-y-0.5">
+                      <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300 text-xs">
+                        <Mail size={12} className="text-gray-400 shrink-0" />
                         <span className="truncate max-w-[180px]">{client.email}</span>
                       </div>
                       {client.phone && (
-                        <div className="flex items-center gap-1.5 text-gray-600 text-xs">
-                          <Phone size={13} className="text-gray-400 shrink-0" />
+                        <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300 text-xs">
+                          <Phone size={12} className="text-gray-400 shrink-0" />
                           <span>{client.phone}</span>
                         </div>
                       )}
                     </td>
 
-                    <td className="py-4 px-6">
+                    <td className="py-3 px-4">
                       {client.company ? (
-                        <div className="flex items-center gap-1.5 text-gray-700">
-                          <Building2 size={14} className="text-gray-400 shrink-0" />
+                        <div className="flex items-center gap-1.5 text-gray-700 dark:text-gray-300 text-xs">
+                          <Building2 size={13} className="text-gray-400 shrink-0" />
                           <span>{client.company}</span>
                         </div>
                       ) : (
-                        <span className="text-xs text-muted">—</span>
+                        <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
                       )}
                     </td>
 
-                    <td className="py-4 px-6">
+                    <td className="py-3 px-4">
                       <Badge
                         variant={client.status === 'active' ? 'success' : 'muted'}
                         size="sm"
@@ -455,51 +463,51 @@ export default function ClientsPage() {
                       </Badge>
                     </td>
 
-                    <td className="py-4 px-6 font-medium text-gray-700">
+                    <td className="py-3 px-4 font-medium text-gray-700 dark:text-gray-300 text-xs">
                       {client.projectCount || 0}
                     </td>
 
-                    <td className="py-4 px-6 font-semibold text-success-600">
+                    <td className="py-3 px-4 font-semibold text-emerald-600 dark:text-emerald-400 text-xs">
                       {formatCurrency(client.totalPaid || 0)}
                     </td>
 
-                    <td className="py-4 px-6 font-semibold text-danger-600">
+                    <td className="py-3 px-4 font-semibold text-rose-600 dark:text-rose-400 text-xs">
                       {formatCurrency(client.outstandingBalance || 0)}
                     </td>
 
-                    <td className="py-4 px-6 text-right">
+                    <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-1">
                         <Link
                           href={`/clients/${client.id}`}
-                          className="p-2 rounded-xl text-gray-500 hover:text-accent-600 hover:bg-accent-50 transition-colors"
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-indigo-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                           title="View Client Profile"
                         >
-                          <Eye size={16} />
+                          <Eye size={15} />
                         </Link>
                         <button
                           onClick={() => openEditModal(client)}
-                          className="p-2 rounded-xl text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-blue-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                           title="Edit Client"
                         >
-                          <Edit2 size={16} />
+                          <Edit2 size={15} />
                         </button>
                         <button
                           onClick={() => setDeactivatingClient(client)}
-                          className={`p-2 rounded-xl transition-colors ${
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
                             client.status === 'active'
-                              ? 'text-gray-500 hover:text-danger-600 hover:bg-danger-50'
-                              : 'text-gray-500 hover:text-success-600 hover:bg-success-50'
+                              ? 'text-gray-400 hover:text-rose-600 hover:bg-gray-100 dark:hover:bg-gray-800'
+                              : 'text-gray-400 hover:text-emerald-600 hover:bg-gray-100 dark:hover:bg-gray-800'
                           }`}
                           title={client.status === 'active' ? 'Deactivate Client' : 'Activate Client'}
                         >
-                          <Power size={16} />
+                          <Power size={15} />
                         </button>
                         <button
                           onClick={() => setDeletingClient(client)}
-                          className="p-2 rounded-xl text-gray-500 hover:text-danger-600 hover:bg-danger-50 transition-colors"
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-rose-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                           title="Delete Client"
                         >
-                          <Trash2 size={16} />
+                          <Trash2 size={15} />
                         </button>
                       </div>
                     </td>
