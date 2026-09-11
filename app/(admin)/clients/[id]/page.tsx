@@ -40,7 +40,7 @@ import {
 } from '@/lib/firebase/firestore'
 import { where, orderBy } from '@/lib/firebase/firestore'
 import type { Client, Project, Invoice, Payment, ClientLink } from '@/lib/types'
-import { formatCurrency, formatDate, getStatusColor, copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone, appUrl, getPaymentLink } from '@/lib/utils'
+import { formatCurrency, formatDate, getStatusColor, copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone, appUrl, getPaymentLink, getProductionUrl } from '@/lib/utils'
 import { NewProjectWizard } from '@/components/projects/NewProjectWizard'
 import { ClientInformationTemplatesModal } from '@/components/clients/ClientInformationTemplatesModal'
 import { RecordPaymentModal } from '@/components/payments/RecordPaymentModal'
@@ -760,7 +760,7 @@ export default function ClientProfilePage() {
                       ) : (
                         <div className="space-y-2">
                           {links.map((link) => {
-                            const payUrl = (link.url && !link.url.includes('vercel.app')) ? link.url : getPaymentLink(link.token)
+                            const payUrl = link.token ? getPaymentLink(link.token) : getProductionUrl(link.url || '')
                             return (
                               <div
                                 key={link.id}

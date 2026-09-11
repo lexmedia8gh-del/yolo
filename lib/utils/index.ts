@@ -341,196 +341,21 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 // ─── Centralized App URL & Payment Link Utilities ───────────
-/**
- * Returns the application base URL without trailing slash.
- * 
- * 1. Explicit context: If a valid origin string or request is provided, extracts origin.
- * 2. Browser-side: Always prefers window.location.origin.
- * 3. Server-side: Dynamically inspects x-forwarded-host / host headers from incoming requests.
- * 4. Environment Variables: APP_URL, NEXT_PUBLIC_APP_URL, VERCEL_URL.
- */
-export function getAppUrl(context?: any): string {
-  // 1. Explicit string passed as origin / base URL
-  if (typeof context === 'string') {
-    const trimmed = context.trim().replace(/\/$/, '')
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      if (!trimmed.includes('localhost') && !trimmed.includes('127.0.0.1') && !trimmed.includes('vercel.app')) {
-        return trimmed
-      }
-    }
-  }
+// Delegated to authoritative gateway in ./app-url
+export {
+  getRuntimeUrl,
+  getCustomerUrl,
+  validateUrlSecurity,
+  getProductionUrl,
+  getAppUrl,
+  appUrl,
+  getPaymentLink,
+  getDeliveryLink,
+  buildPaymentUrl,
+  buildInvoiceUrl,
+  buildDeliveryUrl,
+  buildQuickJobDeliveryUrl,
+  sanitizeRedirectUrl,
+} from './app-url'
 
-  // 2. Configured environment variables (Highest authoritative production override)
-  const configuredAppUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL
-  if (configuredAppUrl) {
-    const trimmed = configuredAppUrl.trim()
-    if (
-      trimmed &&
-      !trimmed.includes('localhost') &&
-      !trimmed.includes('127.0.0.1') &&
-      !trimmed.includes('vercel.app')
-    ) {
-      const normalized = trimmed.startsWith('http') ? trimmed : `https://${trimmed}`
-      return normalized.replace(/\/$/, '')
-    }
-  }
-
-  // 3. Browser context: Authoritative ONLY if NOT localhost and NOT vercel.app
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    const origin = window.location.origin.replace(/\/$/, '')
-    const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1')
-    const isVercel = origin.includes('vercel.app')
-    
-    // If running on localhost, allow local development URL
-    if (isLocalhost) {
-      return origin
-    }
-
-    // If running on a non-Vercel production/preview domain (e.g., custom domain or Cloud Run), use it
-    if (!isVercel) {
-      return origin
-    }
-  }
-
-  // 4. Request context (Server-side dynamic host detection from headers, ignoring vercel.app)
-  if (context && typeof context === 'object') {
-    try {
-      let headers: Headers | any = null
-      if ('headers' in context && context.headers) {
-        headers = context.headers
-      } else if (context instanceof Headers) {
-        headers = context
-      }
-
-      if (headers) {
-        const getHeader = (name: string): string | null => {
-          if (typeof headers.get === 'function') {
-            return headers.get(name)
-          }
-          return headers[name] || headers[name.toLowerCase()] || null
-        }
-
-        const host = getHeader('x-forwarded-host') || getHeader('host')
-        const proto = getHeader('x-forwarded-proto') || (host && host.includes('localhost') ? 'http' : 'https')
-        if (host) {
-          const cleanHost = host.split(',')[0].trim()
-          const isLocalhostHost = cleanHost.includes('localhost') || cleanHost.includes('127.0.0.1')
-          const isVercelHost = cleanHost.includes('vercel.app')
-          
-          if (isLocalhostHost) {
-            return `${proto}://${cleanHost}`.replace(/\/$/, '')
-          }
-          if (!isVercelHost) {
-            return `${proto}://${cleanHost}`.replace(/\/$/, '')
-          }
-        }
-      }
-    } catch {}
-  }
-
-  // 5. Production fallback domain (Lexmedia Production Domain)
-  return 'https://lexmedia.gh'
-}
-
-/**
- * Builds an absolute or clean application URL given a path.
- */
-export function appUrl(path = '', context?: any): string {
-  const base = getAppUrl(context)
-  const cleanPath = path ? (path.startsWith('/') ? path : `/${path}`) : ''
-  if (!base) return cleanPath || '/'
-  return `${base}${cleanPath}`
-}
-
-/**
- * Canonical URL sanitizer for customer-facing links (Brevo emails, client payment links).
- * Guarantees that any localhost, vercel.app, or invalid link is transformed into an absolute,
- * secure production URL. Preserves exact token, route, and query params.
- */
-export function getProductionUrl(urlStr: string, context?: any): string {
-  if (!urlStr || typeof urlStr !== 'string') return ''
-  const trimmed = urlStr.trim()
-  if (!trimmed) return ''
-
-  // 1. If it contains vercel.app or localhost, sanitize and rewrite to authoritative production domain
-  if (trimmed.includes('vercel.app') || trimmed.includes('localhost:3000') || trimmed.includes('127.0.0.1')) {
-    try {
-      const parsed = new URL(trimmed)
-      // If external third-party payment URL (like paystack.com or hubtel.com), leave untouched
-      if (parsed.hostname.includes('paystack.com') || parsed.hostname.includes('hubtel.com')) {
-        return trimmed
-      }
-      const pathname = parsed.pathname || '/'
-      const search = parsed.search || ''
-      const hash = parsed.hash || ''
-      let prodBase = getAppUrl(context)
-      if (!prodBase || prodBase.includes('vercel.app') || prodBase.includes('localhost')) {
-        prodBase = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://lexmedia.gh'
-      }
-      return `${prodBase.replace(/\/$/, '')}${pathname}${search}${hash}`
-    } catch {
-      // Not a full URL, treat as path/token
-    }
-  }
-
-  // 2. If it's a bare token (e.g., "pay_abc123" or "p_xyz"), form the full /pay/[token] path
-  let targetPath = trimmed
-  if (!targetPath.startsWith('/') && !targetPath.startsWith('http://') && !targetPath.startsWith('https://')) {
-    targetPath = `/pay/${targetPath}`
-  }
-
-  // 3. Resolve authoritative base URL
-  let prodBase = getAppUrl(context)
-  if (!prodBase || prodBase.includes('localhost') || prodBase.includes('127.0.0.1') || prodBase.includes('vercel.app')) {
-    prodBase = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://lexmedia.gh'
-  }
-  const cleanBase = prodBase.replace(/\/$/, '')
-
-  // 4. If relative path (e.g. "/pay/token" or "/delivery/token")
-  if (targetPath.startsWith('/')) {
-    return `${cleanBase}${targetPath}`
-  }
-
-  // 5. If full URL
-  try {
-    const parsed = new URL(targetPath)
-    if (parsed.hostname.includes('paystack.com') || parsed.hostname.includes('hubtel.com')) {
-      return targetPath
-    }
-    const isLocalOrVercel =
-      parsed.hostname === 'localhost' ||
-      parsed.hostname === '127.0.0.1' ||
-      parsed.hostname.startsWith('192.168.') ||
-      parsed.port === '3000' ||
-      parsed.hostname.includes('vercel.app')
-
-    if (isLocalOrVercel) {
-      return `${cleanBase}${parsed.pathname}${parsed.search}${parsed.hash}`
-    }
-
-    return targetPath
-  } catch {
-    return `${cleanBase}/${targetPath.replace(/^\//, '')}`
-  }
-}
-
-/**
- * Centralized payment-link generator for Ctrl Room.
- * Generates the authoritative customer-facing payment URL across the app:
- * Admin dashboard, Copy button, WhatsApp messages, Email, Invoices, and Projects.
- */
-export function getPaymentLink(tokenOrId: string, context?: any): string {
-  const cleanToken = (tokenOrId || 'sample').trim()
-  return getProductionUrl(`/pay/${cleanToken}`, context)
-}
-
-/**
- * Centralized delivery-link generator for Ctrl Room.
- * Generates the authoritative customer-facing delivery portal URL across the app:
- * Client delivery portal, emails, and admin copy/share actions.
- */
-export function getDeliveryLink(accessToken: string, context?: any): string {
-  const cleanToken = (accessToken || '').trim()
-  return getProductionUrl(`/delivery/${encodeURIComponent(cleanToken)}`, context)
-}
 
