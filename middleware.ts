@@ -21,13 +21,15 @@ const AUTH_PATHS = ['/login']
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Unconditionally allow public portal routes: /pay/*, /p/*, /payment/*, /delivery/*, /d/*
+  // Unconditionally allow public portal routes: /pay/*, /p/*, /payment/*, /delivery/*, /d/*, /quick-jobs/[token], /client/quick-job/*
   if (
     pathname.startsWith('/pay') ||
     pathname.startsWith('/p/') ||
     pathname.startsWith('/payment') ||
     pathname.startsWith('/delivery') ||
-    pathname.startsWith('/d/')
+    pathname.startsWith('/d/') ||
+    pathname.startsWith('/client/quick-job') ||
+    (pathname.startsWith('/quick-jobs/') && pathname !== '/quick-jobs/' && pathname.length > '/quick-jobs/'.length)
   ) {
     return NextResponse.next()
   }

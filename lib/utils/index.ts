@@ -343,19 +343,26 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 // ─── Centralized App URL & Payment Link Utilities ───────────
 // Delegated to authoritative gateway in ./app-url
 export {
+  getAppBaseUrl,
   getRuntimeUrl,
   getCustomerUrl,
   validateUrlSecurity,
   getProductionUrl,
   getAppUrl,
   appUrl,
+  buildAppUrl,
+  buildSecureLink,
   getPaymentLink,
   getDeliveryLink,
   buildPaymentUrl,
   buildInvoiceUrl,
   buildDeliveryUrl,
+  buildQuickJobUrl,
   buildQuickJobDeliveryUrl,
+  buildPaymentCallbackUrl,
   sanitizeRedirectUrl,
+  normalizeUrl,
+  isTrustedHost,
 } from './app-url'
 
 
