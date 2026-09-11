@@ -64,18 +64,18 @@ export function isTrustedHost(hostname: string): boolean {
  * Allows localhost, Cloud Run, and Vercel deployment URLs during testing and development.
  */
 export function getRuntimeUrl(context?: any): string {
-  // 1. Explicit string context passed
+  // 1. Browser context (Runtime origin)
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    const origin = window.location.origin.replace(/\/+$/, '')
+    if (origin) return origin
+  }
+
+  // 2. Explicit string context passed
   if (typeof context === 'string') {
     const trimmed = context.trim().replace(/\/+$/, '')
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
       return trimmed
     }
-  }
-
-  // 2. Browser context (Runtime origin)
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    const origin = window.location.origin.replace(/\/+$/, '')
-    if (origin) return origin
   }
 
   // 3. Request context (Server-side dynamic host detection from headers)
@@ -106,18 +106,19 @@ export function getRuntimeUrl(context?: any): string {
     } catch {}
   }
 
-  // 4. Environment Variables fallback
-  const envUrl =
-    process.env.APP_URL ||
-    process.env.NEXT_PUBLIC_APP_URL ||
-    (process.env.NEXT_PUBLIC_VERCEL_URL ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : null) ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+  // 4. Vercel deployment environment variables (Prioritize Vercel URL if available for runtime)
+  const vercelUrl = process.env.NEXT_PUBLIC_VERCEL_URL || process.env.VERCEL_URL
+  if (vercelUrl) {
+    return normalizeUrl(`https://${vercelUrl}`)
+  }
 
+  // 5. Configured APP_URL fallback
+  const envUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL
   if (envUrl) {
     return normalizeUrl(envUrl)
   }
 
-  // 5. Default fallback
+  // 6. Default fallback
   const isDev = process.env.NODE_ENV === 'development' || process.env.APP_ENV === 'development'
   return isDev ? DEFAULT_DEV_DOMAIN : CANONICAL_PRODUCTION_DOMAIN
 }
@@ -126,16 +127,25 @@ export function getRuntimeUrl(context?: any): string {
  * Returns the customer/public-facing URL base for link generation (Payments, Deliveries, Invoices, Emails).
  * 
  * Rules:
- * - If APP_ENV === 'production' or APP_URL is explicitly configured to lexmedia.gh -> returns https://lexmedia.gh
- * - If in Vercel testing (APP_ENV === 'testing' or APP_URL/VERCEL_URL is a vercel.app domain or accessed via Vercel) -> returns active Vercel domain
  * - If in Local Development -> returns http://localhost:3000 (or runtime origin)
- * - Vercel deployments are fully supported during testing without forced redirects or rewrites to lexmedia.gh.
+ * - If in Vercel testing (or any non-production env) -> returns active Vercel/Runtime domain
+ * - Only if APP_ENV === 'production' -> returns https://lexmedia.gh (or configured APP_URL)
  */
 export function getCustomerUrl(context?: any): string {
-  const appEnv = (process.env.APP_ENV || '').toLowerCase().trim()
+  const appEnv = (process.env.APP_ENV || process.env.NODE_ENV || '').toLowerCase().trim()
   const configuredAppUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL
 
-  // 1. Explicit production mode configuration
+  // 1. Local Development Mode
+  if (appEnv === 'development' || appEnv === 'local') {
+    // Attempt to get the actual runtime url (e.g. localhost:3000)
+    const runtime = getRuntimeUrl(context)
+    if (runtime && (runtime.includes('localhost') || runtime.includes('127.0.0.1'))) {
+      return runtime
+    }
+    return DEFAULT_DEV_DOMAIN
+  }
+
+  // 2. Explicit Production Mode
   if (appEnv === 'production') {
     if (configuredAppUrl && !configuredAppUrl.includes('localhost') && !configuredAppUrl.includes('127.0.0.1')) {
       return normalizeUrl(configuredAppUrl)
@@ -143,74 +153,34 @@ export function getCustomerUrl(context?: any): string {
     return CANONICAL_PRODUCTION_DOMAIN
   }
 
-  // 2. Explicit configured APP_URL or NEXT_PUBLIC_APP_URL
-  if (configuredAppUrl) {
-    const trimmed = configuredAppUrl.trim()
-    if (trimmed) {
-      return normalizeUrl(trimmed)
-    }
+  // 3. Testing / Preview / Vercel Mode (APP_ENV is not 'production')
+  
+  // Prefer the actual runtime URL (browser origin or request headers) if available
+  const runtimeUrl = getRuntimeUrl(context)
+  
+  // If runtime URL is a Vercel URL, Cloud Run URL, or local, use it directly
+  if (
+    runtimeUrl.includes('vercel.app') || 
+    runtimeUrl.includes('run.app') || 
+    runtimeUrl.includes('localhost') || 
+    runtimeUrl.includes('127.0.0.1')
+  ) {
+    return runtimeUrl
   }
-
-  // 3. Explicit context string passed (e.g. from request or helper)
-  if (typeof context === 'string') {
-    const trimmed = context.trim().replace(/\/+$/, '')
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      return trimmed
-    }
-  }
-
-  // 4. Server-side Request context
-  if (context && typeof context === 'object') {
-    try {
-      let headers: Headers | any = null
-      if ('headers' in context && context.headers) {
-        headers = context.headers
-      } else if (context instanceof Headers) {
-        headers = context
-      }
-
-      if (headers) {
-        const getHeader = (name: string): string | null => {
-          if (typeof headers.get === 'function') {
-            return headers.get(name)
-          }
-          return headers[name] || headers[name.toLowerCase()] || null
-        }
-
-        const host = getHeader('x-forwarded-host') || getHeader('host')
-        const proto = getHeader('x-forwarded-proto') || (host && host.includes('localhost') ? 'http' : 'https')
-        if (host) {
-          const cleanHost = host.split(',')[0].trim()
-          return `${proto}://${cleanHost}`.replace(/\/+$/, '')
-        }
-      }
-    } catch {}
-  }
-
-  // 5. Vercel deployment environment variables
+  
+  // Fallback to Vercel env vars if runtime detection failed
   const vercelUrl = process.env.NEXT_PUBLIC_VERCEL_URL || process.env.VERCEL_URL
   if (vercelUrl) {
     return normalizeUrl(`https://${vercelUrl}`)
   }
 
-  // 6. Browser context (Runtime origin)
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    const origin = window.location.origin.replace(/\/+$/, '')
-    if (origin) {
-      return origin
-    }
+  // If we have a configured APP_URL and we are on an unknown environment, use it
+  if (configuredAppUrl) {
+    return normalizeUrl(configuredAppUrl)
   }
 
-  // 7. Default fallback based on environment
-  if (appEnv === 'testing' || appEnv === 'preview') {
-    return CANONICAL_PRODUCTION_DOMAIN
-  }
-
-  if (process.env.NODE_ENV === 'development' || appEnv === 'development' || appEnv === 'local') {
-    return DEFAULT_DEV_DOMAIN
-  }
-
-  return CANONICAL_PRODUCTION_DOMAIN
+  // Absolute fallback
+  return runtimeUrl || CANONICAL_PRODUCTION_DOMAIN
 }
 
 /**
