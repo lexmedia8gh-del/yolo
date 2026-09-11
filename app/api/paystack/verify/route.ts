@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { FieldValue } from 'firebase-admin/firestore'
+import { buildDeliveryUrl } from '@/lib/utils'
+import { sendPaymentConfirmedDeliveryEmail } from '@/lib/services/brevo'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   try {
@@ -20,6 +24,7 @@ export async function GET(req: NextRequest) {
     let channel = 'card'
     let paidAt = new Date().toISOString()
     let token = queryToken || ''
+    let paystackMetadata: any = null
 
     if (!paystackSecret || paystackSecret.includes('xxxxxxxx') || paystackSecret.includes('placeholder') || isSandbox) {
       console.log(`[Paystack Verify - Sandbox Mode] Processing reference ${reference} without live Paystack key.`)
@@ -46,8 +51,9 @@ export async function GET(req: NextRequest) {
       currency = data.data.currency || 'GHS'
       channel = data.data.channel || 'card'
       paidAt = data.data.paid_at || new Date().toISOString()
+      paystackMetadata = data.data?.metadata || null
       if (!token) {
-        token = (data.data?.metadata?.token as string) || ''
+        token = (paystackMetadata?.token as string) || (paystackMetadata?.deliveryAccessToken as string) || ''
       }
     }
 
@@ -61,11 +67,24 @@ export async function GET(req: NextRequest) {
       .get()
 
     if (!existingPayments.empty) {
-      console.log(`[Verify] Reference ${reference} already processed — skipping`)
+      console.log(`[Verify] Reference ${reference} already processed — returning success`)
+      const paymentData = existingPayments.docs[0].data()
+
+      // Resolve delivery access token to return even on duplicate call
+      let returnToken = token || paymentData.deliveryAccessToken || ''
+      if (!returnToken && paymentData.invoiceId) {
+        const dSnap = await adminDb.collection('deliveries').where('invoiceId', '==', paymentData.invoiceId).limit(1).get()
+        if (!dSnap.empty) returnToken = dSnap.docs[0].data().accessToken
+      }
+
       return NextResponse.json({
         status: 'success',
         message: 'Transaction already verified and processed',
         reference,
+        amount: paymentData.amount || amountPaid,
+        currency: paymentData.currency || currency,
+        deliveryAccessToken: returnToken,
+        deliveryUrl: returnToken ? buildDeliveryUrl(returnToken, req) : null,
       })
     }
     // ─────────────────────────────────────────────────────────
@@ -100,13 +119,16 @@ export async function GET(req: NextRequest) {
           }
         }
         if (!linkData) {
-          // If no clientLink exists, create/use a synthetic linkData object referencing invoiceId / quickJobId / projectId
+          // Synthetic linkData object referencing invoiceId / quickJobId / projectId
           linkData = {
             invoiceId: deliveryData.invoiceId || null,
             quickJobId: deliveryData.quickJobId || null,
             projectId: deliveryData.projectId || null,
+            deliveryId: deliveriesSnap.docs[0].id,
+            deliveryAccessToken: deliveryData.accessToken || token,
             clientId: deliveryData.clientId || '',
             clientName: deliveryData.clientName || 'Client',
+            clientEmail: deliveryData.clientEmail || '',
             invoiceNumber: deliveryData.invoiceNumber || '',
             status: 'Pending',
           }
@@ -128,6 +150,8 @@ export async function GET(req: NextRequest) {
         status: 'success',
         message: 'Transaction already verified and processed',
         reference,
+        deliveryAccessToken: linkData.deliveryAccessToken || token,
+        deliveryUrl: buildDeliveryUrl(linkData.deliveryAccessToken || token, req),
       })
     }
 
@@ -225,6 +249,73 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // ── 7.5 UNLOCK ASSOCIATED DELIVERY ─────────────────────────
+    let resolvedDeliveryAccessToken = linkData.deliveryAccessToken || ''
+    let deliveryDocToUnlock: any = null
+
+    if (linkData.deliveryId) {
+      const dRef = adminDb.collection('deliveries').doc(linkData.deliveryId)
+      const dSnap = await dRef.get()
+      if (dSnap.exists) {
+        deliveryDocToUnlock = dSnap
+        resolvedDeliveryAccessToken = dSnap.data()?.accessToken || resolvedDeliveryAccessToken
+      }
+    }
+
+    if (!deliveryDocToUnlock && linkData.invoiceId) {
+      const dSnap = await adminDb.collection('deliveries').where('invoiceId', '==', linkData.invoiceId).limit(1).get()
+      if (!dSnap.empty) {
+        deliveryDocToUnlock = dSnap.docs[0]
+        resolvedDeliveryAccessToken = dSnap.docs[0].data()?.accessToken || resolvedDeliveryAccessToken
+      }
+    }
+
+    if (!deliveryDocToUnlock && linkData.quickJobId) {
+      const dSnap = await adminDb.collection('deliveries').where('quickJobId', '==', linkData.quickJobId).limit(1).get()
+      if (!dSnap.empty) {
+        deliveryDocToUnlock = dSnap.docs[0]
+        resolvedDeliveryAccessToken = dSnap.docs[0].data()?.accessToken || resolvedDeliveryAccessToken
+      }
+    }
+
+    if (!deliveryDocToUnlock && linkData.projectId) {
+      const dSnap = await adminDb.collection('deliveries').where('projectId', '==', linkData.projectId).limit(1).get()
+      if (!dSnap.empty) {
+        deliveryDocToUnlock = dSnap.docs[0]
+        resolvedDeliveryAccessToken = dSnap.docs[0].data()?.accessToken || resolvedDeliveryAccessToken
+      }
+    }
+
+    if (deliveryDocToUnlock) {
+      batch.update(deliveryDocToUnlock.ref, {
+        isReleased: true,
+        requiresFullPayment: false,
+        status: 'Delivered',
+        releasedAt: FieldValue.serverTimestamp(),
+        releasedBy: 'payment_verified',
+        unlockedAt: FieldValue.serverTimestamp(),
+        unlockedBy: 'paystack_verification',
+        paystackReference: reference,
+        updatedAt: FieldValue.serverTimestamp(),
+      })
+
+      // Delivery unlocked activity log
+      const deliveryActivityRef = adminDb.collection('activityLogs').doc()
+      batch.set(deliveryActivityRef, {
+        event: 'delivery_unlocked',
+        description: `Deliverables automatically unlocked following verified payment of ${currency} ${amountPaid.toLocaleString()}`,
+        entityId: deliveryDocToUnlock.id,
+        entityType: 'delivery',
+        clientId: linkData.clientId || '',
+        clientName: linkData.clientName || '',
+        projectId: linkData.projectId || '',
+        quickJobId: linkData.quickJobId || '',
+        performedBy: 'system',
+        metadata: { reference, amountPaid, deliveryAccessToken: resolvedDeliveryAccessToken },
+        createdAt: FieldValue.serverTimestamp(),
+      })
+    }
+
     // 8. Create Payment Record
     const paymentRef = adminDb.collection('payments').doc()
     const paymentId = paymentRef.id
@@ -235,6 +326,8 @@ export async function GET(req: NextRequest) {
       clientName: linkData.clientName || '',
       projectId: linkData.projectId || '',
       quickJobId: linkData.quickJobId || '',
+      deliveryId: deliveryDocToUnlock?.id || linkData.deliveryId || '',
+      deliveryAccessToken: resolvedDeliveryAccessToken,
       paystackReference: reference,
       amount: amountPaid,
       currency: currency || linkData.currency || 'GHS',
@@ -285,6 +378,40 @@ export async function GET(req: NextRequest) {
 
     await batch.commit()
 
+    // ── 11. DISPATCH BREVO PAYMENT CONFIRMED EMAIL ─────────────────────
+    if (resolvedDeliveryAccessToken) {
+      try {
+        let recipientEmail = linkData.clientEmail || ''
+        if (!recipientEmail && linkData.clientId) {
+          const cSnap = await adminDb.collection('clients').doc(linkData.clientId).get()
+          if (cSnap.exists) recipientEmail = cSnap.data()?.email || ''
+        }
+
+        if (recipientEmail) {
+          const deliveryUrl = buildDeliveryUrl(resolvedDeliveryAccessToken, req)
+
+          let lexmediaLogoUrl = ''
+          const bSnap = await adminDb.collection('settings').doc('branding').get()
+          if (bSnap.exists) lexmediaLogoUrl = bSnap.data()?.logoUrl || ''
+
+          await sendPaymentConfirmedDeliveryEmail({
+            toEmail: recipientEmail,
+            clientName: linkData.clientName || 'Valued Client',
+            projectName: linkData.projectName || deliveryDocToUnlock?.data()?.projectName || 'Your LexMedia Project',
+            deliveryUrl,
+            amountPaid,
+            invoiceNumber,
+            lexmediaLogoUrl,
+          })
+          console.log(`[Verify] ✅ Payment confirmation email sent to ${recipientEmail}`)
+        }
+      } catch (emailErr) {
+        console.warn('[Verify] Post-payment confirmation email warning (non-blocking):', emailErr)
+      }
+    }
+
+    const finalDeliveryUrl = resolvedDeliveryAccessToken ? buildDeliveryUrl(resolvedDeliveryAccessToken, req) : null
+
     return NextResponse.json({
       status: 'success',
       reference,
@@ -292,7 +419,8 @@ export async function GET(req: NextRequest) {
       currency: currency || 'GHS',
       invoiceNumber: invoiceNumber || linkData.invoiceNumber || '',
       clientName: linkData.clientName || '',
-      deliveryAccessToken: linkData.deliveryAccessToken || (linkData.quickJobId ? linkData.quickJobId : token),
+      deliveryAccessToken: resolvedDeliveryAccessToken,
+      deliveryUrl: finalDeliveryUrl,
     })
   } catch (error: any) {
     console.error('Paystack verification error:', error)
@@ -306,3 +434,4 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   return GET(req)
 }
+

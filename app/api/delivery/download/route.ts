@@ -121,6 +121,65 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 })
     }
 
+    // Check expiration
+    if (deliveryData.expiresAt) {
+      let expiresDate: Date
+      if (
+        deliveryData.expiresAt instanceof Timestamp
+      ) {
+        expiresDate = deliveryData.expiresAt.toDate()
+      } else if (deliveryData.expiresAt?.seconds) {
+        expiresDate = new Date(deliveryData.expiresAt.seconds * 1000)
+      } else {
+        expiresDate = new Date(deliveryData.expiresAt)
+      }
+      if (expiresDate.getTime() < Date.now()) {
+        return NextResponse.json(
+          { error: 'This delivery link has expired. Please contact LexMedia for a new link.', isExpired: true },
+          { status: 410 }
+        )
+      }
+    }
+
+    // Security Gate: Check payment lock before returning download URL
+    if (deliveryData.requiresFullPayment && !deliveryData.isReleased) {
+      let remainingBalance = 1
+      try {
+        const adminDb = getAdminDb()
+        if (deliveryData.invoiceId) {
+          const invSnap = await adminDb.collection(COLLECTIONS.INVOICES).doc(deliveryData.invoiceId).get()
+          if (invSnap.exists) {
+            const inv = invSnap.data()!
+            remainingBalance = inv.balanceDue !== undefined ? inv.balanceDue : Math.max(0, (inv.total || 0) - (inv.amountPaid || 0))
+          }
+        } else if (deliveryData.quickJobId) {
+          const qjSnap = await adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(deliveryData.quickJobId).get()
+          if (qjSnap.exists) {
+            const qj = qjSnap.data()!
+            remainingBalance = qj.outstandingBalance !== undefined ? qj.outstandingBalance : Math.max(0, (qj.originalAgreedPrice || 0) - (qj.amountPaid || 0))
+          }
+        } else if (deliveryData.projectId) {
+          const projSnap = await adminDb.collection(COLLECTIONS.PROJECTS).doc(deliveryData.projectId).get()
+          if (projSnap.exists) {
+            const proj = projSnap.data()!
+            remainingBalance = proj.outstandingBalance !== undefined ? proj.outstandingBalance : Math.max(0, (proj.price || 0) - (proj.amountPaid || 0))
+          }
+        }
+      } catch (checkErr) {
+        console.warn('[Download] Payment verification error:', checkErr)
+      }
+
+      if (remainingBalance > 0) {
+        return NextResponse.json(
+          {
+            error: 'Deliverables are locked. Please complete the remaining payment to download files.',
+            isLocked: true,
+          },
+          { status: 403 }
+        )
+      }
+    }
+
     // Verify ownership
     const isMatchingDelivery =
       fileData.deliveryId === deliveryId ||

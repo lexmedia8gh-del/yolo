@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { FieldValue } from 'firebase-admin/firestore'
+import { buildDeliveryUrl } from '@/lib/utils'
+import { sendPaymentConfirmedDeliveryEmail } from '@/lib/services/brevo'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,7 +53,11 @@ export async function POST(req: NextRequest) {
 
     // Extract metadata — token is stored in metadata.token on initialize
     const metadata = txData?.metadata || {}
-    const token = metadata.token || ''
+    const token = metadata.token || metadata.deliveryAccessToken || ''
+    const metadataDeliveryId = metadata.deliveryId || ''
+    const metadataInvoiceId = metadata.invoiceId || ''
+    const metadataQuickJobId = metadata.quickJobId || ''
+    const metadataProjectId = metadata.projectId || ''
 
     if (!reference) {
       return NextResponse.json({ error: 'Missing reference' }, { status: 400 })
@@ -117,14 +123,15 @@ export async function POST(req: NextRequest) {
     }
 
     // Update Invoice
-    let invoiceNumber = linkData?.invoiceNumber || ''
-    let clientName = linkData?.clientName || txData?.customer?.name || ''
-    let clientId = linkData?.clientId || ''
-    let projectId = linkData?.projectId || ''
-    let quickJobId = linkData?.quickJobId || ''
+    let invoiceNumber = linkData?.invoiceNumber || metadata.invoiceNumber || ''
+    let clientName = linkData?.clientName || metadata.clientName || txData?.customer?.name || ''
+    let clientId = linkData?.clientId || metadata.clientId || ''
+    let projectId = linkData?.projectId || metadataProjectId || ''
+    let quickJobId = linkData?.quickJobId || metadataQuickJobId || ''
+    const invoiceId = linkData?.invoiceId || metadataInvoiceId || ''
 
-    if (linkData?.invoiceId) {
-      const invoiceRef = adminDb.collection('invoices').doc(linkData.invoiceId)
+    if (invoiceId) {
+      const invoiceRef = adminDb.collection('invoices').doc(invoiceId)
       const invoiceSnap = await invoiceRef.get()
       if (invoiceSnap.exists) {
         const inv = invoiceSnap.data()!
@@ -204,16 +211,86 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── UNLOCK ASSOCIATED DELIVERY ─────────────────────────────────────
+    let resolvedDeliveryAccessToken = linkData?.deliveryAccessToken || metadata.deliveryAccessToken || ''
+    let deliveryDocToUnlock: any = null
+
+    const targetDeliveryId = linkData?.deliveryId || metadataDeliveryId
+    if (targetDeliveryId) {
+      const dRef = adminDb.collection('deliveries').doc(targetDeliveryId)
+      const dSnap = await dRef.get()
+      if (dSnap.exists) {
+        deliveryDocToUnlock = dSnap
+        resolvedDeliveryAccessToken = dSnap.data()?.accessToken || resolvedDeliveryAccessToken
+      }
+    }
+
+    if (!deliveryDocToUnlock && invoiceId) {
+      const dSnap = await adminDb.collection('deliveries').where('invoiceId', '==', invoiceId).limit(1).get()
+      if (!dSnap.empty) {
+        deliveryDocToUnlock = dSnap.docs[0]
+        resolvedDeliveryAccessToken = dSnap.docs[0].data()?.accessToken || resolvedDeliveryAccessToken
+      }
+    }
+
+    if (!deliveryDocToUnlock && quickJobId) {
+      const dSnap = await adminDb.collection('deliveries').where('quickJobId', '==', quickJobId).limit(1).get()
+      if (!dSnap.empty) {
+        deliveryDocToUnlock = dSnap.docs[0]
+        resolvedDeliveryAccessToken = dSnap.docs[0].data()?.accessToken || resolvedDeliveryAccessToken
+      }
+    }
+
+    if (!deliveryDocToUnlock && projectId) {
+      const dSnap = await adminDb.collection('deliveries').where('projectId', '==', projectId).limit(1).get()
+      if (!dSnap.empty) {
+        deliveryDocToUnlock = dSnap.docs[0]
+        resolvedDeliveryAccessToken = dSnap.docs[0].data()?.accessToken || resolvedDeliveryAccessToken
+      }
+    }
+
+    if (deliveryDocToUnlock) {
+      batch.update(deliveryDocToUnlock.ref, {
+        isReleased: true,
+        requiresFullPayment: false,
+        status: 'Delivered',
+        releasedAt: FieldValue.serverTimestamp(),
+        releasedBy: 'payment_verified',
+        unlockedAt: FieldValue.serverTimestamp(),
+        unlockedBy: 'paystack_webhook',
+        paystackReference: reference,
+        updatedAt: FieldValue.serverTimestamp(),
+      })
+
+      // Delivery unlocked activity log
+      const deliveryActivityRef = adminDb.collection('activityLogs').doc()
+      batch.set(deliveryActivityRef, {
+        event: 'delivery_unlocked',
+        description: `Deliverables automatically unlocked following verified payment of ${currency} ${amountPaid.toLocaleString()}`,
+        entityId: deliveryDocToUnlock.id,
+        entityType: 'delivery',
+        clientId,
+        clientName,
+        projectId,
+        quickJobId,
+        performedBy: 'system',
+        metadata: { reference, amountPaid, deliveryAccessToken: resolvedDeliveryAccessToken },
+        createdAt: FieldValue.serverTimestamp(),
+      })
+    }
+
     // Create Payment Record
     const paymentRef = adminDb.collection('payments').doc()
     const paymentId = paymentRef.id
     batch.set(paymentRef, {
-      invoiceId: linkData?.invoiceId || '',
+      invoiceId,
       invoiceNumber,
       clientId,
       clientName,
       projectId,
       quickJobId,
+      deliveryId: deliveryDocToUnlock?.id || targetDeliveryId || '',
+      deliveryAccessToken: resolvedDeliveryAccessToken,
       paystackReference: reference,
       amount: amountPaid,
       currency,
@@ -230,7 +307,7 @@ export async function POST(req: NextRequest) {
     batch.set(activityRef, {
       event: 'payment_completed',
       description: `Payment of ${currency} ${amountPaid.toLocaleString()} received${invoiceNumber ? ` for Invoice #${invoiceNumber}` : ''}`,
-      entityId: linkData?.invoiceId || paymentId,
+      entityId: invoiceId || paymentId,
       entityType: 'payment',
       clientId,
       clientName,
@@ -251,7 +328,7 @@ export async function POST(req: NextRequest) {
       isRead: false,
       clientId,
       clientName,
-      invoiceId: linkData?.invoiceId || '',
+      invoiceId,
       invoiceNumber,
       projectId,
       quickJobId,
@@ -266,6 +343,38 @@ export async function POST(req: NextRequest) {
 
     console.log(`[Webhook] ✅ Payment processed: ${reference} — ${currency} ${amountPaid} from ${clientName}`)
 
+    // ── DISPATCH BREVO CONFIRMATION EMAIL ─────────────────────────────
+    if (resolvedDeliveryAccessToken) {
+      try {
+        let recipientEmail = linkData?.clientEmail || txData?.customer?.email || ''
+        if (!recipientEmail && clientId) {
+          const cSnap = await adminDb.collection('clients').doc(clientId).get()
+          if (cSnap.exists) recipientEmail = cSnap.data()?.email || ''
+        }
+
+        if (recipientEmail) {
+          const deliveryUrl = buildDeliveryUrl(resolvedDeliveryAccessToken, req)
+
+          let lexmediaLogoUrl = ''
+          const bSnap = await adminDb.collection('settings').doc('branding').get()
+          if (bSnap.exists) lexmediaLogoUrl = bSnap.data()?.logoUrl || ''
+
+          await sendPaymentConfirmedDeliveryEmail({
+            toEmail: recipientEmail,
+            clientName: clientName || 'Valued Client',
+            projectName: linkData?.projectName || deliveryDocToUnlock?.data()?.projectName || 'Your LexMedia Project',
+            deliveryUrl,
+            amountPaid,
+            invoiceNumber,
+            lexmediaLogoUrl,
+          })
+          console.log(`[Webhook] ✅ Confirmation email sent to ${recipientEmail}`)
+        }
+      } catch (emailErr) {
+        console.warn('[Webhook] Post-payment confirmation email warning (non-blocking):', emailErr)
+      }
+    }
+
     return NextResponse.json({ received: true, success: true })
   } catch (error: any) {
     console.error('[Webhook] Unhandled error:', error?.message)
@@ -273,3 +382,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ received: true, error: error?.message }, { status: 200 })
   }
 }
+

@@ -2,17 +2,24 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb, requireAdmin } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 import { FieldValue } from 'firebase-admin/firestore'
-import { sendDeliveryReadyEmail } from '@/lib/services/brevo'
-import { appUrl, getDeliveryLink } from '@/lib/utils'
+import { sendDeliveryReadyEmail, sendDeliveryPaymentRequiredEmail } from '@/lib/services/brevo'
+import { appUrl, getDeliveryLink, buildDeliveryUrl, buildPaymentUrl } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/delivery/release
- * Body: { deliveryId: string, release: boolean }
+ * Body: { deliveryId: string, release: boolean, reason?: string, adminOverride?: boolean, resendEmail?: boolean }
  *
  * Atomically updates the delivery release state using the Admin SDK.
- * Returns the current accessToken so the admin can build the portal URL from server truth.
+ * Calculates server-side outstanding balance.
+ * If balance > 0 and not adminOverride:
+ *   - Deliverables are marked Ready, but delivery access remains locked.
+ *   - Creates/retrieves secure payment link.
+ *   - Sends Brevo Delivery Payment Required email with "Complete Payment & Access Your Deliverables" button.
+ * If balance <= 0 or adminOverride:
+ *   - Deliverables are unlocked and marked Delivered.
+ *   - Sends Brevo Delivery Ready email with secure delivery link.
  */
 export async function POST(req: NextRequest) {
   const auth = await requireAdmin(req)
@@ -51,127 +58,228 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Check if project, invoice, or quick job has outstanding balance to mark as admin override
-    let isPaymentOutstanding = true
+    // ─── Server-Side Balance Calculation ─────────────────────────────
+    let projectTotal = 0
+    let alreadyPaid = 0
+    let outstandingBalance = 0
+    let paymentLinkToken = ''
+
     if (deliveryData.invoiceId) {
       try {
         const invSnap = await adminDb.collection(COLLECTIONS.INVOICES).doc(deliveryData.invoiceId).get()
         if (invSnap.exists) {
           const invData = invSnap.data()!
-          if (invData.status === 'Paid' || (invData.balanceDue !== undefined && invData.balanceDue <= 0)) {
-            isPaymentOutstanding = false
-          }
+          projectTotal = Number(invData.total || invData.totalAmount || 0)
+          alreadyPaid = Number(invData.amountPaid || 0)
+          outstandingBalance = Math.max(0, Number(invData.balanceDue !== undefined ? invData.balanceDue : (projectTotal - alreadyPaid)))
+          if (invData.paymentLinkToken) paymentLinkToken = invData.paymentLinkToken
         }
       } catch (e) {
-        console.warn('Could not verify invoice status for delivery release:', e)
+        console.warn('[Delivery Release] Error fetching invoice balance:', e)
       }
     } else if (deliveryData.quickJobId) {
       try {
         const qjSnap = await adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(deliveryData.quickJobId).get()
         if (qjSnap.exists) {
           const qjData = qjSnap.data()!
-          
-          // Verify payment is actually verified/"paid"
-          const isPaid = qjData.paymentStatus === 'Paid' || 
-            (Number(qjData.outstandingBalance) <= 0 && Number(qjData.amountPaid) >= Number(qjData.originalAgreedPrice))
-          
-          if (willRelease && !isPaid) {
-            return NextResponse.json({ error: 'Cannot submit delivery. Quick Job payment must be confirmed first.' }, { status: 400 })
-          }
-          if (isPaid) {
-            isPaymentOutstanding = false
-          }
-        } else if (willRelease) {
-          return NextResponse.json({ error: 'Associated Quick Job not found.' }, { status: 404 })
+          projectTotal = Number(qjData.originalAgreedPrice || qjData.amount || 0)
+          alreadyPaid = Number(qjData.amountPaid || 0)
+          outstandingBalance = Math.max(0, Number(qjData.outstandingBalance !== undefined ? qjData.outstandingBalance : (projectTotal - alreadyPaid)))
+          if (qjData.paymentLinkToken) paymentLinkToken = qjData.paymentLinkToken
         }
       } catch (e) {
-        console.warn('Could not verify quick job status for delivery release:', e)
-        if (willRelease) {
-          return NextResponse.json({ error: 'Failed to verify payment status' }, { status: 500 })
+        console.warn('[Delivery Release] Error fetching quick job balance:', e)
+      }
+    } else if (deliveryData.projectId) {
+      try {
+        const projSnap = await adminDb.collection(COLLECTIONS.PROJECTS).doc(deliveryData.projectId).get()
+        if (projSnap.exists) {
+          const projData = projSnap.data()!
+          projectTotal = Number(projData.price || projData.totalAmount || 0)
+          alreadyPaid = Number(projData.amountPaid || 0)
+          outstandingBalance = Math.max(0, Number(projData.outstandingBalance !== undefined ? projData.outstandingBalance : (projectTotal - alreadyPaid)))
         }
+      } catch (e) {
+        console.warn('[Delivery Release] Error fetching project balance:', e)
       }
     }
 
-    const isAdminOverride = willRelease && (explicitAdminOverride ?? isPaymentOutstanding)
+    // Determine if payment is outstanding
+    const isPaymentOutstanding = outstandingBalance > 0
+    const isAdminOverride = willRelease && Boolean(explicitAdminOverride)
     const adminUser = auth.email || 'Authorized Administrator'
 
+    // Fetch client email from Firestore (server truth)
+    let clientEmail = deliveryData.clientEmail || ''
+    let clientName = deliveryData.clientName || 'Valued Client'
+    let clientLogoUrl = ''
+
+    if (deliveryData.clientId) {
+      try {
+        const clientSnap = await adminDb.collection(COLLECTIONS.CLIENTS).doc(deliveryData.clientId).get()
+        if (clientSnap.exists) {
+          const clientData = clientSnap.data()!
+          if (clientData.email) clientEmail = clientData.email
+          if (clientData.fullName) clientName = clientData.fullName
+          if (clientData.photoURL) clientLogoUrl = clientData.photoURL
+        }
+      } catch (e) {
+        console.warn('[Delivery Release] Error fetching client details:', e)
+      }
+    }
+
+    // If payment is outstanding and we don't have a token, look up existing active link or create one
+    if (isPaymentOutstanding && !paymentLinkToken) {
+      try {
+        const linksQuery = await adminDb.collection(COLLECTIONS.CLIENT_LINKS)
+          .where('active', '==', true)
+          .get()
+
+        for (const doc of linksQuery.docs) {
+          const lData = doc.data()
+          if (
+            (deliveryData.invoiceId && lData.invoiceId === deliveryData.invoiceId) ||
+            (deliveryData.quickJobId && lData.quickJobId === deliveryData.quickJobId) ||
+            (deliveryData.projectId && lData.projectId === deliveryData.projectId) ||
+            (lData.deliveryId === deliveryId)
+          ) {
+            paymentLinkToken = lData.token
+            break
+          }
+        }
+
+        if (!paymentLinkToken) {
+          const newToken = `pay_${Math.random().toString(36).substring(2, 10)}${Date.now().toString(36)}`
+          await adminDb.collection(COLLECTIONS.CLIENT_LINKS).add({
+            token: newToken,
+            clientId: deliveryData.clientId || null,
+            clientName: clientName || deliveryData.clientName || '',
+            clientEmail: clientEmail || deliveryData.clientEmail || '',
+            projectId: deliveryData.projectId || null,
+            projectName: deliveryData.projectName || 'Project Deliverables',
+            invoiceId: deliveryData.invoiceId || null,
+            quickJobId: deliveryData.quickJobId || null,
+            deliveryId: deliveryId,
+            deliveryAccessToken: deliveryData.accessToken || null,
+            amount: outstandingBalance,
+            currency: 'GHS',
+            description: `Payment for ${deliveryData.projectName || 'Project Deliverables'}`,
+            active: true,
+            createdAt: FieldValue.serverTimestamp(),
+          })
+          paymentLinkToken = newToken
+        }
+      } catch (e) {
+        console.warn('[Delivery Release] Error creating/retrieving client payment link:', e)
+      }
+    }
+
     const updates: any = {
-      isReleased: willRelease,
       updatedAt: FieldValue.serverTimestamp(),
     }
 
     let emailNotificationStatus: { sent: boolean; messageId?: string; error?: string; skipped?: boolean } = { sent: false }
 
     if (willRelease) {
-      updates.releasedAt = FieldValue.serverTimestamp()
-      updates.releasedBy = adminUser
-      
-      if (isAdminOverride) {
-        updates.adminOverride = true
-        updates.adminOverrideReason = reason?.trim() || 'Manual administrator release override'
-        updates.adminOverrideAt = FieldValue.serverTimestamp()
-        updates.adminOverrideBy = adminUser
-      } else {
-        updates.adminOverride = false
-        updates.adminOverrideReason = null
-        updates.adminOverrideAt = null
-        updates.adminOverrideBy = null
-      }
-
-      // Escalate status if still draft
-      if (!deliveryData.status || deliveryData.status === 'Not Ready') {
+      if (isPaymentOutstanding && !isAdminOverride) {
+        // Locked state: deliverables are ready, but full payment is required to unlock downloads
+        updates.isReleased = false
+        updates.requiresFullPayment = true
         updates.status = 'Ready for Delivery'
+        updates.paymentLinkToken = paymentLinkToken || null
+      } else {
+        // Unlocked state: either paid in full or administrator override granted
+        updates.isReleased = true
+        updates.requiresFullPayment = false
+        updates.releasedAt = FieldValue.serverTimestamp()
+        updates.releasedBy = adminUser
+        updates.status = 'Delivered'
+
+        if (isAdminOverride) {
+          updates.adminOverride = true
+          updates.adminOverrideReason = reason?.trim() || 'Manual administrator release override'
+          updates.adminOverrideAt = FieldValue.serverTimestamp()
+          updates.adminOverrideBy = adminUser
+        } else {
+          updates.adminOverride = false
+          updates.adminOverrideReason = null
+          updates.adminOverrideAt = null
+          updates.adminOverrideBy = null
+        }
       }
 
       // Check duplicate notification email flag
       if (deliveryData.notifyEmailSent && !resendEmail) {
         emailNotificationStatus = { sent: false, skipped: true, error: 'Email notification was already sent for this delivery' }
       } else {
-        // Fetch client email from Firestore (server truth)
-        let clientEmail = deliveryData.clientEmail || ''
-        let clientName = deliveryData.clientName || 'Valued Client'
-        let clientLogoUrl = ''
-
-        if (deliveryData.clientId) {
-          const clientSnap = await adminDb.collection(COLLECTIONS.CLIENTS).doc(deliveryData.clientId).get()
-          if (clientSnap.exists) {
-            const clientData = clientSnap.data()!
-            if (clientData.email) clientEmail = clientData.email
-            if (clientData.fullName) clientName = clientData.fullName
-            if (clientData.photoURL) clientLogoUrl = clientData.photoURL
-          }
-        }
-
         // Fetch brand logo
         let lexmediaLogoUrl = ''
-        const brandingSnap = await adminDb.collection(COLLECTIONS.SETTINGS).doc('branding').get()
-        if (brandingSnap.exists) {
-          const bData = brandingSnap.data()!
-          if (bData.logoUrl) lexmediaLogoUrl = bData.logoUrl
+        try {
+          const brandingSnap = await adminDb.collection(COLLECTIONS.SETTINGS).doc('branding').get()
+          if (brandingSnap.exists) {
+            const bData = brandingSnap.data()!
+            if (bData.logoUrl) lexmediaLogoUrl = bData.logoUrl
+          }
+        } catch (e) {
+          console.warn('[Delivery Release] Could not fetch branding logo:', e)
         }
 
         if (clientEmail) {
-          const publicUrl = getDeliveryLink(deliveryData.accessToken, req)
-          const emailRes = await sendDeliveryReadyEmail({
-            toEmail: clientEmail,
-            clientName,
-            projectName: deliveryData.projectName || 'Your Project',
-            deliveryUrl: publicUrl,
-            lexmediaLogoUrl,
-            clientLogoUrl,
-          })
+          const deliveryUrl = buildDeliveryUrl(deliveryData.accessToken, req)
 
-          if (emailRes.success) {
-            updates.notifyEmailSent = true
-            updates.notifyEmailSentAt = FieldValue.serverTimestamp()
-            updates.notifyEmailMessageId = emailRes.messageId || null
-            updates.notifyEmailError = null
-            emailNotificationStatus = { sent: true, messageId: emailRes.messageId }
+          if (isPaymentOutstanding && !isAdminOverride) {
+            // Send Delivery Payment Required email with "Complete Payment & Access Your Deliverables"
+            const paymentUrl = buildPaymentUrl(paymentLinkToken, req)
+            const emailRes = await sendDeliveryPaymentRequiredEmail({
+              toEmail: clientEmail,
+              clientName,
+              projectName: deliveryData.projectName || 'Your Project',
+              amountDue: outstandingBalance,
+              amountPaid: alreadyPaid,
+              projectTotal: projectTotal,
+              currencySymbol: 'GH₵',
+              paymentUrl,
+              deliveryUrl,
+              buttonText: 'Complete Payment & Access Your Deliverables',
+              lexmediaLogoUrl,
+              clientLogoUrl,
+            })
+
+            if (emailRes.success) {
+              updates.notifyEmailSent = true
+              updates.notifyEmailSentAt = FieldValue.serverTimestamp()
+              updates.notifyEmailMessageId = emailRes.messageId || null
+              updates.notifyEmailError = null
+              emailNotificationStatus = { sent: true, messageId: emailRes.messageId }
+            } else {
+              updates.notifyEmailSent = false
+              updates.notifyEmailError = emailRes.error || 'Failed to send email via Brevo'
+              emailNotificationStatus = { sent: false, error: emailRes.error }
+              console.warn(`[Delivery Release] Brevo payment email notification failed for delivery ${deliveryId}:`, emailRes.error)
+            }
           } else {
-            updates.notifyEmailSent = false
-            updates.notifyEmailError = emailRes.error || 'Failed to send email via Brevo'
-            emailNotificationStatus = { sent: false, error: emailRes.error }
-            console.warn(`[Delivery Release] Brevo email notification failed for delivery ${deliveryId}:`, emailRes.error)
+            // Send standard Delivery Ready email
+            const emailRes = await sendDeliveryReadyEmail({
+              toEmail: clientEmail,
+              clientName,
+              projectName: deliveryData.projectName || 'Your Project',
+              deliveryUrl,
+              lexmediaLogoUrl,
+              clientLogoUrl,
+            })
+
+            if (emailRes.success) {
+              updates.notifyEmailSent = true
+              updates.notifyEmailSentAt = FieldValue.serverTimestamp()
+              updates.notifyEmailMessageId = emailRes.messageId || null
+              updates.notifyEmailError = null
+              emailNotificationStatus = { sent: true, messageId: emailRes.messageId }
+            } else {
+              updates.notifyEmailSent = false
+              updates.notifyEmailError = emailRes.error || 'Failed to send email via Brevo'
+              emailNotificationStatus = { sent: false, error: emailRes.error }
+              console.warn(`[Delivery Release] Brevo ready email notification failed for delivery ${deliveryId}:`, emailRes.error)
+            }
           }
         } else {
           updates.notifyEmailSent = false
@@ -181,17 +289,18 @@ export async function POST(req: NextRequest) {
         }
       }
     } else {
+      // Revert/revoke release
+      updates.isReleased = false
       updates.releasedAt = null
-      // Revert status to Not Ready if revoking
-      if (deliveryData.status === 'Ready for Delivery') {
+      if (deliveryData.status === 'Ready for Delivery' || deliveryData.status === 'Delivered') {
         updates.status = 'Not Ready'
       }
     }
 
     await deliveryRef.update(updates)
 
-    // Update associated Quick Job status if applicable
-    if (deliveryData.quickJobId && willRelease) {
+    // Update associated Quick Job status if applicable and fully released
+    if (deliveryData.quickJobId && updates.isReleased) {
       try {
         const qjRef = adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(deliveryData.quickJobId)
         await qjRef.update({
@@ -206,16 +315,23 @@ export async function POST(req: NextRequest) {
 
     // Log activity
     if (willRelease) {
+      const isLocked = updates.isReleased === false
       await adminDb.collection(COLLECTIONS.ACTIVITY_LOGS).add({
-        event: 'delivery_released',
-        description: isAdminOverride
-          ? `Admin Override: Delivery manually released for "${deliveryData.projectName || 'Project'}" by ${adminUser}${updates.adminOverrideReason ? ` (Reason: ${updates.adminOverrideReason})` : ''}`
-          : `Delivery released to client for "${deliveryData.projectName || 'Project'}"${emailNotificationStatus.sent ? ' (Email sent via Brevo)' : ''}`,
+        event: isLocked ? 'delivery_ready_locked' : 'delivery_released',
+        description: isLocked
+          ? `Deliverables ready for "${deliveryData.projectName || 'Project'}" — access locked pending payment of GH₵${outstandingBalance.toFixed(2)}${emailNotificationStatus.sent ? ' (Payment notice sent via Brevo)' : ''}`
+          : isAdminOverride
+            ? `Admin Override: Delivery manually released for "${deliveryData.projectName || 'Project'}" by ${adminUser}${updates.adminOverrideReason ? ` (Reason: ${updates.adminOverrideReason})` : ''}`
+            : `Delivery released to client for "${deliveryData.projectName || 'Project'}"${emailNotificationStatus.sent ? ' (Email sent via Brevo)' : ''}`,
         clientId: deliveryData.clientId,
         clientName: deliveryData.clientName,
         entityId: deliveryId,
         entityType: 'delivery',
         metadata: {
+          isLocked,
+          outstandingBalance,
+          alreadyPaid,
+          projectTotal,
           adminOverride: isAdminOverride,
           reason: updates.adminOverrideReason || null,
           invoiceId: deliveryData.invoiceId || null,
@@ -244,13 +360,21 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // Return the accessToken from Firestore (source of truth) so admin builds URL from this
+    const deliveryPublicUrl = buildDeliveryUrl(deliveryData.accessToken, req)
+    const paymentPublicUrl = paymentLinkToken ? buildPaymentUrl(paymentLinkToken, req) : null
+
     return NextResponse.json({
       success: true,
       deliveryId,
       accessToken: deliveryData.accessToken,
-      publicUrl: getDeliveryLink(deliveryData.accessToken),
-      isReleased: willRelease,
+      publicUrl: deliveryPublicUrl,
+      paymentUrl: paymentPublicUrl,
+      paymentLinkToken: paymentLinkToken || null,
+      isReleased: Boolean(updates.isReleased),
+      isLocked: !updates.isReleased,
+      outstandingBalance,
+      alreadyPaid,
+      projectTotal,
       adminOverride: isAdminOverride,
       adminOverrideReason: updates.adminOverrideReason || null,
       adminOverrideBy: updates.adminOverrideBy || null,

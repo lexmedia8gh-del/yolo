@@ -450,15 +450,11 @@ function ClientDeliveryPageInner() {
                     <span className="font-semibold text-white">{delivery.projectName || delivery.title}</span>
                   </div>
                   <div className="flex items-center justify-between pb-3 border-b border-slate-800/60">
-                    <span className="text-slate-400">Payment Received</span>
+                    <span className="text-slate-400">Total Paid So Far</span>
                     <span className="font-semibold text-emerald-400">{formatCurrency(totalPaid, currency)}</span>
                   </div>
                   <div className="flex items-center justify-between pb-3 border-b border-slate-800/60">
-                    <span className="text-slate-400">Total Paid</span>
-                    <span className="font-semibold text-emerald-400">{formatCurrency(totalPaid, currency)}</span>
-                  </div>
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-800/60">
-                    <span className="text-slate-400">Invoice Total</span>
+                    <span className="text-slate-400">Total Agreed Price</span>
                     <span className="font-semibold text-white">{formatCurrency(invoiceTotal, currency)}</span>
                   </div>
                   <div className="flex items-center justify-between pt-1">
@@ -473,14 +469,21 @@ function ClientDeliveryPageInner() {
               {/* Payment Action Button */}
               <div className="space-y-3 relative z-10">
                 <button
-                  onClick={() => {
-                    const payToken = financials?.paymentLinkToken || token
-                    window.location.href = `/pay/${payToken}`
-                  }}
-                  className="w-full py-4 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-base transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2.5 cursor-pointer active:scale-[0.99]"
+                  onClick={handlePayRemaining}
+                  disabled={isProcessingPayment}
+                  className="w-full py-4 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-base transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2.5 cursor-pointer active:scale-[0.99] disabled:opacity-60"
                 >
-                  <CreditCard size={20} />
-                  <span>Complete Payment & View Deliverables</span>
+                  {isProcessingPayment ? (
+                    <>
+                      <Spinner size="sm" />
+                      <span>Connecting to Paystack...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard size={20} />
+                      <span>Pay {formatCurrency(remainingBal, currency)} & Unlock Deliverables</span>
+                    </>
+                  )}
                 </button>
                 <p className="text-center text-xs text-slate-500 flex items-center justify-center gap-1.5 pt-1">
                   <ShieldCheck size={14} className="text-emerald-400" />

@@ -285,7 +285,21 @@ export async function GET(
       } catch {}
     }
 
-    const isFullyPaid = deliveryDocData.isReleased || (remainingBalance <= 0) || (invoiceTotal > 0 && totalPaid >= invoiceTotal) || !deliveryDocData.requiresFullPayment
+    const isFullyPaid =
+      Boolean(deliveryDocData.isReleased) ||
+      remainingBalance <= 0 ||
+      (invoiceTotal > 0 && totalPaid >= invoiceTotal) ||
+      !deliveryDocData.requiresFullPayment
+
+    const isLockedState = Boolean(deliveryDocData.requiresFullPayment && !isFullyPaid)
+
+    // Security Gate: Strip download URLs when deliverables are locked pending payment
+    const safeFiles = isLockedState
+      ? formattedFiles.map((f) => ({
+          ...f,
+          downloadUrl: null,
+        }))
+      : formattedFiles
 
     return NextResponse.json({
       delivery: {
@@ -312,8 +326,8 @@ export async function GET(
         paymentLinkToken,
         isFullyPaid,
       },
-      files: formattedFiles,
-      isLocked: deliveryDocData.requiresFullPayment && !isFullyPaid,
+      files: safeFiles,
+      isLocked: isLockedState,
     })
   } catch (error: any) {
     console.error('[Delivery] Lookup error:', error)

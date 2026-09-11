@@ -28,9 +28,24 @@ interface SendPaymentReminderEmailParams {
   clientName: string
   projectName: string
   amountDue: number
+  amountPaid?: number
+  projectTotal?: number
   currencySymbol?: string
   paymentUrl: string
   deliveryUrl?: string
+  buttonText?: string
+  lexmediaLogoUrl?: string
+  clientLogoUrl?: string
+}
+
+export interface SendPaymentConfirmedEmailParams {
+  toEmail: string
+  clientName: string
+  projectName: string
+  deliveryUrl: string
+  amountPaid?: number
+  currencySymbol?: string
+  invoiceNumber?: string
   lexmediaLogoUrl?: string
   clientLogoUrl?: string
 }
@@ -90,6 +105,8 @@ function renderEmailTemplate({
   statusBadgeBg,
   statusBadgeColor,
   amountDue,
+  amountPaid,
+  projectTotal,
   currencySymbol = 'GH₵',
   primaryButtonText,
   primaryButtonUrl,
@@ -106,6 +123,8 @@ function renderEmailTemplate({
   statusBadgeBg: string
   statusBadgeColor: string
   amountDue?: number
+  amountPaid?: number
+  projectTotal?: number
   currencySymbol?: string
   primaryButtonText: string
   primaryButtonUrl: string
@@ -121,6 +140,12 @@ function renderEmailTemplate({
   const hasBalance = amountDue !== undefined && amountDue > 0
   const formattedAmount = hasBalance
     ? `${currencySymbol}${amountDue!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : ''
+  const formattedPaid = amountPaid !== undefined
+    ? `${currencySymbol}${amountPaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : ''
+  const formattedTotal = projectTotal !== undefined
+    ? `${currencySymbol}${projectTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : ''
 
   // Resolve logo URLs to absolute before embedding in email
@@ -218,6 +243,23 @@ function renderEmailTemplate({
               <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background: linear-gradient(135deg, #fef2f2 0%, #fff1f2 100%); border: 1px solid #fecdd3; border-radius: 12px; margin: 0 0 24px 0; padding: 20px; text-align: center;">
                 <tr>
                   <td>
+                    ${
+                      formattedTotal && formattedPaid
+                        ? `
+                    <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom: 12px; font-size: 13px; color: #475569;">
+                      <tr>
+                        <td align="left" style="padding-bottom: 4px;">Project Total:</td>
+                        <td align="right" style="padding-bottom: 4px; font-weight: 600; color: #0f172a;">${escapeHtml(formattedTotal)}</td>
+                      </tr>
+                      <tr>
+                        <td align="left" style="padding-bottom: 4px;">Already Paid:</td>
+                        <td align="right" style="padding-bottom: 4px; font-weight: 600; color: #16a34a;">${escapeHtml(formattedPaid)}</td>
+                      </tr>
+                    </table>
+                    <div style="border-top: 1px dashed #fecdd3; margin-bottom: 12px;"></div>
+                        `
+                        : ''
+                    }
                     <p style="margin: 0; font-size: 12px; font-weight: 600; color: #be123c; text-transform: uppercase; letter-spacing: 0.5px;">Outstanding Balance</p>
                     <p style="margin: 6px 0 2px 0; font-size: 30px; font-weight: 800; color: #9f1239; letter-spacing: -0.5px;">${escapeHtml(formattedAmount)}</p>
                     <p style="margin: 0; font-size: 12px; color: #881337;">Complete payment below to instantly unlock download access.</p>
@@ -370,9 +412,12 @@ export async function sendDeliveryPaymentRequiredEmail({
   clientName,
   projectName,
   amountDue,
+  amountPaid,
+  projectTotal,
   currencySymbol = 'GH₵',
   paymentUrl,
   deliveryUrl,
+  buttonText,
   lexmediaLogoUrl,
   clientLogoUrl,
 }: SendPaymentReminderEmailParams): Promise<{ success: boolean; messageId?: string; error?: string }> {
@@ -392,8 +437,10 @@ export async function sendDeliveryPaymentRequiredEmail({
     statusBadgeBg: hasBalance ? '#ffe4e6' : '#dcfce7',
     statusBadgeColor: hasBalance ? '#be123c' : '#15803d',
     amountDue: hasBalance ? amountDue : undefined,
+    amountPaid,
+    projectTotal,
     currencySymbol,
-    primaryButtonText: hasBalance ? 'Complete Payment & View Deliverables' : 'View Your Deliverables',
+    primaryButtonText: buttonText || (hasBalance ? 'Complete Payment & Access Your Deliverables' : 'View Your Deliverables'),
     primaryButtonUrl: safePaymentUrl,
     primaryButtonBg: hasBalance ? '#16a34a' : '#2563eb',
     secondaryButtonText: (hasBalance && safeDeliveryUrl) ? 'View Deliverables Portal (Locked)' : undefined,
@@ -408,6 +455,56 @@ export async function sendDeliveryPaymentRequiredEmail({
   const subject = hasBalance
     ? `Your Deliverables — Balance Due: ${formattedAmount}`
     : `Your Deliverables — ${senderName}`
+
+  return sendBrevoEmail({
+    toEmail,
+    clientName,
+    subject,
+    htmlContent,
+    apiKey,
+    senderEmail,
+    senderName,
+  })
+}
+
+/**
+ * Sends a Brevo confirmation email once payment is verified and deliverables are unlocked.
+ */
+export async function sendPaymentConfirmedDeliveryEmail({
+  toEmail,
+  clientName,
+  projectName,
+  deliveryUrl,
+  amountPaid,
+  currencySymbol = 'GH₵',
+  invoiceNumber,
+  lexmediaLogoUrl,
+  clientLogoUrl,
+}: SendPaymentConfirmedEmailParams): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const apiKey = process.env.BREVO_API_KEY
+  const { email: senderEmail } = getEmailSender()
+
+  const safeDeliveryUrl = getProductionUrl(deliveryUrl)
+  const formattedPaid = amountPaid !== undefined && amountPaid > 0
+    ? `${currencySymbol}${amountPaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : ''
+
+  const htmlContent = renderEmailTemplate({
+    clientName,
+    projectName,
+    statusText: 'Payment Confirmed · Deliverables Ready',
+    statusBadgeBg: '#dcfce7',
+    statusBadgeColor: '#15803d',
+    currencySymbol,
+    primaryButtonText: 'View & Download Deliverables',
+    primaryButtonUrl: safeDeliveryUrl,
+    primaryButtonBg: '#16a34a',
+    introText: `Thank you for your payment${formattedPaid ? ` of <strong>${escapeHtml(formattedPaid)}</strong>` : ''}${invoiceNumber ? ` for Invoice <strong>${escapeHtml(invoiceNumber)}</strong>` : ''}. Your deliverables for <strong>${escapeHtml(projectName)}</strong> are now fully unlocked and ready for you to access and download.`,
+    lexmediaLogoUrl,
+    clientLogoUrl,
+  })
+
+  const subject = `Payment Confirmed — Your LexMedia Deliverables Are Ready`
 
   return sendBrevoEmail({
     toEmail,
