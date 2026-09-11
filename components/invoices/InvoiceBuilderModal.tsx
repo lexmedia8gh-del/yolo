@@ -5,6 +5,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input, Textarea } from '@/components/ui/Input'
 import { InvoiceDocument } from './InvoiceDocument'
+import { getCustomerUrl } from '@/lib/utils'
 import {
   COLLECTIONS,
   getDocuments,
@@ -111,7 +112,7 @@ export function InvoiceBuilderModal({
   const [businessPhone, setBusinessPhone] = useState('+233 24 123 4567')
   const [businessWhatsapp, setBusinessWhatsapp] = useState('+233 24 123 4567')
   const [businessEmail, setBusinessEmail] = useState('contact@lexmedia.com')
-  const [businessWebsite, setBusinessWebsite] = useState('https://lexmedia.gh')
+  const [businessWebsite, setBusinessWebsite] = useState(getCustomerUrl())
   const [saveAsDefaultBrand, setSaveAsDefaultBrand] = useState(false)
 
   // ─── Client Info State ───
@@ -902,7 +903,7 @@ export function InvoiceBuilderModal({
                     label="Website URL"
                     value={businessWebsite}
                     onChange={(e) => setBusinessWebsite(e.target.value)}
-                    placeholder="https://lexmedia.gh"
+                    placeholder="https://your-website.com"
                   />
                   <Input
                     label="Physical Address"

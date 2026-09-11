@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, getCustomerUrl } from '@/lib/utils'
 import type { Invoice, InvoiceItem } from '@/lib/types'
 import { CheckCircle2, AlertCircle, Clock, Send, FileText, Globe, Phone, Mail, MapPin } from 'lucide-react'
 
@@ -29,7 +29,7 @@ export function InvoiceDocument({
     phone: '+233 24 123 4567',
     whatsapp: '+233 24 123 4567',
     email: 'contact@lexmedia.com',
-    website: 'https://lexmedia.gh',
+    website: getCustomerUrl(),
   }
 
   const client = invoice.clientInfo || {
@@ -386,7 +386,7 @@ export function InvoiceDocument({
           {invoice.thankYouMessage || 'Thank you for your business with LexMedia!'}
         </p>
         <p className="text-[11px]">
-          For inquiries or assistance regarding this invoice, contact us at {business.email || 'billing@lexmedia.gh'}
+          For inquiries or assistance regarding this invoice, contact us at {business.email || 'billing@your-website.com'}
         </p>
       </div>
     </div>

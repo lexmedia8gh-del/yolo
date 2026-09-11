@@ -107,7 +107,12 @@ export function getRuntimeUrl(context?: any): string {
   }
 
   // 4. Vercel deployment environment variables (Prioritize Vercel URL if available for runtime)
-  const vercelUrl = process.env.NEXT_PUBLIC_VERCEL_URL || process.env.VERCEL_URL
+  const vercelUrl = 
+    process.env.NEXT_PUBLIC_VERCEL_URL || 
+    process.env.VERCEL_URL || 
+    process.env.VERCEL_PROJECT_PRODUCTION_URL || 
+    process.env.VERCEL_BRANCH_URL
+    
   if (vercelUrl) {
     return normalizeUrl(`https://${vercelUrl}`)
   }
@@ -118,24 +123,39 @@ export function getRuntimeUrl(context?: any): string {
     return normalizeUrl(envUrl)
   }
 
-  // 6. Default fallback
-  const isDev = process.env.NODE_ENV === 'development' || process.env.APP_ENV === 'development'
-  return isDev ? DEFAULT_DEV_DOMAIN : CANONICAL_PRODUCTION_DOMAIN
+  // 6. Default fallback based strictly on environment
+  const appEnv = (process.env.APP_ENV || process.env.VERCEL_ENV || process.env.NODE_ENV || '').toLowerCase().trim()
+  const isStrictProduction = appEnv === 'production' && process.env.VERCEL_ENV !== 'preview'
+  if (isStrictProduction) {
+    return CANONICAL_PRODUCTION_DOMAIN
+  }
+  
+  // If we are not in production, do NOT guess the production URL. Default to local if no Vercel/APP_URL exists.
+  return DEFAULT_DEV_DOMAIN
 }
 
 /**
  * Returns the customer/public-facing URL base for link generation (Payments, Deliveries, Invoices, Emails).
  * 
  * Rules:
+ * - If APP_ENV === 'production' -> returns https://lexmedia.gh (or configured APP_URL)
  * - If in Local Development -> returns http://localhost:3000 (or runtime origin)
  * - If in Vercel testing (or any non-production env) -> returns active Vercel/Runtime domain
- * - Only if APP_ENV === 'production' -> returns https://lexmedia.gh (or configured APP_URL)
  */
 export function getCustomerUrl(context?: any): string {
-  const appEnv = (process.env.APP_ENV || process.env.NODE_ENV || '').toLowerCase().trim()
+  const appEnv = (process.env.APP_ENV || process.env.VERCEL_ENV || process.env.NODE_ENV || '').toLowerCase().trim()
+  const isStrictProduction = appEnv === 'production' && process.env.VERCEL_ENV !== 'preview'
   const configuredAppUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL
 
-  // 1. Local Development Mode
+  // 1. Explicit Production Mode
+  if (isStrictProduction) {
+    if (configuredAppUrl && !configuredAppUrl.includes('localhost') && !configuredAppUrl.includes('127.0.0.1')) {
+      return normalizeUrl(configuredAppUrl)
+    }
+    return CANONICAL_PRODUCTION_DOMAIN
+  }
+
+  // 2. Local Development Mode
   if (appEnv === 'development' || appEnv === 'local') {
     // Attempt to get the actual runtime url (e.g. localhost:3000)
     const runtime = getRuntimeUrl(context)
@@ -145,31 +165,23 @@ export function getCustomerUrl(context?: any): string {
     return DEFAULT_DEV_DOMAIN
   }
 
-  // 2. Explicit Production Mode
-  if (appEnv === 'production') {
-    if (configuredAppUrl && !configuredAppUrl.includes('localhost') && !configuredAppUrl.includes('127.0.0.1')) {
-      return normalizeUrl(configuredAppUrl)
-    }
-    return CANONICAL_PRODUCTION_DOMAIN
-  }
-
   // 3. Testing / Preview / Vercel Mode (APP_ENV is not 'production')
   
-  // Prefer the actual runtime URL (browser origin or request headers) if available
+  // Prefer the actual runtime URL (browser origin or request headers or Vercel env vars)
   const runtimeUrl = getRuntimeUrl(context)
   
-  // If runtime URL is a Vercel URL, Cloud Run URL, or local, use it directly
-  if (
-    runtimeUrl.includes('vercel.app') || 
-    runtimeUrl.includes('run.app') || 
-    runtimeUrl.includes('localhost') || 
-    runtimeUrl.includes('127.0.0.1')
-  ) {
+  // As long as it didn't mistakenly resolve to lexmedia.gh (which it shouldn't anymore unless APP_ENV=production), use it.
+  if (runtimeUrl && !runtimeUrl.includes('lexmedia.gh')) {
     return runtimeUrl
   }
   
-  // Fallback to Vercel env vars if runtime detection failed
-  const vercelUrl = process.env.NEXT_PUBLIC_VERCEL_URL || process.env.VERCEL_URL
+  // Fallback to Vercel env vars explicitly in case getRuntimeUrl failed us
+  const vercelUrl = 
+    process.env.NEXT_PUBLIC_VERCEL_URL || 
+    process.env.VERCEL_URL || 
+    process.env.VERCEL_PROJECT_PRODUCTION_URL || 
+    process.env.VERCEL_BRANCH_URL
+    
   if (vercelUrl) {
     return normalizeUrl(`https://${vercelUrl}`)
   }
@@ -179,8 +191,10 @@ export function getCustomerUrl(context?: any): string {
     return normalizeUrl(configuredAppUrl)
   }
 
-  // Absolute fallback
-  return runtimeUrl || CANONICAL_PRODUCTION_DOMAIN
+  // Absolute fallback: We MUST NOT return lexmedia.gh if APP_ENV is not production!
+  // If we get here, it means we have no Vercel env vars, no APP_URL, no headers, and we are not in production.
+  // The most likely scenario is a local build or a custom environment without config.
+  return runtimeUrl || DEFAULT_DEV_DOMAIN
 }
 
 /**

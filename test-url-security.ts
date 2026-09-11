@@ -172,4 +172,20 @@ assert(
 // Restore environment
 process.env = originalEnv
 
-console.log('\n=== ALL 19 URL SECURITY & ENVIRONMENT-AWARE GATEWAY TESTS PASSED ===')
+
+
+// ─── TEST SUITE 5: VERCEL PREVIEW FALSE POSITIVE ─────────────────────────────
+console.log('\n--- TEST SUITE 5: VERCEL PREVIEW (NODE_ENV=production) ---')
+Object.defineProperty(process.env, "NODE_ENV", { value: "production" }); //'production'
+process.env.VERCEL_ENV = 'preview'
+process.env.NEXT_PUBLIC_VERCEL_URL = 'preview.vercel.app'
+delete process.env.APP_ENV
+delete process.env.APP_URL
+
+const previewUrl = getCustomerUrl()
+console.log('20. getCustomerUrl() on Vercel preview:', previewUrl)
+assert(
+  previewUrl === 'https://preview.vercel.app',
+  'Vercel preview must not fall back to production domain'
+)
+console.log('\n=== ALL 20 URL SECURITY & ENVIRONMENT-AWARE GATEWAY TESTS PASSED ===')
