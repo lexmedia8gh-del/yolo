@@ -20,6 +20,48 @@ export const CANONICAL_PRODUCTION_DOMAIN = 'https://lexmedia.gh'
 export const DEFAULT_DEV_DOMAIN = 'http://localhost:3000'
 
 /**
+ * Detects if a host or URL belongs to the Vercel platform (vercel.com),
+ * as opposed to a deployment domain (*.vercel.app).
+ * vercel.com is NEVER a valid LexMedia application origin.
+ */
+export function isVercelPlatformDomain(input: string): boolean {
+  if (!input || typeof input !== 'string') return false
+  const trimmed = input.trim().toLowerCase()
+  if (!trimmed) return false
+
+  // Direct platform host matches
+  if (trimmed === 'vercel.com' || trimmed === 'www.vercel.com') return true
+
+  // Fast check for protocol URLs
+  if (
+    trimmed.startsWith('https://vercel.com') ||
+    trimmed.startsWith('http://vercel.com') ||
+    trimmed.startsWith('https://www.vercel.com') ||
+    trimmed.startsWith('http://www.vercel.com')
+  ) {
+    return true
+  }
+
+  // Parse if it looks like a URL or host
+  try {
+    const withProto = trimmed.startsWith('http://') || trimmed.startsWith('https://')
+      ? trimmed
+      : `https://${trimmed}`
+    const parsed = new URL(withProto)
+    const host = parsed.hostname.toLowerCase()
+    if (host === 'vercel.com' || host === 'www.vercel.com' || (host.endsWith('.vercel.com') && !host.endsWith('.vercel.app'))) {
+      return true
+    }
+  } catch {
+    if (trimmed.includes('vercel.com') && !trimmed.includes('.vercel.app')) {
+      return true
+    }
+  }
+
+  return false
+}
+
+/**
  * Normalizes any URL string by trimming whitespace, stripping trailing slashes,
  * and ensuring an http/https protocol prefix.
  */
@@ -40,9 +82,8 @@ export function normalizeUrl(urlStr: string): string {
   }
 
   // Prevent accidental vercel.com platform domain
-  if (trimmed.includes('vercel.com') && !trimmed.includes('.vercel.app')) {
-    trimmed = trimmed.replace(/https?:\/\/([a-zA-Z0-9\-_]+\.)?vercel\.com[^\s]*/gi, '')
-    if (!trimmed) return ''
+  if (isVercelPlatformDomain(trimmed)) {
+    return ''
   }
 
   const withProto = trimmed.startsWith('http://') || trimmed.startsWith('https://')
@@ -62,6 +103,10 @@ export function normalizeUrl(urlStr: string): string {
 export function isTrustedHost(hostname: string): boolean {
   if (!hostname) return false
   const clean = hostname.toLowerCase().split(':')[0].trim()
+  // Block any vercel.com platform domain
+  if (clean === 'vercel.com' || (clean.endsWith('.vercel.com') && !clean.endsWith('.vercel.app'))) {
+    return false
+  }
   return (
     clean === 'localhost' ||
     clean === '127.0.0.1' ||
@@ -90,7 +135,7 @@ function extractHostFromContext(context: any): string | null {
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
       try {
         const parsed = new URL(trimmed)
-        if (parsed.hostname && !parsed.hostname.includes('vercel.com')) {
+        if (parsed.hostname && !isVercelPlatformDomain(parsed.hostname)) {
           return `${parsed.protocol}//${parsed.host}`.replace(/\/+$/, '')
         }
       } catch {}
@@ -120,7 +165,7 @@ function extractHostFromContext(context: any): string | null {
         if (host) {
           const cleanHost = host.split(',')[0].trim()
           // Never use vercel.com platform domain
-          if (cleanHost === 'vercel.com' || cleanHost.endsWith('.vercel.com')) {
+          if (isVercelPlatformDomain(cleanHost)) {
             return null
           }
           const proto =
@@ -133,7 +178,7 @@ function extractHostFromContext(context: any): string | null {
       // If NextRequest has nextUrl
       if ('nextUrl' in context && context.nextUrl?.origin) {
         const origin = context.nextUrl.origin
-        if (!origin.includes('vercel.com')) {
+        if (!isVercelPlatformDomain(origin)) {
           return origin.replace(/\/+$/, '')
         }
       }
@@ -145,68 +190,82 @@ function extractHostFromContext(context: any): string | null {
 
 /**
  * Authoritative Centralized Base URL Resolver.
- * Determines the application's base URL with strict environment awareness:
- * 
- * 1. Runtime request headers (x-forwarded-host) or browser origin (window.location.origin)
- * 2. Vercel deployment variables (VERCEL_URL, NEXT_PUBLIC_VERCEL_URL, etc.)
- * 3. Configured environment variables (APP_URL, NEXT_PUBLIC_APP_URL)
- * 4. Localhost fallback (http://localhost:3000) during local development
- * 5. Production domain (https://lexmedia.gh) ONLY when explicitly configured as the active production domain.
+ * Priority:
+ * 1. Explicit production URL ONLY when production mode is intentionally enabled.
+ * 2. Current request origin when available (headers or window origin).
+ * 3. Configured APP_URL / NEXT_PUBLIC_APP_URL (rejecting vercel.com).
+ * 4. Vercel runtime deployment hostname when deployed on Vercel.
+ * 5. Localhost fallback (http://localhost:3000) during local development.
  */
 export function getAppBaseUrl(context?: any): string {
-  // 1. Browser context: Authoritative active origin
+  // Configured environment variables
+  const configuredAppUrl = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || '').trim()
+  const safeConfiguredAppUrl = isVercelPlatformDomain(configuredAppUrl) ? '' : configuredAppUrl
+
+  // Vercel deployment variables
+  const rawVercelHost =
+    process.env.NEXT_PUBLIC_VERCEL_URL ||
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+    process.env.VERCEL_BRANCH_URL ||
+    process.env.VERCEL_URL ||
+    ''
+
+  const cleanVercelHost = rawVercelHost
+    .trim()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/+$/, '')
+
+  const isVercelHostValid =
+    cleanVercelHost &&
+    !isVercelPlatformDomain(cleanVercelHost) &&
+    cleanVercelHost !== 'vercel.com'
+
+  // 1. Explicit production domain ONLY when production mode is intentionally enabled
+  const isProductionExplicitlyEnabled =
+    process.env.PRODUCTION_DOMAIN_CONFIGURED === 'true' ||
+    process.env.FORCE_PRODUCTION_DOMAIN === 'true' ||
+    (process.env.APP_ENV === 'production' && safeConfiguredAppUrl.includes('lexmedia.gh')) ||
+    safeConfiguredAppUrl === CANONICAL_PRODUCTION_DOMAIN
+
+  // If in Vercel preview or testing, do not force production domain
+  const isVercelTesting =
+    process.env.VERCEL_ENV === 'preview' ||
+    process.env.APP_ENV === 'testing' ||
+    (safeConfiguredAppUrl && safeConfiguredAppUrl.includes('.vercel.app'))
+
+  if (isProductionExplicitlyEnabled && !isVercelTesting) {
+    return CANONICAL_PRODUCTION_DOMAIN
+  }
+
+  // 2. Current request origin when available
+  // 2a. Server-side request headers
+  const hostFromContext = extractHostFromContext(context)
+  if (hostFromContext && !isVercelPlatformDomain(hostFromContext)) {
+    return hostFromContext
+  }
+
+  // 2b. Browser context: Authoritative active origin
   if (typeof window !== 'undefined' && window.location?.origin) {
     const origin = window.location.origin.replace(/\/+$/, '')
-    if (origin && !origin.includes('vercel.com')) {
+    if (origin && !isVercelPlatformDomain(origin)) {
       return origin
     }
   }
 
-  // 2. Request context (Server-side dynamic host detection)
-  const hostFromContext = extractHostFromContext(context)
-  if (hostFromContext) {
-    return hostFromContext
-  }
-
-  // 3. Vercel deployment environment variables
-  // Vercel sets VERCEL_URL (e.g. project-git-branch.vercel.app or project.vercel.app)
-  const vercelHost =
-    process.env.NEXT_PUBLIC_VERCEL_URL ||
-    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
-    process.env.VERCEL_BRANCH_URL ||
-    process.env.VERCEL_URL
-
-  if (vercelHost && typeof vercelHost === 'string') {
-    const cleanVercel = vercelHost.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')
-    // Must be a .vercel.app domain and not vercel.com platform
-    if (cleanVercel && !cleanVercel.includes('vercel.com') && cleanVercel.includes('.vercel.app')) {
-      return `https://${cleanVercel}`
-    }
-  }
-
-  // 4. Configured APP_URL / NEXT_PUBLIC_APP_URL environment variable
-  const configuredAppUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL
-  if (configuredAppUrl && typeof configuredAppUrl === 'string') {
-    const normalized = normalizeUrl(configuredAppUrl)
-    // Avoid returning vercel.com platform domain
-    if (normalized && !normalized.includes('vercel.com')) {
+  // 3. Safe configured APP_URL (e.g. testing URL like https://lexmedia-preview-git-main.vercel.app)
+  if (safeConfiguredAppUrl) {
+    const normalized = normalizeUrl(safeConfiguredAppUrl)
+    if (normalized && !isVercelPlatformDomain(normalized)) {
       return normalized
     }
   }
 
-  // 5. Check if production domain is strictly configured as active
-  const isProductionDomainConfigured =
-    process.env.PRODUCTION_DOMAIN_CONFIGURED === 'true' ||
-    process.env.FORCE_PRODUCTION_DOMAIN === 'true' ||
-    Boolean(configuredAppUrl && configuredAppUrl.includes('lexmedia.gh'))
-
-  const isVercelTesting = Boolean(process.env.VERCEL || process.env.VERCEL_ENV || vercelHost)
-
-  if (isProductionDomainConfigured && !isVercelTesting) {
-    return CANONICAL_PRODUCTION_DOMAIN
+  // 4. Vercel runtime deployment hostname when deployed on Vercel
+  if (isVercelHostValid) {
+    return `https://${cleanVercelHost}`
   }
 
-  // 6. Local development or container fallback
+  // 5. Localhost only during local development
   const isLocalDev =
     process.env.NODE_ENV === 'development' ||
     process.env.APP_ENV === 'development' ||
@@ -214,14 +273,6 @@ export function getAppBaseUrl(context?: any): string {
 
   if (isLocalDev) {
     return DEFAULT_DEV_DOMAIN
-  }
-
-  // 7. If on Vercel without domain, construct from project name or fallback
-  if (vercelHost) {
-    const clean = vercelHost.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')
-    if (clean && !clean.includes('vercel.com')) {
-      return `https://${clean}`
-    }
   }
 
   return DEFAULT_DEV_DOMAIN
@@ -265,10 +316,19 @@ export function buildSecureLink(path: string, token: string, context?: any): str
 
 /**
  * Builds a secure customer-facing payment URL.
- * Routes through the standardized /payment/secure/{token} (with /pay/{token} alias supported).
- * Example: https://YOUR-VERCEL-DEPLOYMENT.vercel.app/payment/secure/{token}
+ * Routes to the canonical /pay/{token} (with /payment/secure/{token} alias supported).
+ * Example: https://YOUR-VERCEL-DEPLOYMENT.vercel.app/pay/{token}
  */
 export function buildPaymentUrl(tokenOrId: string, context?: any): string {
+  const cleanToken = (tokenOrId || 'sample').trim()
+  const base = getAppBaseUrl(context)
+  return `${base}/pay/${encodeURIComponent(cleanToken)}`
+}
+
+/**
+ * Builds a secure customer-facing payment URL using the /payment/secure/{token} path.
+ */
+export function buildSecurePaymentUrl(tokenOrId: string, context?: any): string {
   const cleanToken = (tokenOrId || 'sample').trim()
   const base = getAppBaseUrl(context)
   return `${base}/payment/secure/${encodeURIComponent(cleanToken)}`
@@ -276,10 +336,19 @@ export function buildPaymentUrl(tokenOrId: string, context?: any): string {
 
 /**
  * Builds a secure customer-facing delivery portal URL.
- * Routes through the standardized /delivery/secure/{token} (with /delivery/{token} alias supported).
- * Example: https://YOUR-VERCEL-DEPLOYMENT.vercel.app/delivery/secure/{token}
+ * Routes to canonical /delivery/{token} (with /delivery/secure/{token} alias supported).
+ * Example: https://YOUR-VERCEL-DEPLOYMENT.vercel.app/delivery/{token}
  */
 export function buildDeliveryUrl(accessToken: string, context?: any): string {
+  const cleanToken = (accessToken || '').trim()
+  const base = getAppBaseUrl(context)
+  return `${base}/delivery/${encodeURIComponent(cleanToken)}`
+}
+
+/**
+ * Builds a secure customer-facing delivery portal URL using /delivery/secure/{token}.
+ */
+export function buildSecureDeliveryUrl(accessToken: string, context?: any): string {
   const cleanToken = (accessToken || '').trim()
   const base = getAppBaseUrl(context)
   return `${base}/delivery/secure/${encodeURIComponent(cleanToken)}`
@@ -287,7 +356,7 @@ export function buildDeliveryUrl(accessToken: string, context?: any): string {
 
 /**
  * Builds a secure Quick Job customer link.
- * Routes through the standardized /quick-jobs/{token} (with /client/quick-job/{token} alias supported).
+ * Routes to canonical /quick-jobs/{token}.
  * Example: https://YOUR-VERCEL-DEPLOYMENT.vercel.app/quick-jobs/{token}
  */
 export function buildQuickJobUrl(tokenOrId: string, context?: any): string {
@@ -334,15 +403,29 @@ export const getPaymentLink = buildPaymentUrl
 export const getDeliveryLink = buildDeliveryUrl
 export const appUrl = buildAppUrl
 
+export interface AppUrlValidationResult {
+  isValid: boolean
+  sanitizedUrl: string
+  reason?: string
+}
+
 /**
- * Centralized URL Security Validator.
- * Neutralizes open redirects, malicious domains, and prevents leaking to vercel.com platform.
+ * Validates that an application URL is safe and points to the deployed application
+ * rather than the Vercel platform (vercel.com) or an untrusted external host.
+ *
+ * Rejects:
+ * - https://vercel.com
+ * - https://vercel.com/dashboard
+ * - https://vercel.com/projects/...
+ * - https://vercel.com/new/...
+ * - https://*.vercel.com
+ *
+ * Allows:
+ * - https://<project-name>.vercel.app (and subpaths)
+ * - https://lexmedia.gh (production domain)
+ * - http://localhost:3000 (local development)
  */
-export function validateUrlSecurity(
-  urlStr: string,
-  mode: 'runtime' | 'customer' = 'customer',
-  context?: any
-): { isValid: boolean; sanitizedUrl: string; reason?: string } {
+export function validateAppUrl(urlStr: string, context?: any): AppUrlValidationResult {
   const safeBase = getAppBaseUrl(context)
 
   if (!urlStr || typeof urlStr !== 'string') {
@@ -351,7 +434,7 @@ export function validateUrlSecurity(
 
   const trimmed = urlStr.trim()
 
-  // Prevent protocol-relative and dangerous scheme injection
+  // 1. Block dangerous schemes
   if (
     trimmed.startsWith('//') ||
     trimmed.startsWith('javascript:') ||
@@ -362,50 +445,113 @@ export function validateUrlSecurity(
     return {
       isValid: false,
       sanitizedUrl: safeBase,
-      reason: 'Blocked dangerous protocol or protocol-relative URI',
+      reason: 'Blocked dangerous URI scheme or protocol-relative attack',
     }
   }
 
-  // Reject accidental vercel.com platform URLs
-  if (trimmed.includes('vercel.com') && !trimmed.includes('.vercel.app')) {
-    return {
-      isValid: false,
-      sanitizedUrl: safeBase,
-      reason: 'Blocked vercel.com platform URL; sanitized to application base',
+  // 2. Reject vercel.com platform URLs
+  if (isVercelPlatformDomain(trimmed)) {
+    try {
+      const withProto = trimmed.startsWith('http://') || trimmed.startsWith('https://')
+        ? trimmed
+        : `https://${trimmed}`
+      const parsed = new URL(withProto)
+
+      // If someone passed https://vercel.com/<project>.vercel.app/pay/xyz
+      const vercelAppMatch = parsed.pathname.match(/\/([a-zA-Z0-9\-_]+\.vercel\.app)(\/.*)?$/)
+      if (vercelAppMatch) {
+        return {
+          isValid: false,
+          sanitizedUrl: `https://${vercelAppMatch[1]}${vercelAppMatch[2] || ''}${parsed.search}${parsed.hash}`,
+          reason: 'Corrected malformed vercel.com prefix on vercel.app deployment URL',
+        }
+      }
+
+      // Check if it's a known application route under vercel.com
+      const path = parsed.pathname
+      if (
+        path.startsWith('/pay') ||
+        path.startsWith('/payment') ||
+        path.startsWith('/delivery') ||
+        path.startsWith('/invoices') ||
+        path.startsWith('/quick-jobs') ||
+        path.startsWith('/dashboard') ||
+        path.startsWith('/p/') ||
+        path.startsWith('/d/')
+      ) {
+        return {
+          isValid: false,
+          sanitizedUrl: `${safeBase}${path}${parsed.search}${parsed.hash}`,
+          reason: 'Blocked vercel.com platform URL; redirected to application origin',
+        }
+      }
+
+      return {
+        isValid: false,
+        sanitizedUrl: safeBase,
+        reason: 'Blocked vercel.com platform URL; sanitized to application base',
+      }
+    } catch {
+      return {
+        isValid: false,
+        sanitizedUrl: safeBase,
+        reason: 'Blocked vercel.com platform URL; sanitized to application base',
+      }
     }
   }
 
-  // Allow safe relative paths
-  if (trimmed.startsWith('/')) {
+  // 3. Allow safe relative paths
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
     return { isValid: true, sanitizedUrl: `${safeBase}${trimmed}` }
   }
 
+  // 4. Parse full URL
   try {
     const parsed = new URL(trimmed)
+    const hostname = parsed.hostname.toLowerCase()
 
-    // Allow third-party payment gateways (Paystack, Hubtel)
-    if (parsed.hostname.includes('paystack.com') || parsed.hostname.includes('hubtel.com')) {
+    if (hostname === 'vercel.com' || (hostname.endsWith('.vercel.com') && !hostname.endsWith('.vercel.app'))) {
+      return {
+        isValid: false,
+        sanitizedUrl: `${safeBase}${parsed.pathname}${parsed.search}${parsed.hash}`,
+        reason: 'Blocked vercel.com platform host; sanitized to application base',
+      }
+    }
+
+    // Allow trusted third-party payment gateways
+    if (hostname.endsWith('paystack.com') || hostname.endsWith('hubtel.com')) {
       return { isValid: true, sanitizedUrl: trimmed }
     }
 
-    // Check if domain is a trusted host
-    if (isTrustedHost(parsed.hostname)) {
+    if (isTrustedHost(hostname)) {
+      // In production or testing mode, ensure localhost URLs are upgraded to safe base
+      const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1'
+      const baseIsLocalhost = safeBase.includes('localhost') || safeBase.includes('127.0.0.1')
+      if (isLocalhost && !baseIsLocalhost) {
+        return {
+          isValid: true,
+          sanitizedUrl: `${safeBase}${parsed.pathname}${parsed.search}${parsed.hash}`,
+        }
+      }
       return { isValid: true, sanitizedUrl: trimmed }
     }
 
-    // Untrusted external domain -> sanitize to active base preserving path
-    const sanitized = `${safeBase}${parsed.pathname}${parsed.search}${parsed.hash}`
+    // Untrusted external domain -> sanitize to application base preserving path
     return {
       isValid: false,
-      sanitizedUrl: sanitized,
-      reason: `Untrusted domain ${parsed.hostname} sanitized to ${safeBase}`,
+      sanitizedUrl: `${safeBase}${parsed.pathname}${parsed.search}${parsed.hash}`,
+      reason: `Untrusted external domain ${hostname} sanitized to ${safeBase}`,
     }
   } catch {
-    // If not a valid URL, treat as relative path or token
     const cleanPath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
     return { isValid: true, sanitizedUrl: `${safeBase}${cleanPath}` }
   }
 }
+
+/**
+ * Centralized URL Security Validator (alias to validateAppUrl).
+ */
+export const validateUrlSecurity = validateAppUrl
 
 /**
  * Environment-aware customer URL sanitizer for customer-facing links (Brevo emails, SMS, client portals).
@@ -417,41 +563,14 @@ export function getProductionUrl(urlStr: string, context?: any): string {
   const trimmed = urlStr.trim()
   if (!trimmed) return base
 
-  // Block vercel.com platform URLs
-  if (trimmed.includes('vercel.com') && !trimmed.includes('.vercel.app')) {
-    return base
-  }
-
   // 1. Bare token -> treat as payment token
-  let targetPath = trimmed
-  if (!targetPath.startsWith('/') && !targetPath.startsWith('http://') && !targetPath.startsWith('https://')) {
-    return buildPaymentUrl(targetPath, context)
+  if (!trimmed.startsWith('/') && !trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    return buildPaymentUrl(trimmed, context)
   }
 
-  // 2. Validate security and sanitize if needed
-  const validation = validateUrlSecurity(targetPath, 'customer', context)
-  if (validation.isValid) {
-    if (targetPath.startsWith('http://') || targetPath.startsWith('https://')) {
-      return validation.sanitizedUrl
-    }
-  } else {
-    return validation.sanitizedUrl
-  }
-
-  // 3. Relative path -> prepend base
-  if (targetPath.startsWith('/')) {
-    return `${base}${targetPath}`
-  }
-
-  try {
-    const parsed = new URL(targetPath)
-    if (parsed.hostname.includes('paystack.com') || parsed.hostname.includes('hubtel.com')) {
-      return targetPath
-    }
-    return `${base}${parsed.pathname}${parsed.search}${parsed.hash}`
-  } catch {
-    return `${base}/${targetPath.replace(/^\//, '')}`
-  }
+  // 2. Validate and sanitize
+  const validation = validateAppUrl(trimmed, context)
+  return validation.sanitizedUrl
 }
 
 /**

@@ -29,6 +29,8 @@ import {
   appUrl,
   getPaymentLink,
   getProductionUrl,
+  validateAppUrl,
+  isVercelPlatformDomain,
 } from '@/lib/utils'
 import { PreparePaymentMessageModal } from './PreparePaymentMessageModal'
 import toast from 'react-hot-toast'
@@ -150,9 +152,15 @@ export function PaymentLinkModal({
       return
     }
 
-    if (linkSource === 'custom' && !customUrl.trim()) {
-      toast.error('Please enter the payment link URL (e.g. Paystack, Hubtel, or bank checkout link)')
-      return
+    if (linkSource === 'custom') {
+      if (!customUrl.trim()) {
+        toast.error('Please enter the payment link URL (e.g. Paystack, Hubtel, or bank checkout link)')
+        return
+      }
+      if (isVercelPlatformDomain(customUrl.trim())) {
+        toast.error('The Vercel platform domain (vercel.com) cannot be used as a client payment link.')
+        return
+      }
     }
 
     setSubmitting(true)

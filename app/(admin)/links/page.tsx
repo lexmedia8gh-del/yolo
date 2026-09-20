@@ -41,6 +41,7 @@ import {
   generateWhatsAppLink,
   appUrl,
   getPaymentLink,
+  getProductionUrl,
 } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
@@ -272,7 +273,7 @@ export default function LinksPage() {
               </thead>
               <tbody className="divide-y divide-gray-100 text-xs">
                 {filteredLinks.map((link) => {
-                  const publicUrl = getPaymentLink(link.token)
+                  const publicUrl = link.customUrl ? getProductionUrl(link.customUrl) : getPaymentLink(link.token)
                   const clientObj = clients.find((c) => c.id === link.clientId)
                   const whatsappNum = clientObj?.whatsappNumber || clientObj?.phone
 

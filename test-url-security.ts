@@ -8,6 +8,8 @@ import {
   buildQuickJobDeliveryUrl,
   sanitizeRedirectUrl,
   validateUrlSecurity,
+  validateAppUrl,
+  isVercelPlatformDomain,
   isTrustedHost,
   CANONICAL_PRODUCTION_DOMAIN,
 } from './lib/utils/app-url'
@@ -170,13 +172,11 @@ assert(
 )
 
 // Restore environment
-process.env = originalEnv
+process.env = { ...originalEnv }
 
-
-
-// ─── TEST SUITE 5: VERCEL PREVIEW FALSE POSITIVE ─────────────────────────────
+// ─── TEST SUITE 5: VERCEL PREVIEW (NODE_ENV=production) ─────────────────────────
 console.log('\n--- TEST SUITE 5: VERCEL PREVIEW (NODE_ENV=production) ---')
-Object.defineProperty(process.env, "NODE_ENV", { value: "production" }); //'production'
+Object.defineProperty(process.env, 'NODE_ENV', { value: 'production' })
 process.env.VERCEL_ENV = 'preview'
 process.env.NEXT_PUBLIC_VERCEL_URL = 'preview.vercel.app'
 delete process.env.APP_ENV
@@ -188,4 +188,68 @@ assert(
   previewUrl === 'https://preview.vercel.app',
   'Vercel preview must not fall back to production domain'
 )
-console.log('\n=== ALL 20 URL SECURITY & ENVIRONMENT-AWARE GATEWAY TESTS PASSED ===')
+
+// ─── TEST SUITE 6: SCENARIO D: VERCEL.COM MISCONFIGURATION REJECTION ──────────
+console.log('\n--- TEST SUITE 6: SCENARIO D: VERCEL.COM MISCONFIGURATION REJECTION ---')
+// Simulate malicious or accidental vercel.com configuration
+process.env.APP_URL = 'https://vercel.com'
+process.env.NEXT_PUBLIC_APP_URL = 'https://vercel.com'
+process.env.VERCEL_URL = 'lexmedia-project.vercel.app'
+delete process.env.NEXT_PUBLIC_VERCEL_URL
+delete process.env.APP_ENV
+
+// The resolver MUST reject vercel.com and fall back to actual deployed application hostname
+const sanitizedBase = getCustomerUrl()
+console.log('21. getCustomerUrl() with APP_URL=https://vercel.com:', sanitizedBase)
+assert(
+  sanitizedBase === 'https://lexmedia-project.vercel.app',
+  'Resolver must reject APP_URL=https://vercel.com and resolve to https://lexmedia-project.vercel.app'
+)
+
+const misconfigPayment = buildPaymentUrl('tok_abc')
+console.log('22. buildPaymentUrl() under misconfiguration:', misconfigPayment)
+assert(
+  misconfigPayment === 'https://lexmedia-project.vercel.app/pay/tok_abc',
+  'Payment link under vercel.com misconfiguration must point to deployed app'
+)
+
+// Validate validateAppUrl security check
+const check1 = validateAppUrl('https://vercel.com')
+console.log('23. validateAppUrl("https://vercel.com"):', check1)
+assert(check1.isValid === false, 'validateAppUrl must reject https://vercel.com')
+
+const check2 = validateAppUrl('https://vercel.com/dashboard')
+console.log('24. validateAppUrl("https://vercel.com/dashboard"):', check2)
+assert(check2.isValid === false, 'validateAppUrl must reject https://vercel.com/dashboard')
+
+const check3 = validateAppUrl('https://vercel.com/projects/my-project')
+console.log('25. validateAppUrl("https://vercel.com/projects/my-project"):', check3)
+assert(check3.isValid === false, 'validateAppUrl must reject https://vercel.com/projects/my-project')
+
+const check4 = validateAppUrl('https://vercel.com/new')
+console.log('26. validateAppUrl("https://vercel.com/new"):', check4)
+assert(check4.isValid === false, 'validateAppUrl must reject https://vercel.com/new')
+
+// Valid project deployment URL
+const check5 = validateAppUrl('https://lexmedia-project.vercel.app/pay/test_token')
+console.log('27. validateAppUrl("https://lexmedia-project.vercel.app/pay/test_token"):', check5)
+assert(check5.isValid === true, 'validateAppUrl must allow valid *.vercel.app deployment URL')
+
+// Accidental nested vercel.com prefix: https://vercel.com/lexmedia-project.vercel.app/pay/tok
+const check6 = getProductionUrl('https://vercel.com/lexmedia-project.vercel.app/pay/tok')
+console.log('28. getProductionUrl() with nested vercel.com prefix:', check6)
+assert(
+  check6 === 'https://lexmedia-project.vercel.app/pay/tok',
+  'Nested vercel.com URL must be corrected to deployed vercel.app URL'
+)
+
+// Verify isVercelPlatformDomain helper
+assert(isVercelPlatformDomain('https://vercel.com') === true, 'isVercelPlatformDomain identifies https://vercel.com')
+assert(isVercelPlatformDomain('https://vercel.com/dashboard') === true, 'isVercelPlatformDomain identifies vercel dashboard')
+assert(isVercelPlatformDomain('https://lexmedia-project.vercel.app') === false, 'isVercelPlatformDomain allows *.vercel.app')
+assert(isVercelPlatformDomain('https://lexmedia.gh') === false, 'isVercelPlatformDomain allows lexmedia.gh')
+
+// Restore environment
+process.env = originalEnv
+
+console.log('\n=== ALL 28 URL SECURITY & ENVIRONMENT-AWARE GATEWAY TESTS PASSED ===')
