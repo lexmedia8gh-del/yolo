@@ -322,7 +322,21 @@ export function buildSecureLink(path: string, token: string, context?: any): str
 export function buildPaymentUrl(tokenOrId: string, context?: any): string {
   const cleanToken = (tokenOrId || 'sample').trim()
   const base = getAppBaseUrl(context)
-  return `${base}/pay/${encodeURIComponent(cleanToken)}`
+
+  // If cleanToken is already a full URL, extract the payment token/path
+  if (cleanToken.startsWith('http://') || cleanToken.startsWith('https://')) {
+    try {
+      const parsed = new URL(cleanToken)
+      const sectionMatch = parsed.pathname.match(/\/(pay|payment(?:\/secure)?)\/([^/?#]+)/i)
+      if (sectionMatch && sectionMatch[2]) {
+        return `${base}/pay/${encodeURIComponent(sectionMatch[2])}${parsed.search}${parsed.hash}`
+      }
+    } catch {}
+  }
+
+  // If cleanToken starts with /pay/ or /payment/secure/
+  const stripped = cleanToken.replace(/^\/?(pay|payment(?:\/secure)?)\//i, '')
+  return `${base}/pay/${encodeURIComponent(stripped)}`
 }
 
 /**
@@ -331,7 +345,8 @@ export function buildPaymentUrl(tokenOrId: string, context?: any): string {
 export function buildSecurePaymentUrl(tokenOrId: string, context?: any): string {
   const cleanToken = (tokenOrId || 'sample').trim()
   const base = getAppBaseUrl(context)
-  return `${base}/payment/secure/${encodeURIComponent(cleanToken)}`
+  const stripped = cleanToken.replace(/^\/?(pay|payment(?:\/secure)?)\//i, '')
+  return `${base}/payment/secure/${encodeURIComponent(stripped)}`
 }
 
 /**
@@ -342,7 +357,20 @@ export function buildSecurePaymentUrl(tokenOrId: string, context?: any): string 
 export function buildDeliveryUrl(accessToken: string, context?: any): string {
   const cleanToken = (accessToken || '').trim()
   const base = getAppBaseUrl(context)
-  return `${base}/delivery/${encodeURIComponent(cleanToken)}`
+
+  // If cleanToken is already a full URL, extract the delivery token
+  if (cleanToken.startsWith('http://') || cleanToken.startsWith('https://')) {
+    try {
+      const parsed = new URL(cleanToken)
+      const sectionMatch = parsed.pathname.match(/\/(delivery(?:\/secure)?)\/([^/?#]+)/i)
+      if (sectionMatch && sectionMatch[2]) {
+        return `${base}/delivery/${encodeURIComponent(sectionMatch[2])}${parsed.search}${parsed.hash}`
+      }
+    } catch {}
+  }
+
+  const stripped = cleanToken.replace(/^\/?(delivery(?:\/secure)?)\//i, '')
+  return `${base}/delivery/${encodeURIComponent(stripped)}`
 }
 
 /**
@@ -351,7 +379,8 @@ export function buildDeliveryUrl(accessToken: string, context?: any): string {
 export function buildSecureDeliveryUrl(accessToken: string, context?: any): string {
   const cleanToken = (accessToken || '').trim()
   const base = getAppBaseUrl(context)
-  return `${base}/delivery/secure/${encodeURIComponent(cleanToken)}`
+  const stripped = cleanToken.replace(/^\/?(delivery(?:\/secure)?)\//i, '')
+  return `${base}/delivery/secure/${encodeURIComponent(stripped)}`
 }
 
 /**
@@ -362,7 +391,19 @@ export function buildSecureDeliveryUrl(accessToken: string, context?: any): stri
 export function buildQuickJobUrl(tokenOrId: string, context?: any): string {
   const cleanToken = (tokenOrId || '').trim()
   const base = getAppBaseUrl(context)
-  return `${base}/quick-jobs/${encodeURIComponent(cleanToken)}`
+
+  if (cleanToken.startsWith('http://') || cleanToken.startsWith('https://')) {
+    try {
+      const parsed = new URL(cleanToken)
+      const sectionMatch = parsed.pathname.match(/\/quick-jobs\/([^/?#]+)/i)
+      if (sectionMatch && sectionMatch[1]) {
+        return `${base}/quick-jobs/${encodeURIComponent(sectionMatch[1])}${parsed.search}${parsed.hash}`
+      }
+    } catch {}
+  }
+
+  const stripped = cleanToken.replace(/^\/?quick-jobs\//i, '')
+  return `${base}/quick-jobs/${encodeURIComponent(stripped)}`
 }
 
 /**
@@ -467,22 +508,50 @@ export function validateAppUrl(urlStr: string, context?: any): AppUrlValidationR
         }
       }
 
-      // Check if it's a known application route under vercel.com
-      const path = parsed.pathname
-      if (
-        path.startsWith('/pay') ||
-        path.startsWith('/payment') ||
-        path.startsWith('/delivery') ||
-        path.startsWith('/invoices') ||
-        path.startsWith('/quick-jobs') ||
-        path.startsWith('/dashboard') ||
-        path.startsWith('/p/') ||
-        path.startsWith('/d/')
-      ) {
+      // Check if an application section is present anywhere in the pathname
+      // (e.g. /pay/xyz, /team/proj/pay/xyz, /delivery/abc, /quick-jobs/123, /invoices/456)
+      const sectionMatch = parsed.pathname.match(/\/(pay|payment(?:\/secure)?|delivery(?:\/secure)?|quick-jobs|invoices)(?:\/([^/?#]+))?/i)
+      if (sectionMatch) {
+        const rawPrefix = sectionMatch[1].toLowerCase()
+        const section = rawPrefix.startsWith('payment') ? 'pay' : rawPrefix
+        const tokenSegment = sectionMatch[2] ? `/${sectionMatch[2]}` : ''
         return {
           isValid: false,
-          sanitizedUrl: `${safeBase}${path}${parsed.search}${parsed.hash}`,
-          reason: 'Blocked vercel.com platform URL; redirected to application origin',
+          sanitizedUrl: `${safeBase}/${section}${tokenSegment}${parsed.search}${parsed.hash}`,
+          reason: 'Blocked vercel.com platform URL; redirected to application section',
+        }
+      }
+
+      // Check query parameters for token hints
+      const queryToken = parsed.searchParams.get('token') || parsed.searchParams.get('t')
+      if (queryToken) {
+        if (queryToken.startsWith('del_') || queryToken.startsWith('d_')) {
+          return {
+            isValid: false,
+            sanitizedUrl: `${safeBase}/delivery/${encodeURIComponent(queryToken)}`,
+            reason: 'Extracted delivery token from vercel.com link',
+          }
+        }
+        if (queryToken.startsWith('qj_')) {
+          return {
+            isValid: false,
+            sanitizedUrl: `${safeBase}/quick-jobs/${encodeURIComponent(queryToken)}`,
+            reason: 'Extracted quick job token from vercel.com link',
+          }
+        }
+        return {
+          isValid: false,
+          sanitizedUrl: `${safeBase}/pay/${encodeURIComponent(queryToken)}`,
+          reason: 'Extracted payment token from vercel.com link',
+        }
+      }
+
+      // Check context for token fallback
+      if (context && typeof context === 'object' && context.token) {
+        return {
+          isValid: false,
+          sanitizedUrl: `${safeBase}/pay/${encodeURIComponent(context.token)}`,
+          reason: 'Fallback to context payment token from vercel.com link',
         }
       }
 
@@ -511,6 +580,18 @@ export function validateAppUrl(urlStr: string, context?: any): AppUrlValidationR
     const hostname = parsed.hostname.toLowerCase()
 
     if (hostname === 'vercel.com' || (hostname.endsWith('.vercel.com') && !hostname.endsWith('.vercel.app'))) {
+      const sectionMatch = parsed.pathname.match(/\/(pay|payment(?:\/secure)?|delivery(?:\/secure)?|quick-jobs|invoices)(?:\/([^/?#]+))?/i)
+      if (sectionMatch) {
+        const rawPrefix = sectionMatch[1].toLowerCase()
+        const section = rawPrefix.startsWith('payment') ? 'pay' : rawPrefix
+        const tokenSegment = sectionMatch[2] ? `/${sectionMatch[2]}` : ''
+        return {
+          isValid: false,
+          sanitizedUrl: `${safeBase}/${section}${tokenSegment}${parsed.search}${parsed.hash}`,
+          reason: 'Blocked vercel.com platform host; redirected to application section',
+        }
+      }
+
       return {
         isValid: false,
         sanitizedUrl: `${safeBase}${parsed.pathname}${parsed.search}${parsed.hash}`,
@@ -559,12 +640,28 @@ export const validateUrlSecurity = validateAppUrl
  */
 export function getProductionUrl(urlStr: string, context?: any): string {
   const base = getAppBaseUrl(context)
-  if (!urlStr || typeof urlStr !== 'string') return base
+  if (!urlStr || typeof urlStr !== 'string') {
+    if (context && typeof context === 'object' && context.token) {
+      return buildPaymentUrl(context.token, context)
+    }
+    return base
+  }
   const trimmed = urlStr.trim()
-  if (!trimmed) return base
+  if (!trimmed) {
+    if (context && typeof context === 'object' && context.token) {
+      return buildPaymentUrl(context.token, context)
+    }
+    return base
+  }
 
-  // 1. Bare token -> treat as payment token
+  // 1. Bare token -> treat as specific section token
   if (!trimmed.startsWith('/') && !trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    if (trimmed.startsWith('del_') || trimmed.startsWith('d_')) {
+      return buildDeliveryUrl(trimmed, context)
+    }
+    if (trimmed.startsWith('qj_')) {
+      return buildQuickJobUrl(trimmed, context)
+    }
     return buildPaymentUrl(trimmed, context)
   }
 

@@ -183,13 +183,23 @@ function PaymentCallbackContent() {
                 </button>
               ) : null}
 
-              <button
-                onClick={() => router.push('/')}
-                className="w-full py-2.5 px-4 rounded-xl border border-slate-800 hover:bg-slate-800/60 text-slate-300 font-medium text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <span>Return to Home</span>
-                <ArrowRight size={14} />
-              </button>
+              {token ? (
+                <button
+                  onClick={() => router.push(`/pay/${token}`)}
+                  className="w-full py-2.5 px-4 rounded-xl border border-slate-800 hover:bg-slate-800/60 text-slate-300 font-medium text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <span>View Payment Receipt</span>
+                  <ArrowRight size={14} />
+                </button>
+              ) : (
+                <button
+                  onClick={() => router.push('/pay')}
+                  className="w-full py-2.5 px-4 rounded-xl border border-slate-800 hover:bg-slate-800/60 text-slate-300 font-medium text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <span>Return to Payment Portal</span>
+                  <ArrowRight size={14} />
+                </button>
+              )}
             </div>
           </div>
         )}

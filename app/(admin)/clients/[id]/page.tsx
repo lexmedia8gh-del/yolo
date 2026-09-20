@@ -40,7 +40,7 @@ import {
 } from '@/lib/firebase/firestore'
 import { where, orderBy } from '@/lib/firebase/firestore'
 import type { Client, Project, Invoice, Payment, ClientLink } from '@/lib/types'
-import { formatCurrency, formatDate, getStatusColor, copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone, appUrl, getPaymentLink, getProductionUrl } from '@/lib/utils'
+import { formatCurrency, formatDate, getStatusColor, copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone, appUrl, getPaymentLink, getProductionUrl, isVercelPlatformDomain } from '@/lib/utils'
 import { NewProjectWizard } from '@/components/projects/NewProjectWizard'
 import { ClientInformationTemplatesModal } from '@/components/clients/ClientInformationTemplatesModal'
 import { RecordPaymentModal } from '@/components/payments/RecordPaymentModal'
@@ -760,7 +760,13 @@ export default function ClientProfilePage() {
                       ) : (
                         <div className="space-y-2">
                           {links.map((link) => {
-                            const payUrl = link.token ? getPaymentLink(link.token) : getProductionUrl(link.url || '')
+                            const payUrl = link.token
+                              ? getPaymentLink(link.token)
+                              : (link.customUrl && !isVercelPlatformDomain(link.customUrl))
+                              ? getProductionUrl(link.customUrl)
+                              : (link.url && !isVercelPlatformDomain(link.url))
+                              ? getProductionUrl(link.url)
+                              : ''
                             return (
                               <div
                                 key={link.id}
@@ -1076,9 +1082,13 @@ export default function ClientProfilePage() {
           onClose={() => setSelectedLinkForMessage(null)}
           client={client}
           paymentUrl={
-            (selectedLinkForMessage.url && !selectedLinkForMessage.url.includes('localhost') && !selectedLinkForMessage.url.includes('127.0.0.1'))
-              ? selectedLinkForMessage.url
-              : getPaymentLink(selectedLinkForMessage.token)
+            selectedLinkForMessage.token
+              ? getPaymentLink(selectedLinkForMessage.token)
+              : (selectedLinkForMessage.customUrl && !isVercelPlatformDomain(selectedLinkForMessage.customUrl))
+              ? getProductionUrl(selectedLinkForMessage.customUrl)
+              : (selectedLinkForMessage.url && !isVercelPlatformDomain(selectedLinkForMessage.url))
+              ? getProductionUrl(selectedLinkForMessage.url)
+              : ''
           }
           amount={selectedLinkForMessage.amount}
           invoiceNumber={selectedLinkForMessage.invoiceNumber}

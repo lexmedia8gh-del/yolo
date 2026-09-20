@@ -19,7 +19,7 @@ import {
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import type { Client, Project, Invoice } from '@/lib/types'
-import { formatCurrency, copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone, getProductionUrl } from '@/lib/utils'
+import { formatCurrency, copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone, getProductionUrl, getPaymentLink, isVercelPlatformDomain } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface PreparePaymentMessageModalProps {
@@ -53,8 +53,15 @@ export function PreparePaymentMessageModal({
   currency = 'GHS',
   isDeposit = false,
 }: PreparePaymentMessageModalProps) {
-  // Authoritative production payment link — never contains localhost
-  const effectiveUrl = getProductionUrl(paymentUrl || paymentLinkUrl || '')
+  // Authoritative production payment link — resolves directly to the payment section
+  const rawUrl = paymentUrl || paymentLinkUrl || ''
+  const effectiveUrl = (rawUrl && !isVercelPlatformDomain(rawUrl))
+    ? getProductionUrl(rawUrl)
+    : (invoice?.paymentLinkToken
+        ? getPaymentLink(invoice.paymentLinkToken)
+        : (invoiceNumber || invoice?.invoiceNumber
+            ? getPaymentLink(invoiceNumber || invoice?.invoiceNumber || '')
+            : getProductionUrl(rawUrl)))
 
   const [template, setTemplate] = useState<MessageTemplate>(
     isDeposit ? 'deposit_request' : 'whatsapp_standard'

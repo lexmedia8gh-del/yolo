@@ -5,7 +5,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { InvoiceDocument } from './InvoiceDocument'
 import { downloadInvoicePdf, printInvoiceDocument } from '@/lib/utils/pdfGenerator'
-import { copyToClipboard } from '@/lib/utils'
+import { copyToClipboard, getPaymentLink, getProductionUrl, isVercelPlatformDomain } from '@/lib/utils'
 import type { Invoice } from '@/lib/types'
 import {
   Download,
@@ -46,7 +46,13 @@ export function InvoicePreviewModal({
   if (!invoice) return null
 
   const elementId = `invoice-preview-${invoice.id || 'current'}`
-  const resolvedPaymentUrl = paymentUrl || invoice.paymentLinkUrl || ''
+  const resolvedPaymentUrl = (paymentUrl && !isVercelPlatformDomain(paymentUrl))
+    ? getProductionUrl(paymentUrl)
+    : (invoice.paymentLinkToken
+        ? getPaymentLink(invoice.paymentLinkToken)
+        : (invoice.paymentLinkUrl && !isVercelPlatformDomain(invoice.paymentLinkUrl)
+            ? getProductionUrl(invoice.paymentLinkUrl)
+            : (invoice.invoiceNumber ? getPaymentLink(invoice.invoiceNumber) : '')))
 
   const handleDownloadPdf = async () => {
     setIsGeneratingPdf(true)

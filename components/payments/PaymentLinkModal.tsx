@@ -140,7 +140,7 @@ export function PaymentLinkModal({
   }, [currentInvoice, currentProject])
 
   const getEffectiveUrl = (token?: string, url?: string) => {
-    if (url) return getProductionUrl(url)
+    if (url && !isVercelPlatformDomain(url)) return getProductionUrl(url)
     return getPaymentLink(token || 'sample')
   }
 
@@ -158,7 +158,7 @@ export function PaymentLinkModal({
         return
       }
       if (isVercelPlatformDomain(customUrl.trim())) {
-        toast.error('The Vercel platform domain (vercel.com) cannot be used as a client payment link.')
+        toast.error('The Vercel platform domain (vercel.com) cannot be used as a client payment link. Please provide the checkout or application payment URL.')
         return
       }
     }
@@ -180,7 +180,7 @@ export function PaymentLinkModal({
         currency,
         title: title.trim() || `Payment Request for ${currentClient?.fullName || 'Client'}`,
         notes: notes.trim(),
-        customUrl: linkSource === 'custom' ? customUrl.trim() : undefined,
+        customUrl: (linkSource === 'custom' && !isVercelPlatformDomain(customUrl.trim())) ? getProductionUrl(customUrl.trim()) : undefined,
         linkType: linkSource,
         status: 'Pending Payment',
         paymentStatus: 'Unpaid',
@@ -192,7 +192,9 @@ export function PaymentLinkModal({
       const savedLink = { id: docId, ...payload } as any
       setCreatedLink(savedLink)
 
-      const finalUrl = linkSource === 'custom' ? customUrl.trim() : getEffectiveUrl(token)
+      const finalUrl = (linkSource === 'custom' && !isVercelPlatformDomain(customUrl.trim()))
+        ? getProductionUrl(customUrl.trim())
+        : getPaymentLink(token)
       copyToClipboard(finalUrl)
 
       toast.success('Payment link saved & copied to clipboard!')
@@ -206,7 +208,9 @@ export function PaymentLinkModal({
   }
 
   const activeUrl = createdLink
-    ? createdLink.customUrl || getEffectiveUrl(createdLink.token)
+    ? (createdLink.customUrl && !isVercelPlatformDomain(createdLink.customUrl)
+        ? getProductionUrl(createdLink.customUrl)
+        : getPaymentLink(createdLink.token))
     : linkSource === 'custom'
     ? customUrl
     : 'Will generate studio link (/pay/...)'

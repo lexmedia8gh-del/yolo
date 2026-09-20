@@ -54,6 +54,8 @@ import {
   generateLxmInvoiceNumber,
   generateSecureToken,
   getPaymentLink,
+  getProductionUrl,
+  isVercelPlatformDomain,
   copyToClipboard,
 } from '@/lib/utils'
 import { downloadInvoicePdf } from '@/lib/utils/pdfGenerator'
@@ -291,7 +293,11 @@ export default function InvoicesPage() {
   }
 
   const handleCopyPaymentLink = async (inv: Invoice) => {
-    let link = inv.paymentLinkUrl
+    let link = (inv.paymentLinkToken
+      ? getPaymentLink(inv.paymentLinkToken)
+      : (inv.paymentLinkUrl && !isVercelPlatformDomain(inv.paymentLinkUrl)
+          ? getProductionUrl(inv.paymentLinkUrl)
+          : ''))
 
     if (!link) {
       // Generate one on the fly and persist
@@ -319,6 +325,7 @@ export default function InvoicesPage() {
         })
       } catch (err) {
         console.warn('Could not generate payment link:', err)
+        link = getPaymentLink(inv.invoiceNumber)
       }
     }
 

@@ -38,6 +38,43 @@ export async function GET(
         if (docSnap.exists) {
           linkData = docSnap.data()
           linkDocId = docSnap.id
+        } else {
+          // Check invoices by paymentLinkToken or invoiceNumber
+          const invByToken = await adminDb.collection(COLLECTIONS.INVOICES).where('paymentLinkToken', '==', token).limit(1).get()
+          if (!invByToken.empty) {
+            const inv = invByToken.docs[0].data()
+            invoiceData = { id: invByToken.docs[0].id, ...inv }
+            linkData = {
+              token,
+              amount: inv.balanceDue !== undefined ? inv.balanceDue : inv.total,
+              currency: inv.currency || 'GHS',
+              clientName: inv.clientName || '',
+              projectName: inv.projectName || '',
+              invoiceNumber: inv.invoiceNumber || '',
+              title: `Invoice ${inv.invoiceNumber || ''} Payment`,
+              status: inv.status === 'Paid' ? 'Paid' : 'Pending Payment',
+              invoiceId: invByToken.docs[0].id,
+            }
+            linkDocId = invByToken.docs[0].id
+          } else {
+            const invByNum = await adminDb.collection(COLLECTIONS.INVOICES).where('invoiceNumber', '==', token).limit(1).get()
+            if (!invByNum.empty) {
+              const inv = invByNum.docs[0].data()
+              invoiceData = { id: invByNum.docs[0].id, ...inv }
+              linkData = {
+                token: inv.paymentLinkToken || token,
+                amount: inv.balanceDue !== undefined ? inv.balanceDue : inv.total,
+                currency: inv.currency || 'GHS',
+                clientName: inv.clientName || '',
+                projectName: inv.projectName || '',
+                invoiceNumber: inv.invoiceNumber || '',
+                title: `Invoice ${inv.invoiceNumber || ''} Payment`,
+                status: inv.status === 'Paid' ? 'Paid' : 'Pending Payment',
+                invoiceId: invByNum.docs[0].id,
+              }
+              linkDocId = invByNum.docs[0].id
+            }
+          }
         }
       }
 
@@ -85,17 +122,39 @@ export async function GET(
       }
     }
 
-    // 3. Fallback: check invoices directly by token
+    // 3. Fallback: check invoices directly by token, invoiceNumber, or doc ID
     if (!linkData) {
       try {
         const invRef = collection(db, COLLECTIONS.INVOICES)
-        const qInv = query(invRef, where('paymentLinkToken', '==', token))
-        const invSnap = await getDocs(qInv)
-        if (!invSnap.empty) {
+        let invSnap = await getDocs(query(invRef, where('paymentLinkToken', '==', token)))
+        if (invSnap.empty) {
+          invSnap = await getDocs(query(invRef, where('invoiceNumber', '==', token)))
+        }
+        if (invSnap.empty) {
+          try {
+            const singleDoc = await getDoc(doc(db, COLLECTIONS.INVOICES, token))
+            if (singleDoc.exists()) {
+              const inv = singleDoc.data()
+              invoiceData = { id: singleDoc.id, ...inv }
+              linkData = {
+                token: inv.paymentLinkToken || singleDoc.id,
+                amount: inv.balanceDue !== undefined ? inv.balanceDue : inv.total,
+                currency: inv.currency || 'GHS',
+                clientName: inv.clientName || '',
+                projectName: inv.projectName || '',
+                invoiceNumber: inv.invoiceNumber || '',
+                title: `Invoice ${inv.invoiceNumber || ''} Payment`,
+                status: inv.status === 'Paid' ? 'Paid' : 'Pending Payment',
+                invoiceId: singleDoc.id,
+              }
+              linkDocId = singleDoc.id
+            }
+          } catch {}
+        } else {
           const inv = invSnap.docs[0].data()
           invoiceData = { id: invSnap.docs[0].id, ...inv }
           linkData = {
-            token,
+            token: inv.paymentLinkToken || token,
             amount: inv.balanceDue !== undefined ? inv.balanceDue : inv.total,
             currency: inv.currency || 'GHS',
             clientName: inv.clientName || '',
