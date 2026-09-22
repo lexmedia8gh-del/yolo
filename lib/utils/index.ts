@@ -364,6 +364,8 @@ export {
   buildQuickJobUrl,
   buildQuickJobDeliveryUrl,
   buildPaymentCallbackUrl,
+  getRuntimeOrigin,
+  buildVerificationUrl,
   sanitizeRedirectUrl,
   normalizeUrl,
   isTrustedHost,

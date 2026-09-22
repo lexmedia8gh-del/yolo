@@ -136,6 +136,54 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    if (!linkData && token) {
+      // 2.5 Fallback: check quickJobs by paymentToken or doc id
+      const qjByToken = await adminDb.collection('quickJobs').where('paymentToken', '==', token).limit(1).get()
+      if (!qjByToken.empty) {
+        const qjData = qjByToken.docs[0].data()
+        linkData = {
+          quickJobId: qjByToken.docs[0].id,
+          deliveryAccessToken: qjData.deliveryAccessToken || '',
+          clientId: qjData.clientId || '',
+          clientName: qjData.clientName || 'Client',
+          clientEmail: qjData.clientEmail || '',
+          amount: qjData.outstandingBalance !== undefined ? qjData.outstandingBalance : (qjData.originalAgreedPrice || 0),
+          status: 'Pending',
+        }
+      } else {
+        const qjDoc = await adminDb.collection('quickJobs').doc(token).get()
+        if (qjDoc.exists) {
+          const qjData = qjDoc.data()!
+          linkData = {
+            quickJobId: qjDoc.id,
+            deliveryAccessToken: qjData.deliveryAccessToken || '',
+            clientId: qjData.clientId || '',
+            clientName: qjData.clientName || 'Client',
+            clientEmail: qjData.clientEmail || '',
+            amount: qjData.outstandingBalance !== undefined ? qjData.outstandingBalance : (qjData.originalAgreedPrice || 0),
+            status: 'Pending',
+          }
+        }
+      }
+    }
+
+    if (!linkData && token) {
+      // 2.6 Fallback: check invoices by paymentLinkToken or invoiceNumber or doc id
+      const invByToken = await adminDb.collection('invoices').where('paymentLinkToken', '==', token).limit(1).get()
+      if (!invByToken.empty) {
+        const invData = invByToken.docs[0].data()
+        linkData = {
+          invoiceId: invByToken.docs[0].id,
+          invoiceNumber: invData.invoiceNumber || '',
+          clientId: invData.clientId || '',
+          clientName: invData.clientName || 'Client',
+          clientEmail: invData.clientEmail || '',
+          amount: invData.balanceDue !== undefined ? invData.balanceDue : (invData.total || 0),
+          status: 'Pending',
+        }
+      }
+    }
+
     if (!linkData) {
       return NextResponse.json({ error: 'Invalid payment link or delivery access token' }, { status: 404 })
     }

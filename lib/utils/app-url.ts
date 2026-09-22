@@ -455,15 +455,25 @@ export function buildPaymentCallbackUrl(reference?: string, token?: string, cont
 export function buildInvoiceUrl(invoiceNumber: string, context?: any): string {
   const clean = (invoiceNumber || '').trim()
   const base = getAppBaseUrl(context)
-  return `${base}/invoices/${encodeURIComponent(clean)}`
+  return attachVercelBypassIfAvailable(`${base}/invoices/${encodeURIComponent(clean)}`)
 }
 
 /**
- * Alias for Quick Job delivery link (uses buildDeliveryUrl).
+ * Builds a canonical Quick Job delivery portal link.
+ * Example: https://YOUR-VERCEL-DEPLOYMENT.vercel.app/quick-jobs/delivery/{token}
  */
-export function buildQuickJobDeliveryUrl(accessToken: string, context?: any): string {
-  return buildDeliveryUrl(accessToken, context)
+export function buildQuickJobDeliveryUrl(tokenOrAccessToken: string, context?: any): string {
+  const cleanToken = (tokenOrAccessToken || '').trim()
+  const base = getAppBaseUrl(context)
+  const stripped = cleanToken.replace(/^\/?(quick-jobs\/delivery|quick-jobs|delivery)\//i, '')
+  return attachVercelBypassIfAvailable(`${base}/quick-jobs/delivery/${encodeURIComponent(stripped)}`)
 }
+
+/**
+ * Standardized conceptual URL helpers & aliases.
+ */
+export const getRuntimeOrigin = getAppBaseUrl
+export const buildVerificationUrl = buildPaymentCallbackUrl
 
 /**
  * Backwards compatibility aliases for existing imports across the codebase.
@@ -564,8 +574,8 @@ export function validateAppUrl(urlStr: string, context?: any): AppUrlValidationR
         if (queryToken.startsWith('qj_')) {
           return {
             isValid: false,
-            sanitizedUrl: `${safeBase}/quick-jobs/${encodeURIComponent(queryToken)}`,
-            reason: 'Extracted quick job token from vercel.com link',
+            sanitizedUrl: attachVercelBypassIfAvailable(`${safeBase}/pay/${encodeURIComponent(queryToken)}`),
+            reason: 'Extracted quick job payment token from vercel.com link',
           }
         }
         return {
@@ -689,7 +699,10 @@ export function getProductionUrl(urlStr: string, context?: any): string {
       return buildDeliveryUrl(trimmed, context)
     }
     if (trimmed.startsWith('qj_')) {
-      return buildQuickJobUrl(trimmed, context)
+      if (context?.type === 'delivery' || context?.section === 'delivery') {
+        return buildQuickJobDeliveryUrl(trimmed, context)
+      }
+      return buildPaymentUrl(trimmed, context)
     }
     return buildPaymentUrl(trimmed, context)
   }

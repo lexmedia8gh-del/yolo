@@ -96,8 +96,8 @@ export const config = {
      * - favicon.ico
      * - public folder files
      * - API routes (handled separately)
-     * - Public client pages (pay, payment, delivery, d, p, client)
+     * - Public client pages (pay, payment, delivery, d, p, client, quick-jobs/delivery)
      */
-    '/((?!_next/static|_next/image|favicon.ico|public|api|p/|pay|payment|delivery|d/|client).*)',
+    '/((?!_next/static|_next/image|favicon.ico|public|api|p/|pay|payment|delivery|d/|client|quick-jobs/delivery).*)',
   ],
 }

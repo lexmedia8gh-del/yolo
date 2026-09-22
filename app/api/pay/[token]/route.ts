@@ -73,6 +73,43 @@ export async function GET(
                 invoiceId: invByNum.docs[0].id,
               }
               linkDocId = invByNum.docs[0].id
+            } else {
+              // Check Quick Jobs by paymentToken or doc id
+              const qjByToken = await adminDb.collection(COLLECTIONS.QUICK_JOBS).where('paymentToken', '==', token).limit(1).get()
+              if (!qjByToken.empty) {
+                const qj = qjByToken.docs[0].data()
+                linkData = {
+                  token,
+                  amount: qj.outstandingBalance !== undefined ? qj.outstandingBalance : (qj.originalAgreedPrice || 0),
+                  currency: qj.currency || 'GHS',
+                  clientName: qj.clientName || '',
+                  projectName: qj.jobDescription || '',
+                  invoiceNumber: '',
+                  title: `Payment for Quick Job: ${qj.jobDescription || ''}`,
+                  status: (qj.paymentStatus === 'Paid' || (qj.outstandingBalance !== undefined && qj.outstandingBalance <= 0)) ? 'Paid' : (qj.paymentStatus || 'Pending Payment'),
+                  paymentStatus: qj.paymentStatus || 'Pending Payment',
+                  quickJobId: qjByToken.docs[0].id,
+                }
+                linkDocId = qjByToken.docs[0].id
+              } else {
+                const qjDoc = await adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(token).get()
+                if (qjDoc.exists) {
+                  const qj = qjDoc.data()!
+                  linkData = {
+                    token: qj.paymentToken || token,
+                    amount: qj.outstandingBalance !== undefined ? qj.outstandingBalance : (qj.originalAgreedPrice || 0),
+                    currency: qj.currency || 'GHS',
+                    clientName: qj.clientName || '',
+                    projectName: qj.jobDescription || '',
+                    invoiceNumber: '',
+                    title: `Payment for Quick Job: ${qj.jobDescription || ''}`,
+                    status: (qj.paymentStatus === 'Paid' || (qj.outstandingBalance !== undefined && qj.outstandingBalance <= 0)) ? 'Paid' : (qj.paymentStatus || 'Pending Payment'),
+                    paymentStatus: qj.paymentStatus || 'Pending Payment',
+                    quickJobId: qjDoc.id,
+                  }
+                  linkDocId = qjDoc.id
+                }
+              }
             }
           }
         }

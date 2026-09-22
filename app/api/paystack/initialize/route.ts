@@ -104,6 +104,34 @@ export async function POST(req: NextRequest) {
               serverInvoiceNumber = qjData.jobCode || qjData.title || serverInvoiceNumber
             }
           }
+        } else {
+          // 3. Try checking quickJobs directly by paymentToken or doc id
+          const qjByToken = await adminDb.collection(COLLECTIONS.QUICK_JOBS).where('paymentToken', '==', token).limit(1).get()
+          if (!qjByToken.empty) {
+            const qjData = qjByToken.docs[0].data()
+            serverQuickJobId = qjByToken.docs[0].id
+            serverClientId = qjData.clientId || ''
+            serverClientName = qjData.clientName || serverClientName
+            serverEmail = qjData.clientEmail || serverEmail
+            const total = Number(qjData.originalAgreedPrice || qjData.amount || 0)
+            const paid = Number(qjData.amountPaid || 0)
+            serverAmount = Math.max(0, Number(qjData.outstandingBalance !== undefined ? qjData.outstandingBalance : (total - paid)))
+            serverDeliveryAccessToken = qjData.deliveryAccessToken || ''
+          } else {
+            // 4. Try checking invoices directly by paymentLinkToken or invoiceNumber
+            const invByToken = await adminDb.collection(COLLECTIONS.INVOICES).where('paymentLinkToken', '==', token).limit(1).get()
+            if (!invByToken.empty) {
+              const invData = invByToken.docs[0].data()
+              serverInvoiceId = invByToken.docs[0].id
+              serverClientId = invData.clientId || ''
+              serverClientName = invData.clientName || serverClientName
+              serverEmail = invData.clientEmail || serverEmail
+              serverInvoiceNumber = invData.invoiceNumber || serverInvoiceNumber
+              const total = Number(invData.total || invData.totalAmount || 0)
+              const paid = Number(invData.amountPaid || 0)
+              serverAmount = Math.max(0, Number(invData.balanceDue !== undefined ? invData.balanceDue : (total - paid)))
+            }
+          }
         }
       }
     }
