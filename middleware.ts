@@ -18,33 +18,59 @@ const PROTECTED_PATHS = [
 // Routes that should redirect to dashboard if already authenticated
 const AUTH_PATHS = ['/login']
 
+// Public client-facing routes that MUST bypass admin authentication:
+// - /pay/* (payment portal)
+// - /payment/* (payment portal alias)
+// - /p/* (short payment link)
+// - /delivery/* (secure delivery portal)
+// - /d/* (short delivery link)
+// - /quick-jobs/delivery/* (quick job delivery portal)
+// - /quick-jobs/[token] (client token view)
+// - /client/quick-job/* (client quick job alias)
+export function isPublicClientRoute(pathname: string): boolean {
+  if (
+    pathname === '/pay' ||
+    pathname.startsWith('/pay/') ||
+    pathname === '/payment' ||
+    pathname.startsWith('/payment/') ||
+    pathname.startsWith('/p/') ||
+    pathname === '/delivery' ||
+    pathname.startsWith('/delivery/') ||
+    pathname.startsWith('/d/') ||
+    pathname.startsWith('/quick-jobs/delivery') ||
+    pathname.startsWith('/client/quick-job')
+  ) {
+    return true
+  }
+
+  // Quick job client token portals: /quick-jobs/[token]
+  // Note: /quick-jobs and /quick-jobs/ are the admin portal, which remains protected.
+  if (pathname.startsWith('/quick-jobs/') && pathname !== '/quick-jobs/') {
+    return true
+  }
+
+  return false
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Unconditionally allow public portal routes: /pay/*, /p/*, /payment/*, /delivery/*, /d/*, /quick-jobs/[token], /client/quick-job/*
-  if (
-    pathname.startsWith('/pay') ||
-    pathname.startsWith('/p/') ||
-    pathname.startsWith('/payment') ||
-    pathname.startsWith('/delivery') ||
-    pathname.startsWith('/d/') ||
-    pathname.startsWith('/client/quick-job') ||
-    (pathname.startsWith('/quick-jobs/') && pathname !== '/quick-jobs/' && pathname.length > '/quick-jobs/'.length)
-  ) {
+  // 1. Unconditionally allow public client-facing portal routes
+  if (isPublicClientRoute(pathname)) {
     return NextResponse.next()
   }
 
-  // Check for Firebase auth session cookie
+  // 2. Check for Firebase auth session cookie
   const sessionCookie = request.cookies.get('__session')
   const isAuthenticated = !!sessionCookie?.value
 
-  // Check if path is protected
+  // 3. Check if path is protected admin route
   const isProtectedPath = PROTECTED_PATHS.some((path) =>
-    pathname.startsWith(path)
+    pathname === path || pathname.startsWith(`${path}/`)
   )
 
-  // Check if path is auth-only (login page)
-  const isAuthPath = AUTH_PATHS.some((path) => pathname.startsWith(path))
+  // 4. Check if path is auth-only (login page)
+  const isAuthPath = AUTH_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))
 
   // Redirect unauthenticated users away from protected routes
   if (isProtectedPath && !isAuthenticated) {
@@ -70,8 +96,8 @@ export const config = {
      * - favicon.ico
      * - public folder files
      * - API routes (handled separately)
-     * - Public client pages /p/*, /pay/*, /payment/*, /delivery/*, /d/* (always accessible)
+     * - Public client pages (pay, payment, delivery, d, p, client)
      */
-    '/((?!_next/static|_next/image|favicon.ico|public|api|p/|pay/|payment/|delivery/|d/).*)',
+    '/((?!_next/static|_next/image|favicon.ico|public|api|p/|pay|payment|delivery|d/|client).*)',
   ],
 }

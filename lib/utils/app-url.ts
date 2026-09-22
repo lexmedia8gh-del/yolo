@@ -315,6 +315,35 @@ export function buildSecureLink(path: string, token: string, context?: any): str
 }
 
 /**
+ * Retrieves optional Vercel Protection Bypass secret token if configured in the environment.
+ * Allows client-facing links on Vercel preview deployments to bypass Vercel Authentication / SSO.
+ */
+export function getProtectionBypassSecret(): string {
+  const bypass =
+    process.env.VERCEL_PROTECTION_BYPASS ||
+    process.env.NEXT_PUBLIC_VERCEL_PROTECTION_BYPASS ||
+    process.env.VERCEL_AUTOMATION_BYPASS_SECRET ||
+    ''
+  return bypass.trim()
+}
+
+/**
+ * Attaches Vercel Protection Bypass query parameter if configured and targeting a *.vercel.app host.
+ */
+export function attachVercelBypassIfAvailable(url: string): string {
+  const bypass = getProtectionBypassSecret()
+  if (!bypass) return url
+  try {
+    const parsed = new URL(url)
+    if (parsed.hostname.endsWith('.vercel.app') && !parsed.searchParams.has('x-vercel-protection-bypass')) {
+      parsed.searchParams.set('x-vercel-protection-bypass', bypass)
+      return parsed.toString()
+    }
+  } catch {}
+  return url
+}
+
+/**
  * Builds a secure customer-facing payment URL.
  * Routes to the canonical /pay/{token} (with /payment/secure/{token} alias supported).
  * Example: https://YOUR-VERCEL-DEPLOYMENT.vercel.app/pay/{token}
@@ -329,14 +358,14 @@ export function buildPaymentUrl(tokenOrId: string, context?: any): string {
       const parsed = new URL(cleanToken)
       const sectionMatch = parsed.pathname.match(/\/(pay|payment(?:\/secure)?)\/([^/?#]+)/i)
       if (sectionMatch && sectionMatch[2]) {
-        return `${base}/pay/${encodeURIComponent(sectionMatch[2])}${parsed.search}${parsed.hash}`
+        return attachVercelBypassIfAvailable(`${base}/pay/${encodeURIComponent(sectionMatch[2])}${parsed.search}${parsed.hash}`)
       }
     } catch {}
   }
 
   // If cleanToken starts with /pay/ or /payment/secure/
   const stripped = cleanToken.replace(/^\/?(pay|payment(?:\/secure)?)\//i, '')
-  return `${base}/pay/${encodeURIComponent(stripped)}`
+  return attachVercelBypassIfAvailable(`${base}/pay/${encodeURIComponent(stripped)}`)
 }
 
 /**
@@ -346,7 +375,7 @@ export function buildSecurePaymentUrl(tokenOrId: string, context?: any): string 
   const cleanToken = (tokenOrId || 'sample').trim()
   const base = getAppBaseUrl(context)
   const stripped = cleanToken.replace(/^\/?(pay|payment(?:\/secure)?)\//i, '')
-  return `${base}/payment/secure/${encodeURIComponent(stripped)}`
+  return attachVercelBypassIfAvailable(`${base}/payment/secure/${encodeURIComponent(stripped)}`)
 }
 
 /**
@@ -364,13 +393,13 @@ export function buildDeliveryUrl(accessToken: string, context?: any): string {
       const parsed = new URL(cleanToken)
       const sectionMatch = parsed.pathname.match(/\/(delivery(?:\/secure)?)\/([^/?#]+)/i)
       if (sectionMatch && sectionMatch[2]) {
-        return `${base}/delivery/${encodeURIComponent(sectionMatch[2])}${parsed.search}${parsed.hash}`
+        return attachVercelBypassIfAvailable(`${base}/delivery/${encodeURIComponent(sectionMatch[2])}${parsed.search}${parsed.hash}`)
       }
     } catch {}
   }
 
   const stripped = cleanToken.replace(/^\/?(delivery(?:\/secure)?)\//i, '')
-  return `${base}/delivery/${encodeURIComponent(stripped)}`
+  return attachVercelBypassIfAvailable(`${base}/delivery/${encodeURIComponent(stripped)}`)
 }
 
 /**
@@ -380,7 +409,7 @@ export function buildSecureDeliveryUrl(accessToken: string, context?: any): stri
   const cleanToken = (accessToken || '').trim()
   const base = getAppBaseUrl(context)
   const stripped = cleanToken.replace(/^\/?(delivery(?:\/secure)?)\//i, '')
-  return `${base}/delivery/secure/${encodeURIComponent(stripped)}`
+  return attachVercelBypassIfAvailable(`${base}/delivery/secure/${encodeURIComponent(stripped)}`)
 }
 
 /**
@@ -397,13 +426,13 @@ export function buildQuickJobUrl(tokenOrId: string, context?: any): string {
       const parsed = new URL(cleanToken)
       const sectionMatch = parsed.pathname.match(/\/quick-jobs\/([^/?#]+)/i)
       if (sectionMatch && sectionMatch[1]) {
-        return `${base}/quick-jobs/${encodeURIComponent(sectionMatch[1])}${parsed.search}${parsed.hash}`
+        return attachVercelBypassIfAvailable(`${base}/quick-jobs/${encodeURIComponent(sectionMatch[1])}${parsed.search}${parsed.hash}`)
       }
     } catch {}
   }
 
   const stripped = cleanToken.replace(/^\/?quick-jobs\//i, '')
-  return `${base}/quick-jobs/${encodeURIComponent(stripped)}`
+  return attachVercelBypassIfAvailable(`${base}/quick-jobs/${encodeURIComponent(stripped)}`)
 }
 
 /**
@@ -416,7 +445,7 @@ export function buildPaymentCallbackUrl(reference?: string, token?: string, cont
   if (reference) params.set('reference', reference)
   if (token) params.set('token', token)
   const query = params.toString() ? `?${params.toString()}` : ''
-  return `${base}/payment/callback${query}`
+  return attachVercelBypassIfAvailable(`${base}/payment/callback${query}`)
 }
 
 /**
