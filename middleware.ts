@@ -13,6 +13,7 @@ const PROTECTED_PATHS = [
   '/analytics',
   '/settings',
   '/quick-jobs',
+  '/previews',
 ]
 
 // Routes that should redirect to dashboard if already authenticated
@@ -24,6 +25,8 @@ const AUTH_PATHS = ['/login']
 // - /p/* (short payment link)
 // - /delivery/* (secure delivery portal)
 // - /d/* (short delivery link)
+// - /client-preview/* (view-only proofing portal)
+// - /preview/* (view-only proofing portal alias)
 // - /quick-jobs/delivery/* (quick job delivery portal)
 // - /quick-jobs/[token] (client token view)
 // - /client/quick-job/* (client quick job alias)
@@ -37,6 +40,10 @@ export function isPublicClientRoute(pathname: string): boolean {
     pathname === '/delivery' ||
     pathname.startsWith('/delivery/') ||
     pathname.startsWith('/d/') ||
+    pathname === '/client-preview' ||
+    pathname.startsWith('/client-preview/') ||
+    pathname === '/preview' ||
+    pathname.startsWith('/preview/') ||
     pathname.startsWith('/quick-jobs/delivery') ||
     pathname.startsWith('/client/quick-job')
   ) {

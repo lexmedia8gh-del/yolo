@@ -403,6 +403,20 @@ export function buildDeliveryUrl(accessToken: string, context?: any): string {
 }
 
 /**
+ * Builds a secure customer-facing client preview portal URL.
+ * Routes to canonical /client-preview/{token}.
+ * Example: https://YOUR-APP.com/client-preview/{token}
+ */
+export function buildClientPreviewUrl(token: string, context?: any): string {
+  const cleanToken = (token || '').trim()
+  const base = getAppBaseUrl(context)
+  const stripped = cleanToken.replace(/^\/?(client-preview|preview)\//i, '')
+  return attachVercelBypassIfAvailable(`${base}/client-preview/${encodeURIComponent(stripped)}`)
+}
+
+export const getClientPreviewLink = buildClientPreviewUrl
+
+/**
  * Builds a secure customer-facing delivery portal URL using /delivery/secure/{token}.
  */
 export function buildSecureDeliveryUrl(accessToken: string, context?: any): string {

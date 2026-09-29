@@ -19,6 +19,7 @@ import {
   ChevronRight,
   Zap,
   BarChart3,
+  Eye,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/hooks/useAuth'
@@ -54,6 +55,11 @@ const navItems = [
     label: 'Projects',
     href: '/projects',
     icon: FolderKanban,
+  },
+  {
+    label: 'Client Previews',
+    href: '/previews',
+    icon: Eye,
   },
   {
     label: 'Services',

@@ -375,6 +375,86 @@ export interface DeliveryFile {
   uploadedBy: string
 }
 
+// ─── Client Preview (View-Only Proofing Portal) ───────────────
+export type PreviewStatus = 'Draft' | 'Active' | 'Expired' | 'Revoked'
+export type PreviewExpirationOption = 'never' | '1_hour' | '24_hours' | '3_days' | '7_days' | 'custom'
+
+export interface PreviewWatermarkConfig {
+  enabled: boolean
+  text: string // template text e.g. "[CTRL ROOM] CONFIDENTIAL PREVIEW\n{{client_name}} | {{project_name}}\nSession: {{session_id}}\n{{date}}"
+  opacity: number // 0.05 to 0.60
+  fontSize?: number // 12 - 28
+  tilePattern: boolean // repeat diagonal grid
+  dynamicPosition: boolean // subtle periodic shifting
+}
+
+export interface PreviewAsset {
+  id: string
+  name: string
+  originalName: string
+  fileType: string
+  fileSize: number
+  storagePath: string
+  sourceStorage?: 'supabase' | 'firebase' | 'local' | 'external'
+  thumbnailUrl?: string
+  width?: number
+  height?: number
+  duration?: number
+  order: number
+}
+
+export interface ClientPreview {
+  id: string
+  token: string // secure random token (e.g. prev_...)
+  clientId: string
+  clientName: string
+  clientEmail?: string
+  projectId?: string
+  projectName: string
+  quickJobId?: string
+  title: string
+  description?: string // notes/instructions for the client proof
+  status: PreviewStatus
+  expiresAt: Timestamp | null
+  expirationOption: PreviewExpirationOption
+  watermark: PreviewWatermarkConfig
+  assets: PreviewAsset[]
+  viewCount: number
+  lastViewedAt?: Timestamp | null
+  revokedAt?: Timestamp | null
+  revokedReason?: string
+  createdAt: Timestamp
+  updatedAt: Timestamp
+  createdBy: string
+}
+
+export interface PreviewAccessLog {
+  id: string
+  previewId: string
+  token: string
+  clientId?: string
+  clientName?: string
+  projectId?: string
+  projectName?: string
+  sessionId: string
+  event:
+    | 'access_granted'
+    | 'access_revoked'
+    | 'access_expired'
+    | 'invalid_token'
+    | 'asset_viewed'
+    | 'blur_lock'
+    | 'print_blocked'
+    | 'save_blocked'
+    | 'suspicious_activity'
+  assetId?: string
+  assetName?: string
+  userAgent?: string
+  ipSnippet?: string
+  timestamp: Timestamp | string
+  metadata?: Record<string, any>
+}
+
 // ─── File ─────────────────────────────────────────────────────
 export interface ProjectFile {
   id: string

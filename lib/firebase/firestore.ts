@@ -45,6 +45,8 @@ export const COLLECTIONS = {
   REMINDERS: 'reminders',
   TASKS: 'tasks',
   QUICK_JOBS: 'quickJobs',
+  CLIENT_PREVIEWS: 'clientPreviews',
+  PREVIEW_LOGS: 'previewLogs',
 } as const
 
 // Helper for local storage persistence fallback

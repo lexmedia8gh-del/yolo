@@ -356,6 +356,8 @@ export {
   buildSecureLink,
   getPaymentLink,
   getDeliveryLink,
+  buildClientPreviewUrl,
+  getClientPreviewLink,
   buildPaymentUrl,
   buildSecurePaymentUrl,
   buildInvoiceUrl,
