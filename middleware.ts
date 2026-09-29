@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-// Routes that require authentication
+// Routes that require admin authentication
 const PROTECTED_PATHS = [
   '/dashboard',
   '/clients',
@@ -20,18 +20,9 @@ const PROTECTED_PATHS = [
 const AUTH_PATHS = ['/login']
 
 // Public client-facing routes that MUST bypass admin authentication:
-// - /pay/* (payment portal)
-// - /payment/* (payment portal alias)
-// - /p/* (short payment link)
-// - /delivery/* (secure delivery portal)
-// - /d/* (short delivery link)
-// - /client-preview/* (view-only proofing portal)
-// - /preview/* (view-only proofing portal alias)
-// - /quick-jobs/delivery/* (quick job delivery portal)
-// - /quick-jobs/[token] (client token view)
-// - /client/quick-job/* (client quick job alias)
 export function isPublicClientRoute(pathname: string): boolean {
   if (
+    pathname.startsWith('/api/') ||
     pathname === '/pay' ||
     pathname.startsWith('/pay/') ||
     pathname === '/payment' ||
@@ -51,7 +42,6 @@ export function isPublicClientRoute(pathname: string): boolean {
   }
 
   // Quick job client token portals: /quick-jobs/[token]
-  // Note: /quick-jobs and /quick-jobs/ are the admin portal, which remains protected.
   if (pathname.startsWith('/quick-jobs/') && pathname !== '/quick-jobs/') {
     return true
   }
@@ -62,7 +52,7 @@ export function isPublicClientRoute(pathname: string): boolean {
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // 1. Unconditionally allow public client-facing portal routes
+  // 1. Unconditionally allow API routes & public client-facing portal routes
   if (isPublicClientRoute(pathname)) {
     return NextResponse.next()
   }
@@ -97,14 +87,8 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Match all request paths EXCEPT:
-     * - _next/static (static files)
-     * - _next/image (image optimization)
-     * - favicon.ico
-     * - public folder files
-     * - API routes (handled separately)
-     * - Public client pages (pay, payment, delivery, d, p, client, client-preview, preview, quick-jobs/delivery)
+     * Match all request paths EXCEPT static files and images
      */
-    '/((?!_next/static|_next/image|favicon.ico|public|api|p/|pay|payment|delivery|d/|client|client-preview|preview|quick-jobs/delivery).*)',
+    '/((?!_next/static|_next/image|favicon.ico|public|api).*)',
   ],
 }

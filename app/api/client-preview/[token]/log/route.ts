@@ -5,7 +5,8 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { token: string } }
+  { params }: { params: { token: string } | Promise<{ token: string }> }
 ) {
-  return handleLogClientPreview(req, params)
+  const resolvedParams = await Promise.resolve(params)
+  return handleLogClientPreview(req, resolvedParams)
 }

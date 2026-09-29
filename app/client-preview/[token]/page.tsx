@@ -237,6 +237,24 @@ function ClientPreviewPortalInner() {
     loadPreview()
   }, [loadPreview])
 
+  // Silent background refresh of signed asset URLs every 15 minutes for long sessions
+  useEffect(() => {
+    if (state !== 'valid' || !token) return
+    const refreshInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/client-preview/${encodeURIComponent(token)}`)
+        const data = await res.json()
+        if (data.success && data.preview && data.preview.assets) {
+          setPreview((prev) => (prev ? { ...prev, assets: data.preview.assets } : data.preview))
+        }
+      } catch {
+        // Silent background refresh
+      }
+    }, 15 * 60 * 1000)
+
+    return () => clearInterval(refreshInterval)
+  }, [state, token])
+
   // 3. Periodic subtle shifting of watermark to prevent automated composite removal
   useEffect(() => {
     if (state !== 'valid' || !preview?.watermark?.dynamicPosition) return
@@ -891,6 +909,15 @@ function ClientPreviewPortalInner() {
                     disablePictureInPicture
                     onContextMenu={(e) => e.preventDefault()}
                     className="max-w-full max-h-full rounded-xl bg-black shadow-2xl"
+                  />
+                </div>
+              ) : activeAsset.fileType.includes('pdf') || activeAsset.name.toLowerCase().endsWith('.pdf') ? (
+                <div className="w-full h-full flex flex-col items-center justify-center relative rounded-2xl overflow-hidden bg-slate-950/90 border border-slate-800">
+                  <iframe
+                    src={`${activeAsset.previewUrl || activeAsset.streamUrl}#toolbar=0&navpanes=0`}
+                    className="w-full h-full border-0 bg-slate-900 rounded-2xl"
+                    title={activeAsset.name}
+                    onContextMenu={(e) => e.preventDefault()}
                   />
                 </div>
               ) : activeAsset.fileType.startsWith('audio/') ? (

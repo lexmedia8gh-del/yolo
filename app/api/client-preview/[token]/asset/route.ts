@@ -67,10 +67,11 @@ function inferMimeType(fileName: string, rawType?: string): string {
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { token: string } }
+  { params }: { params: { token: string } | Promise<{ token: string }> }
 ) {
   try {
-    const rawToken = params?.token
+    const resolvedParams = await Promise.resolve(params)
+    const rawToken = resolvedParams?.token
     const token = decodeURIComponent(rawToken || '').trim()
 
     if (!token) {
