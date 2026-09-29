@@ -308,37 +308,12 @@ export async function GET(
       } catch {}
     }
 
-    // 8. Dynamic Image Preview Fallback Generator for offline/sandbox resiliency
-    if (mimeType.startsWith('image/')) {
-      const fallbackSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800">
-        <rect width="100%" height="100%" fill="#0a0a0c" />
-        <radialGradient id="g" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stop-color="#4f46e5" stop-opacity="0.15" />
-          <stop offset="100%" stop-color="#0a0a0c" stop-opacity="0" />
-        </radialGradient>
-        <rect width="100%" height="100%" fill="url(#g)" />
-        <g transform="translate(600, 380)">
-          <polygon points="0,-80 70,-40 70,40 0,80 -70,40 -70,-40" fill="#18181b" stroke="#6366f1" stroke-width="3" />
-          <text x="0" y="10" font-family="sans-serif" font-size="36" font-weight="800" fill="#ffffff" text-anchor="middle">LMX8</text>
-        </g>
-        <text x="600" y="520" font-family="sans-serif" font-size="20" font-weight="700" fill="#f3f4f6" text-anchor="middle">${fileName}</text>
-        <text x="600" y="555" font-family="sans-serif" font-size="13" font-weight="500" fill="#9ca3af" text-anchor="middle">CTRL ROOM SECURE PROOF • ${mimeType.toUpperCase()}</text>
-      </svg>`
-      const svgBuffer = Buffer.from(fallbackSvg, 'utf-8')
-      return new NextResponse(new Uint8Array(svgBuffer), {
-        status: 200,
-        headers: {
-          'Content-Type': 'image/svg+xml',
-          'Content-Disposition': `inline; filename="${encodeURIComponent(fileName)}"`,
-          'Content-Length': svgBuffer.length.toString(),
-          'Cache-Control': 'private, no-transform, max-age=300',
-          'X-Content-Type-Options': 'nosniff',
-        },
-      })
-    }
-
     return NextResponse.json(
-      { success: false, code: 'PREVIEW_ASSET_UNAVAILABLE', error: 'Unable to stream asset. Storage reference may not be accessible.' },
+      {
+        success: false,
+        code: 'PREVIEW_ASSET_UNAVAILABLE',
+        error: 'Preview asset could not be prepared.',
+      },
       { status: 404 }
     )
   } catch (err: any) {
