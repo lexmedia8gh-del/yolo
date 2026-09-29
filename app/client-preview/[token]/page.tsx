@@ -378,10 +378,30 @@ function ClientPreviewPortalInner() {
     setImageError(true)
   }
 
-  const handleRetryImage = () => {
+  const handleRetryImage = async () => {
     setImageLoading(true)
     setImageError(false)
     setHasTriedFailover(false)
+
+    try {
+      if (token) {
+        const res = await fetch(`/api/client-preview/${encodeURIComponent(token)}`)
+        const data = await res.json()
+        if (data.success && data.preview) {
+          setPreview(data.preview)
+          const refreshedAsset = data.preview.assets?.[activeAssetIndex] || data.preview.assets?.[0]
+          const newSrc = refreshedAsset?.previewUrl || refreshedAsset?.streamUrl || ''
+          if (newSrc) {
+            const sep = newSrc.includes('?') ? '&' : '?'
+            setCurrentImageSrc(`${newSrc}${sep}_retry=${Date.now()}`)
+            return
+          }
+        }
+      }
+    } catch (refreshErr) {
+      console.warn('[Client Preview] In-place refresh warning:', refreshErr)
+    }
+
     const base = activeAsset?.streamUrl || activeAsset?.previewUrl || ''
     if (base) {
       const sep = base.includes('?') ? '&' : '?'

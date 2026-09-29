@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="woodBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1d110c" />
+      <stop offset="30%" stop-color="#2e1910" />
+      <stop offset="70%" stop-color="#180e0a" />
+      <stop offset="100%" stop-color="#0e0705" />
+    </linearGradient>
+    <radialGradient id="woodGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#d97706" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="#000000" stop-opacity="0" />
+    </radialGradient>
+    <filter id="carveBevel" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="4" dy="6" stdDeviation="6" flood-color="#000000" flood-opacity="0.9" />
+      <feDropShadow dx="-2" dy="-2" stdDeviation="3" flood-color="#f59e0b" flood-opacity="0.2" />
+    </filter>
+  </defs>
+
+  <!-- Background Wood Texture Canvas -->
+  <rect width="100%" height="100%" fill="url(#woodBg)" />
+  <rect width="100%" height="100%" fill="url(#woodGlow)" />
+
+  <!-- Subtle Wood Grain Lines -->
+  <path d="M0,200 Q480,180 960,220 T1920,200" stroke="rgba(217, 119, 6, 0.08)" stroke-width="2" fill="none" />
+  <path d="M0,450 Q480,480 960,430 T1920,460" stroke="rgba(217, 119, 6, 0.06)" stroke-width="3" fill="none" />
+  <path d="M0,750 Q480,720 960,770 T1920,740" stroke="rgba(217, 119, 6, 0.08)" stroke-width="2" fill="none" />
+
+  <!-- Carved 3D Emblem Container -->
+  <g transform="translate(960, 480)" filter="url(#carveBevel)">
+    <!-- Outer Shield / Hexagon -->
+    <polygon points="0,-220 190,-110 190,110 0,220 -190,110 -190,-110" fill="#2b1810" stroke="#b45309" stroke-width="6" />
+    <polygon points="0,-200 170,-100 170,100 0,200 -170,100 -170,-100" fill="#1c0f0a" stroke="#78350f" stroke-width="4" />
+
+    <!-- Carved Studio Brand Monogram -->
+    <text x="0" y="25" font-family="'Cinzel', 'Trajan Pro', 'Georgia', serif" font-size="110" font-weight="900" fill="#f59e0b" text-anchor="middle" letter-spacing="4">LMX8</text>
+    <text x="0" y="85" font-family="'Inter', sans-serif" font-size="18" font-weight="700" fill="#d97706" text-anchor="middle" letter-spacing="12">CTRL ROOM</text>
+  </g>
+
+  <!-- Title & Metadata -->
+  <text x="960" y="880" font-family="'Inter', sans-serif" font-size="24" font-weight="700" fill="#f3f4f6" text-anchor="middle" letter-spacing="2">Carved Wooden Logo 3D Render (2K)</text>
+  <text x="960" y="920" font-family="'Inter', sans-serif" font-size="14" font-weight="500" fill="#9ca3af" text-anchor="middle" letter-spacing="1">CONFIDENTIAL CLIENT PROOF • DEBORAH LOMO</text>
+</svg>
