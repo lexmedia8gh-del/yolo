@@ -286,17 +286,32 @@ export function CreatePreviewModal({
           const safeName = item.fileObj.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')
           const destinationPath = `previews/${safeProjId}/${Date.now()}_${safeName}`
 
-          const uploadRes = await uploadDeliveryFile({
-            path: destinationPath,
-            file: item.fileObj,
-            contentType: item.fileType,
-          })
+          try {
+            // Prefer server-side proxy upload (bypasses browser client RLS issues)
+            const formData = new FormData()
+            formData.append('file', item.fileObj)
+            formData.append('projectId', safeProjId)
+            formData.append('path', destinationPath)
 
-          if (uploadRes.error) {
-            console.warn('[Create Preview Upload Warning]:', uploadRes.error)
-            // Even if upload failed, fall back to safe destination
-            storagePath = destinationPath
-          } else {
+            const uploadApiRes = await fetch('/api/preview/upload', {
+              method: 'POST',
+              body: formData,
+            })
+            const uploadApiData = await uploadApiRes.json()
+
+            if (uploadApiRes.ok && uploadApiData.success && uploadApiData.storagePath) {
+              storagePath = uploadApiData.storagePath
+            } else {
+              throw new Error(uploadApiData.error || 'Server upload failed')
+            }
+          } catch (serverErr) {
+            console.warn('[Create Preview Server Upload Fallback]:', serverErr)
+            // Fallback to client-side direct upload
+            const uploadRes = await uploadDeliveryFile({
+              path: destinationPath,
+              file: item.fileObj,
+              contentType: item.fileType,
+            })
             storagePath = uploadRes.data?.path || destinationPath
           }
         }

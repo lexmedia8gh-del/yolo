@@ -32,27 +32,33 @@ export function cleanSupabaseKey(raw?: string): string {
   return str.replace(/['"]/g, '').trim()
 }
 
-const rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const rawKey =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  ''
+export function getSupabaseUrl(): string {
+  return cleanSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL || '')
+}
 
-const supabaseUrl = cleanSupabaseUrl(rawUrl)
-const supabaseAnonKey = cleanSupabaseKey(rawKey)
+export function getSupabaseKey(): string {
+  return cleanSupabaseKey(
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    ''
+  )
+}
 
 let clientInstance: SupabaseClient | null = null
 
 /**
- * Checks if Supabase client-side environment variables are defined.
+ * Checks if Supabase client-side or server environment variables are defined.
  */
 export function isSupabaseConfigured(): boolean {
+  const url = getSupabaseUrl()
+  const key = getSupabaseKey()
   return Boolean(
-    supabaseUrl &&
-    supabaseAnonKey &&
-    supabaseUrl.trim() !== '' &&
-    supabaseAnonKey.trim() !== '' &&
-    !supabaseUrl.includes('placeholder')
+    url &&
+    key &&
+    url.trim() !== '' &&
+    key.trim() !== '' &&
+    !url.includes('placeholder')
   )
 }
 
@@ -60,8 +66,10 @@ export function isSupabaseConfigured(): boolean {
  * Returns detailed diagnostic information about the Supabase connection configuration.
  */
 export function getSupabaseConfigStatus(): { configured: boolean; urlConfigured: boolean; keyConfigured: boolean; error?: string } {
-  const urlConfigured = Boolean(supabaseUrl && supabaseUrl.trim() !== '' && !supabaseUrl.includes('placeholder'))
-  const keyConfigured = Boolean(supabaseAnonKey && supabaseAnonKey.trim() !== '' && !supabaseAnonKey.includes('placeholder'))
+  const url = getSupabaseUrl()
+  const key = getSupabaseKey()
+  const urlConfigured = Boolean(url && url.trim() !== '' && !url.includes('placeholder'))
+  const keyConfigured = Boolean(key && key.trim() !== '' && !key.includes('placeholder'))
   
   if (!urlConfigured || !keyConfigured) {
     const missing: string[] = []
@@ -87,14 +95,14 @@ export function getSupabaseConfigStatus(): { configured: boolean; urlConfigured:
  * Gracefully handles missing credentials during build or before configuration.
  */
 export function getSupabaseClient(): SupabaseClient {
+  const url = getSupabaseUrl()
+  const key = getSupabaseKey()
+
   if (!clientInstance) {
     if (!isSupabaseConfigured()) {
-      console.warn(
-        '[Supabase] NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY missing. Initializing fallback client.'
-      )
       clientInstance = createClient(
-        supabaseUrl || 'https://placeholder.supabase.co',
-        supabaseAnonKey || 'placeholder-anon-key',
+        url || 'https://placeholder.supabase.co',
+        key || 'placeholder-anon-key',
         {
           auth: {
             persistSession: true,
@@ -103,7 +111,7 @@ export function getSupabaseClient(): SupabaseClient {
         }
       )
     } else {
-      clientInstance = createClient(supabaseUrl, supabaseAnonKey, {
+      clientInstance = createClient(url, key, {
         auth: {
           persistSession: true,
           autoRefreshToken: true,

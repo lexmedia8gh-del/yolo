@@ -856,17 +856,17 @@ function ClientPreviewPortalInner() {
 
                     {/* Failed-Image Error State */}
                     {imageError && (
-                      <div className="p-6 max-w-sm rounded-2xl bg-slate-950/90 border border-rose-500/30 text-center space-y-3 shadow-2xl">
-                        <div className="w-12 h-12 mx-auto rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                      <div className="p-6 max-w-sm rounded-2xl bg-slate-950/90 border border-slate-800 text-center space-y-3 shadow-2xl">
+                        <div className="w-12 h-12 mx-auto rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
                           <AlertCircle size={24} />
                         </div>
                         <div>
-                          <h4 className="font-semibold text-white text-sm">Image Failed to Render</h4>
+                          <h4 className="font-semibold text-white text-sm">Preview Image Unavailable</h4>
                           <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                            {activeAsset.name} ({activeAsset.fileType})
+                            {activeAsset.name}
                           </p>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
-                            The secure storage image stream encountered an error or network timeout.
+                          <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                            Preview image temporarily unavailable. Please refresh the preview.
                           </p>
                         </div>
                         <Button
@@ -876,7 +876,7 @@ function ClientPreviewPortalInner() {
                           onClick={handleRetryImage}
                           className="w-full"
                         >
-                          Retry Loading
+                          Refresh Preview
                         </Button>
                       </div>
                     )}

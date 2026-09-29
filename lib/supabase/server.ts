@@ -1,7 +1,9 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { cleanSupabaseUrl, cleanSupabaseKey } from './client'
 
-let serverClientInstance: SupabaseClient | null = null
+let cachedServerClient: SupabaseClient | null = null
+let cachedUrl = ''
+let cachedKey = ''
 
 /**
  * Returns a server-side Supabase client instance.
@@ -19,12 +21,12 @@ export function getSupabaseServerClient(): SupabaseClient {
   const supabaseUrl = cleanSupabaseUrl(rawUrl)
   const serviceKey = cleanSupabaseKey(rawServiceKey)
 
-  if (!serverClientInstance) {
+  if (!cachedServerClient || cachedUrl !== supabaseUrl || cachedKey !== serviceKey) {
+    cachedUrl = supabaseUrl
+    cachedKey = serviceKey
+
     if (!supabaseUrl || !serviceKey) {
-      console.warn(
-        '[Supabase Server] Server environment variables are missing. Using fallback initialization.'
-      )
-      serverClientInstance = createClient(
+      cachedServerClient = createClient(
         supabaseUrl || 'https://placeholder.supabase.co',
         serviceKey || 'placeholder-service-key',
         {
@@ -35,7 +37,7 @@ export function getSupabaseServerClient(): SupabaseClient {
         }
       )
     } else {
-      serverClientInstance = createClient(supabaseUrl, serviceKey, {
+      cachedServerClient = createClient(supabaseUrl, serviceKey, {
         auth: {
           persistSession: false,
           autoRefreshToken: false,
@@ -44,5 +46,5 @@ export function getSupabaseServerClient(): SupabaseClient {
     }
   }
 
-  return serverClientInstance
+  return cachedServerClient
 }
