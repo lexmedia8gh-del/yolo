@@ -125,68 +125,127 @@ export async function POST(req: NextRequest) {
       order: a.order ?? idx,
     }))
 
-    const adminDb = getAdminDb()
+    try {
+      const adminDb = getAdminDb()
 
-    if (id) {
-      // Update existing preview
-      await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).update({
-        clientId: clientId || '',
-        clientName: clientName || '',
-        clientEmail: clientEmail || '',
-        projectId: projectId || '',
-        projectName: projectName || '',
-        quickJobId: quickJobId || '',
-        title: title.trim(),
-        description: (description || '').trim(),
-        status: (status as PreviewStatus) || 'Active',
-        expirationOption,
-        expiresAt,
-        watermark: watermarkConfig,
-        assets: formattedAssets,
-        updatedAt: FieldValue.serverTimestamp(),
-      })
+      if (id) {
+        // Update existing preview
+        await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).update({
+          clientId: clientId || '',
+          clientName: clientName || '',
+          clientEmail: clientEmail || '',
+          projectId: projectId || '',
+          projectName: projectName || '',
+          quickJobId: quickJobId || '',
+          title: title.trim(),
+          description: (description || '').trim(),
+          status: (status as PreviewStatus) || 'Active',
+          expirationOption,
+          expiresAt,
+          watermark: watermarkConfig,
+          assets: formattedAssets,
+          updatedAt: FieldValue.serverTimestamp(),
+        })
 
-      const updatedSnap = await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).get()
-      return NextResponse.json({
-        success: true,
-        preview: { id, ...updatedSnap.data() },
-      })
-    } else {
-      // Create new preview
-      const token = generateSecureToken('prev_')
+        const updatedSnap = await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).get()
+        return NextResponse.json({
+          success: true,
+          preview: { id, ...updatedSnap.data() },
+        })
+      } else {
+        // Create new preview
+        const token = generateSecureToken('prev_')
 
-      const newPreviewData = {
-        token,
-        clientId: clientId || '',
-        clientName: clientName || 'Client',
-        clientEmail: clientEmail || '',
-        projectId: projectId || '',
-        projectName: projectName || 'Deliverable',
-        quickJobId: quickJobId || '',
-        title: title.trim(),
-        description: (description || '').trim(),
-        status: (status as PreviewStatus) || 'Active',
-        expirationOption,
-        expiresAt,
-        watermark: watermarkConfig,
-        assets: formattedAssets,
-        viewCount: 0,
-        lastViewedAt: null,
-        revokedAt: null,
-        revokedReason: '',
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-        createdBy: 'admin',
+        const newPreviewData = {
+          token,
+          clientId: clientId || '',
+          clientName: clientName || 'Client',
+          clientEmail: clientEmail || '',
+          projectId: projectId || '',
+          projectName: projectName || 'Deliverable',
+          quickJobId: quickJobId || '',
+          title: title.trim(),
+          description: (description || '').trim(),
+          status: (status as PreviewStatus) || 'Active',
+          expirationOption,
+          expiresAt,
+          watermark: watermarkConfig,
+          assets: formattedAssets,
+          viewCount: 0,
+          lastViewedAt: null,
+          revokedAt: null,
+          revokedReason: '',
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+          createdBy: 'admin',
+        }
+
+        const docRef = await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).add(newPreviewData)
+
+        return NextResponse.json({
+          success: true,
+          previewId: docRef.id,
+          token,
+          preview: { id: docRef.id, ...newPreviewData },
+        })
       }
+    } catch {
+      // Client SDK fallback when Admin SDK is not configured in current runtime
+      if (id) {
+        const docRef = doc(db, COLLECTIONS.CLIENT_PREVIEWS, id)
+        await updateDoc(docRef, {
+          clientId: clientId || '',
+          clientName: clientName || '',
+          clientEmail: clientEmail || '',
+          projectId: projectId || '',
+          projectName: projectName || '',
+          quickJobId: quickJobId || '',
+          title: title.trim(),
+          description: (description || '').trim(),
+          status: (status as PreviewStatus) || 'Active',
+          expirationOption,
+          expiresAt: expiresAt ? ClientTimestamp.fromMillis(expiresAt.toMillis()) : null,
+          watermark: watermarkConfig,
+          assets: formattedAssets,
+        })
 
-      const docRef = await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).add(newPreviewData)
+        return NextResponse.json({
+          success: true,
+          preview: { id, title: title.trim(), status, assets: formattedAssets },
+        })
+      } else {
+        const token = generateSecureToken('prev_')
+        const newPreviewData = {
+          token,
+          clientId: clientId || '',
+          clientName: clientName || 'Client',
+          clientEmail: clientEmail || '',
+          projectId: projectId || '',
+          projectName: projectName || 'Deliverable',
+          quickJobId: quickJobId || '',
+          title: title.trim(),
+          description: (description || '').trim(),
+          status: (status as PreviewStatus) || 'Active',
+          expirationOption,
+          expiresAt: expiresAt ? ClientTimestamp.fromMillis(expiresAt.toMillis()) : null,
+          watermark: watermarkConfig,
+          assets: formattedAssets,
+          viewCount: 0,
+          lastViewedAt: null,
+          revokedAt: null,
+          revokedReason: '',
+          createdBy: 'admin',
+        }
 
-      return NextResponse.json({
-        success: true,
-        previewId: docRef.id,
-        token,
-        preview: { id: docRef.id, ...newPreviewData },
-      })
+        const docRef = await addDoc(collection(db, COLLECTIONS.CLIENT_PREVIEWS), newPreviewData)
+
+        return NextResponse.json({
+          success: true,
+          previewId: docRef.id,
+          token,
+          preview: { id: docRef.id, ...newPreviewData },
+        })
+      }
     }
   } catch (err: any) {
     console.error('[Preview Admin POST Error]:', err)

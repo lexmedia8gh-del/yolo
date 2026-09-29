@@ -52,10 +52,29 @@ interface PreviewAssetDTO {
   fileType: string
   fileSize: number
   previewUrl: string
+  streamUrl?: string
   width?: number | null
   height?: number | null
   duration?: number | null
   order?: number
+}
+
+function isImageAsset(asset?: PreviewAssetDTO | null): boolean {
+  if (!asset) return false
+  const t = (asset.fileType || '').toLowerCase()
+  if (t.startsWith('image/')) return true
+  const n = (asset.name || asset.originalName || '').toLowerCase()
+  return (
+    n.endsWith('.png') ||
+    n.endsWith('.jpg') ||
+    n.endsWith('.jpeg') ||
+    n.endsWith('.webp') ||
+    n.endsWith('.gif') ||
+    n.endsWith('.svg') ||
+    n.endsWith('.avif') ||
+    n.endsWith('.bmp') ||
+    n.endsWith('.ico')
+  )
 }
 
 interface PreviewDTO {
@@ -109,6 +128,12 @@ function ClientPreviewPortalInner() {
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false)
   const [isWindowBlurred, setIsWindowBlurred] = useState<boolean>(false)
   const [showInstructions, setShowInstructions] = useState<boolean>(false)
+
+  // Image load & failover state
+  const [currentImageSrc, setCurrentImageSrc] = useState<string>('')
+  const [imageLoading, setImageLoading] = useState<boolean>(true)
+  const [imageError, setImageError] = useState<boolean>(false)
+  const [hasTriedFailover, setHasTriedFailover] = useState<boolean>(false)
 
   // Floating watermark dynamic shifting state
   const [watermarkOffset, setWatermarkOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -289,13 +314,62 @@ function ClientPreviewPortalInner() {
     }
   }, [state, activeAssetName, activeAssetId, logAuditActivity])
 
-  // Log asset view whenever active asset switches
+  // Log asset view whenever active asset switches and sync image state
   useEffect(() => {
-    if (activeAssetId) {
-      logAuditActivity('asset_viewed', activeAssetName, activeAssetId)
+    if (activeAsset) {
+      const initialSrc = activeAsset.previewUrl || activeAsset.streamUrl || ''
+      setCurrentImageSrc(initialSrc)
+      setImageLoading(Boolean(initialSrc && isImageAsset(activeAsset)))
+      setImageError(!initialSrc && isImageAsset(activeAsset))
+      setHasTriedFailover(false)
       setZoomLevel(1)
+
+      if (activeAssetId) {
+        logAuditActivity('asset_viewed', activeAssetName, activeAssetId)
+      }
+    } else {
+      setCurrentImageSrc('')
+      setImageLoading(false)
+      setImageError(false)
     }
-  }, [activeAssetId, activeAssetName, logAuditActivity])
+  }, [activeAsset, activeAssetId, activeAssetName, logAuditActivity])
+
+  const handleImageLoad = () => {
+    setImageLoading(false)
+    setImageError(false)
+  }
+
+  const handleImageError = () => {
+    // If primary previewUrl failed and we haven't tried streamUrl yet, attempt failover to secure stream
+    if (!hasTriedFailover && activeAsset?.streamUrl && currentImageSrc !== activeAsset.streamUrl) {
+      console.warn('[Client Preview] Image failed to load via primary URL, falling back to secure stream:', activeAsset.streamUrl)
+      setHasTriedFailover(true)
+      setCurrentImageSrc(activeAsset.streamUrl)
+      setImageLoading(true)
+      setImageError(false)
+      return
+    }
+
+    console.error('[Client Preview] Image failed to render:', {
+      assetId: activeAssetId,
+      name: activeAssetName,
+      src: currentImageSrc,
+      fileType: activeAsset?.fileType,
+    })
+    setImageLoading(false)
+    setImageError(true)
+  }
+
+  const handleRetryImage = () => {
+    setImageLoading(true)
+    setImageError(false)
+    setHasTriedFailover(false)
+    const base = activeAsset?.streamUrl || activeAsset?.previewUrl || ''
+    if (base) {
+      const sep = base.includes('?') ? '&' : '?'
+      setCurrentImageSrc(`${base}${sep}_retry=${Date.now()}`)
+    }
+  }
 
   // Fullscreen toggle helper
   const toggleFullscreen = () => {
@@ -739,27 +813,79 @@ function ClientPreviewPortalInner() {
       {/* Main Proof Viewer Area */}
       <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 relative overflow-hidden">
         {/* Main Asset Canvas with Watermark */}
-        <div className="w-full max-w-5xl h-[65vh] sm:h-[72vh] rounded-3xl bg-slate-900/60 border border-slate-800/80 shadow-2xl relative overflow-hidden flex items-center justify-center backdrop-blur-sm group">
+        <div className="w-full max-w-5xl h-[65vh] sm:h-[72vh] rounded-3xl bg-slate-900/80 border border-slate-800/80 shadow-2xl relative overflow-hidden flex items-center justify-center backdrop-blur-sm group">
           {/* Asset Renderer */}
           {activeAsset ? (
             <div className="w-full h-full flex items-center justify-center p-2 sm:p-6 relative">
-              {activeAsset.fileType.startsWith('image/') ? (
-                <div
-                  className="relative w-full h-full flex items-center justify-center transition-transform duration-200"
-                  style={{ transform: `scale(${zoomLevel})` }}
-                >
-                  <img
-                    src={activeAsset.previewUrl}
-                    alt={activeAsset.name}
-                    draggable={false}
-                    onContextMenu={(e) => e.preventDefault()}
-                    className="max-w-full max-h-full object-contain rounded-xl pointer-events-none select-none shadow-2xl"
-                  />
+              {isImageAsset(activeAsset) ? (
+                <div className="relative w-full h-full flex items-center justify-center">
+                  {/* Subtle transparency checkered backing for PNGs, transparent cutouts, SVGs, and WEBP */}
+                  <div
+                    className="relative max-w-full max-h-full flex items-center justify-center rounded-2xl overflow-hidden transition-transform duration-200"
+                    style={{
+                      transform: `scale(${zoomLevel})`,
+                      backgroundImage:
+                        'linear-gradient(45deg, rgba(255,255,255,0.04) 25%, transparent 25%), linear-gradient(-45deg, rgba(255,255,255,0.04) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.04) 75%), linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.04) 75%)',
+                      backgroundSize: '20px 20px',
+                      backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
+                    }}
+                  >
+                    {/* Image Loading Spinner */}
+                    {imageLoading && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/40 backdrop-blur-[2px] z-10 rounded-xl">
+                        <Spinner size="md" />
+                        <span className="text-[11px] font-medium text-slate-400 mt-2">Loading proof image...</span>
+                      </div>
+                    )}
+
+                    {/* Image Render */}
+                    {!imageError && currentImageSrc ? (
+                      <img
+                        key={`${activeAsset.id}_${currentImageSrc}`}
+                        src={currentImageSrc}
+                        alt={activeAsset.name}
+                        draggable={false}
+                        onLoad={handleImageLoad}
+                        onError={handleImageError}
+                        onContextMenu={(e) => e.preventDefault()}
+                        className={`max-w-full max-h-[60vh] sm:max-h-[66vh] object-contain rounded-xl pointer-events-none select-none shadow-2xl transition-opacity duration-200 ${
+                          imageLoading ? 'opacity-0' : 'opacity-100'
+                        }`}
+                      />
+                    ) : null}
+
+                    {/* Failed-Image Error State */}
+                    {imageError && (
+                      <div className="p-6 max-w-sm rounded-2xl bg-slate-950/90 border border-rose-500/30 text-center space-y-3 shadow-2xl">
+                        <div className="w-12 h-12 mx-auto rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                          <AlertCircle size={24} />
+                        </div>
+                        <div>
+                          <h4 className="font-semibold text-white text-sm">Image Failed to Render</h4>
+                          <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                            {activeAsset.name} ({activeAsset.fileType})
+                          </p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            The secure storage image stream encountered an error or network timeout.
+                          </p>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          icon={<RefreshCw size={12} />}
+                          onClick={handleRetryImage}
+                          className="w-full"
+                        >
+                          Retry Loading
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : activeAsset.fileType.startsWith('video/') ? (
                 <div className="w-full h-full flex items-center justify-center">
                   <video
-                    src={activeAsset.previewUrl}
+                    src={activeAsset.previewUrl || activeAsset.streamUrl}
                     controls
                     controlsList="nodownload noplaybackrate"
                     disablePictureInPicture
@@ -777,7 +903,7 @@ function ClientPreviewPortalInner() {
                     <p className="text-xs text-slate-400 mt-1">{formatFileSize(activeAsset.fileSize)}</p>
                   </div>
                   <audio
-                    src={activeAsset.previewUrl}
+                    src={activeAsset.previewUrl || activeAsset.streamUrl}
                     controls
                     controlsList="nodownload"
                     className="w-full mt-4"
@@ -850,7 +976,7 @@ function ClientPreviewPortalInner() {
           )}
 
           {/* Floating Zoom / Control Bar for Images */}
-          {activeAsset?.fileType.startsWith('image/') && (
+          {isImageAsset(activeAsset) && !imageError && (
             <div className="absolute bottom-4 right-4 z-30 flex items-center gap-1.5 p-1 rounded-2xl bg-slate-950/80 border border-slate-800 backdrop-blur-md">
               <button
                 type="button"
@@ -903,7 +1029,7 @@ function ClientPreviewPortalInner() {
                         : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-850'
                     }`}
                   >
-                    {asset.fileType.startsWith('image/') ? (
+                    {isImageAsset(asset) ? (
                       <ImageIcon size={13} />
                     ) : asset.fileType.startsWith('video/') ? (
                       <Video size={13} />

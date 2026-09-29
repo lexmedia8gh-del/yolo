@@ -253,8 +253,52 @@ export async function handleGetClientPreview(
     const rawAssets: any[] = Array.isArray(previewDoc.assets) ? previewDoc.assets : []
     const hasSupabase = isSupabaseConfigured()
 
+    const inferMimeType = (fileName: string, rawType?: string): string => {
+      if (rawType && rawType !== 'application/octet-stream' && rawType.trim() !== '') {
+        return rawType.toLowerCase()
+      }
+      const ext = fileName.split('.').pop()?.toLowerCase() || ''
+      switch (ext) {
+        case 'png':
+          return 'image/png'
+        case 'jpg':
+        case 'jpeg':
+          return 'image/jpeg'
+        case 'webp':
+          return 'image/webp'
+        case 'gif':
+          return 'image/gif'
+        case 'svg':
+          return 'image/svg+xml'
+        case 'bmp':
+          return 'image/bmp'
+        case 'avif':
+          return 'image/avif'
+        case 'ico':
+          return 'image/x-icon'
+        case 'mp4':
+          return 'video/mp4'
+        case 'mov':
+          return 'video/quicktime'
+        case 'webm':
+          return 'video/webm'
+        case 'mp3':
+          return 'audio/mpeg'
+        case 'wav':
+          return 'audio/wav'
+        case 'pdf':
+          return 'application/pdf'
+        default:
+          return rawType || 'application/octet-stream'
+      }
+    }
+
     const sanitizedAssets = await Promise.all(
       rawAssets.map(async (asset: any, idx: number) => {
+        const assetId = asset.id || `asset_${idx}`
+        const assetName = asset.name || asset.originalName || `Proof Asset ${idx + 1}`
+        const inferredType = inferMimeType(assetName, asset.fileType || asset.type)
+        const streamUrl = `/api/client-preview/${encodeURIComponent(token)}/asset?id=${encodeURIComponent(assetId)}`
         let viewUrl = ''
 
         if (asset.storagePath) {
@@ -264,25 +308,39 @@ export async function handleGetClientPreview(
               if (signed.data?.signedUrl) {
                 viewUrl = signed.data.signedUrl
               }
-            } catch {}
+            } catch (signErr: any) {
+              console.warn('[Client Preview Signed URL Warning]:', signErr?.message)
+            }
 
             if (!viewUrl) {
-              viewUrl = getDeliveryFilePublicUrl(asset.storagePath)
+              const pubUrl = getDeliveryFilePublicUrl(asset.storagePath)
+              if (pubUrl && !pubUrl.includes('placeholder')) {
+                viewUrl = pubUrl
+              }
             }
           }
         }
 
         if (!viewUrl && (asset.url || asset.previewUrl || asset.downloadUrl)) {
-          viewUrl = asset.url || asset.previewUrl || asset.downloadUrl
+          const cand = asset.url || asset.previewUrl || asset.downloadUrl
+          if (typeof cand === 'string' && cand.startsWith('http')) {
+            viewUrl = cand
+          }
+        }
+
+        // If no external URL resolved, use the secure server stream endpoint
+        if (!viewUrl) {
+          viewUrl = streamUrl
         }
 
         return {
-          id: asset.id || `asset_${idx}`,
-          name: asset.name || asset.originalName || `Proof Asset ${idx + 1}`,
+          id: assetId,
+          name: assetName,
           originalName: asset.originalName || asset.name || `Proof Asset ${idx + 1}`,
-          fileType: asset.fileType || 'application/octet-stream',
+          fileType: inferredType,
           fileSize: asset.fileSize || 0,
           previewUrl: viewUrl,
+          streamUrl: streamUrl,
           width: asset.width || null,
           height: asset.height || null,
           duration: asset.duration || null,

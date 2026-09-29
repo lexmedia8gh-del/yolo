@@ -193,13 +193,25 @@ export function CreatePreviewModal({
     const files = e.target.files
     if (!files || files.length === 0) return
 
+    const inferMime = (name: string, raw?: string) => {
+      if (raw && raw !== 'application/octet-stream' && raw.trim() !== '') return raw.toLowerCase()
+      const ext = name.split('.').pop()?.toLowerCase() || ''
+      if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif', 'bmp', 'ico'].includes(ext)) {
+        return ext === 'jpg' ? 'image/jpeg' : ext === 'svg' ? 'image/svg+xml' : `image/${ext}`
+      }
+      if (['mp4', 'mov', 'webm'].includes(ext)) return ext === 'mov' ? 'video/quicktime' : `video/${ext}`
+      if (['mp3', 'wav'].includes(ext)) return ext === 'mp3' ? 'audio/mpeg' : 'audio/wav'
+      if (ext === 'pdf') return 'application/pdf'
+      return raw || 'application/octet-stream'
+    }
+
     const newStaged: any[] = []
     for (let i = 0; i < files.length; i++) {
       const f = files[i]
       newStaged.push({
         id: `proof_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         name: f.name,
-        fileType: f.type || 'application/octet-stream',
+        fileType: inferMime(f.name, f.type),
         fileSize: f.size,
         storagePath: '',
         sourceStorage: 'supabase',

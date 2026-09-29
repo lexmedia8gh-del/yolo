@@ -1,4 +1,5 @@
 import { getSupabaseClient, isSupabaseConfigured, getSupabaseConfigStatus } from './client'
+import { getSupabaseServerClient } from './server'
 
 /**
  * Storage bucket constants.
@@ -8,6 +9,43 @@ import { getSupabaseClient, isSupabaseConfigured, getSupabaseConfigStatus } from
 export const STORAGE_BUCKETS = {
   DELIVERY_FILES: 'Delivery files',
 } as const
+
+export const KNOWN_STORAGE_BUCKETS = [
+  'Delivery files',
+  'delivery-files',
+  'deliveries',
+  'quick-jobs',
+] as const
+
+/**
+ * Sanitizes and extracts the pure relative storage path within a bucket.
+ * Handles leading slashes, full Supabase URLs, and bucket name prefixes.
+ */
+export function cleanStoragePath(path: string, bucketName: string = STORAGE_BUCKETS.DELIVERY_FILES): string {
+  if (!path) return ''
+  let cleaned = String(path).trim()
+
+  // If it's a full URL from supabase storage, extract the path after the bucket
+  if (cleaned.startsWith('http://') || cleaned.startsWith('https://')) {
+    const urlParts = cleaned.split(/storage\/v1\/object\/(?:public|sign|authenticated)\/[^\/]+\//i)
+    if (urlParts.length > 1) {
+      cleaned = decodeURIComponent(urlParts[1].split('?')[0])
+    }
+  }
+
+  // Remove leading slashes
+  cleaned = cleaned.replace(/^\/+/, '')
+
+  // Remove known bucket names if prepended
+  for (const b of KNOWN_STORAGE_BUCKETS) {
+    const safeB = b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const encodedB = encodeURIComponent(b).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const regex = new RegExp(`^(?:${safeB}|${encodedB})\\/+`, 'i')
+    cleaned = cleaned.replace(regex, '')
+  }
+
+  return cleaned.replace(/^\/+/, '')
+}
 
 export interface UploadFileOptions {
   path: string
@@ -38,11 +76,13 @@ export async function uploadDeliveryFile({
     }
   }
 
+  const cleanPath = cleanStoragePath(path)
+
   try {
-    const supabase = getSupabaseClient()
+    const supabase = typeof window === 'undefined' ? getSupabaseServerClient() : getSupabaseClient()
     let { data, error } = await supabase.storage
       .from(STORAGE_BUCKETS.DELIVERY_FILES)
-      .upload(path, file, {
+      .upload(cleanPath, file, {
         contentType,
         upsert,
       })
@@ -56,7 +96,7 @@ export async function uploadDeliveryFile({
         await supabase.storage.createBucket(STORAGE_BUCKETS.DELIVERY_FILES, { public: true })
         const retry = await supabase.storage
           .from(STORAGE_BUCKETS.DELIVERY_FILES)
-          .upload(path, file, { contentType, upsert })
+          .upload(cleanPath, file, { contentType, upsert })
         data = retry.data
         error = retry.error
       } catch {}
@@ -70,7 +110,7 @@ export async function uploadDeliveryFile({
       return { data: null, error: new Error(formattedMsg) }
     }
 
-    const resPath = data?.path || path
+    const resPath = data?.path || cleanPath
     const { data: urlData } = supabase.storage
       .from(STORAGE_BUCKETS.DELIVERY_FILES)
       .getPublicUrl(resPath)
@@ -88,16 +128,18 @@ export async function uploadDeliveryFile({
 export function getDeliveryFilePublicUrl(path: string): string {
   if (!isSupabaseConfigured()) return ''
 
-  const supabase = getSupabaseClient()
+  const cleanPath = cleanStoragePath(path)
+  const supabase = typeof window === 'undefined' ? getSupabaseServerClient() : getSupabaseClient()
   const { data } = supabase.storage
     .from(STORAGE_BUCKETS.DELIVERY_FILES)
-    .getPublicUrl(path)
+    .getPublicUrl(cleanPath)
 
   return data?.publicUrl || ''
 }
 
 /**
- * Creates a temporary signed download URL for private files in the 'Delivery files' bucket.
+ * Creates a temporary signed download/preview URL for private files in Supabase Storage.
+ * Uses the server-side client when invoked in server contexts (such as Next.js API Routes).
  */
 export async function createDeliveryFileSignedUrl(
   path: string,
@@ -111,14 +153,35 @@ export async function createDeliveryFileSignedUrl(
     }
   }
 
+  const cleanPath = cleanStoragePath(path)
+
   try {
-    const supabase = getSupabaseClient()
+    const supabase = typeof window === 'undefined' ? getSupabaseServerClient() : getSupabaseClient()
+
+    // Try primary bucket first
     const { data, error } = await supabase.storage
       .from(STORAGE_BUCKETS.DELIVERY_FILES)
-      .createSignedUrl(path, expiresInSeconds)
+      .createSignedUrl(cleanPath, expiresInSeconds)
+
+    if (!error && data?.signedUrl) {
+      return { data, error: null }
+    }
+
+    // Fallback across known bucket aliases if primary failed
+    for (const bucket of KNOWN_STORAGE_BUCKETS) {
+      if (bucket === STORAGE_BUCKETS.DELIVERY_FILES) continue
+      try {
+        const retry = await supabase.storage
+          .from(bucket)
+          .createSignedUrl(cleanPath, expiresInSeconds)
+        if (!retry.error && retry.data?.signedUrl) {
+          return { data: retry.data, error: null }
+        }
+      } catch {}
+    }
 
     if (error) {
-      console.error('[Supabase Storage] Error creating signed URL:', error.message)
+      console.warn('[Supabase Storage] Warning creating signed URL for', cleanPath, ':', error.message)
       return { data: null, error: new Error(`Signed URL creation failed: ${error.message}`) }
     }
 
