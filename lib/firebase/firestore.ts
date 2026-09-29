@@ -79,8 +79,8 @@ export async function getDocument<T>(
       return { id: snap.id, ...snap.data() } as T
     }
     return null
-  } catch (err) {
-    console.error(`[Cloud Firestore] Error fetching document ${collectionName}/${docId}:`, err)
+  } catch (err: any) {
+    console.warn(`[Cloud Firestore] Offline or network warning fetching ${collectionName}/${docId}:`, err?.message || err)
     const local = getLocalCollection<T & { id: string }>(collectionName)
     return local.find((item) => item.id === docId) || null
   }

@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { subscribeToDocument, COLLECTIONS } from '@/lib/firebase/firestore'
@@ -37,18 +37,38 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    setLoading(true)
+    let mounted = true
+
+    // 1. Fetch from server API immediately for fast, reliable initialization
+    fetch('/api/branding')
+      .then((res) => res.json())
+      .then((data) => {
+        if (mounted && data?.success && data?.branding) {
+          setBranding((prev) => ({ ...prev, ...data.branding }))
+          setLoading(false)
+        }
+      })
+      .catch((err) => {
+        console.warn('[Branding Context] API load warning, using defaults/listeners:', err)
+        if (mounted) setLoading(false)
+      })
+
+    // 2. Real-time subscription to Firestore as dynamic enhancement
     const unsubscribe = subscribeToDocument<BrandingSettings>(
       COLLECTIONS.SETTINGS,
       'branding',
       (data) => {
-        if (data) {
+        if (mounted && data) {
           setBranding((prev) => ({ ...prev, ...data }))
+          setLoading(false)
         }
-        setLoading(false)
       }
     )
-    return () => unsubscribe()
+
+    return () => {
+      mounted = false
+      unsubscribe()
+    }
   }, [])
 
   const cssVars = [
