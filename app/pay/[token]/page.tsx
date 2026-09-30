@@ -418,7 +418,7 @@ function PublicPaymentPageInner() {
                   <span className="text-[11px] font-bold uppercase tracking-widest text-gray-400">
                     {isAlreadyPaid ? 'Amount Paid' : 'Total Amount Due'}
                   </span>
-                  <div className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900 font-mono">
+                  <div className="text-4xl sm:text-5xl font-black tracking-tight text-indigo-600 dark:text-indigo-600 font-mono">
                     {formatCurrency(linkData.amount || invoiceData?.balanceDue || 0, linkData.currency || invoiceData?.currency)}
                   </div>
                   <div className="pt-2 flex justify-center">
