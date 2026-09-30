@@ -47,6 +47,7 @@ export const COLLECTIONS = {
   QUICK_JOBS: 'quickJobs',
   CLIENT_PREVIEWS: 'clientPreviews',
   PREVIEW_LOGS: 'previewLogs',
+  ADD_ONS: 'addOns',
 } as const
 
 // Helper for local storage persistence fallback

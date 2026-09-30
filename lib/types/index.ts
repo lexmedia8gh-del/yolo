@@ -123,30 +123,56 @@ export interface PackageItem {
   text: string
 }
 
+export type PackagePricingType = 'fixed' | 'starting_from'
+export type PackageDepositType = 'percentage' | 'fixed' | 'none'
+
 export interface Package {
   id: string
   title: string
+  name?: string // alias for title
   description?: string
   clientId?: string
   projectId?: string
   serviceId?: string
   serviceName?: string
+  category?: string
   includedServiceIds?: string[]
   includedServices?: string[]
   price: number
   discount?: number
+  pricingType?: PackagePricingType
+  depositType?: PackageDepositType
+  depositValue?: number
   depositAmount?: number
   currency: string
-  whatsIncluded: PackageItem[]
+  inclusions?: string[]
+  whatsIncluded?: PackageItem[]
   deliveryTimeline?: string
   revisions?: number
   imageUrls?: string[]
   additionalNotes?: string
   termsAndConditions?: string
-  status: 'active' | 'inactive' | 'archived'
-  createdAt: Timestamp
-  updatedAt: Timestamp
-  createdBy: string
+  status?: 'active' | 'inactive' | 'archived'
+  active?: boolean
+  sortOrder?: number
+  createdAt: Timestamp | string
+  updatedAt: Timestamp | string
+  createdBy?: string
+}
+
+// ─── Add-On ──────────────────────────────────────────────────
+export interface AddOn {
+  id: string
+  name: string
+  description?: string
+  price: number
+  pricingType: 'fixed' | 'starting_from'
+  category?: string // e.g. 'Photography', 'Website Design & Development', or 'General'
+  active: boolean
+  sortOrder?: number
+  createdAt: Timestamp | string
+  updatedAt: Timestamp | string
+  createdBy?: string
 }
 
 // ─── Invoice ─────────────────────────────────────────────────
@@ -634,6 +660,23 @@ export interface QuickJobServiceSnapshot {
 export type QuickJobPaymentStatus = 'Unpaid' | 'Partially Paid' | 'Pending' | 'Payment Link Generated' | 'Payment Link Sent' | 'Paid' | 'Failed' | 'Cancelled'
 export type QuickJobDeliveryStatus = 'Not Ready' | 'Ready' | 'Released' | 'Downloaded' | 'Not Sent' | 'Sent' | 'Failed'
 
+export interface QuickJobPackageSnapshot {
+  id?: string
+  title: string
+  price: number
+  pricingType?: 'fixed' | 'starting_from'
+  inclusions?: string[]
+  depositType?: 'percentage' | 'fixed' | 'none'
+  depositValue?: number
+}
+
+export interface QuickJobAddOnSnapshot {
+  id?: string
+  name: string
+  price: number
+  pricingType?: 'fixed' | 'starting_from'
+}
+
 export interface QuickJob {
   id: string
   clientId: string
@@ -642,6 +685,10 @@ export interface QuickJob {
   clientPhone?: string
   serviceId?: string
   serviceSnapshot?: QuickJobServiceSnapshot
+  packageId?: string
+  packageTitle?: string
+  packageSnapshot?: QuickJobPackageSnapshot
+  selectedAddOns?: QuickJobAddOnSnapshot[]
   jobDescription: string
   originalAgreedPrice: number
   quantity: number
