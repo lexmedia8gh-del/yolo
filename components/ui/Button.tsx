@@ -90,11 +90,11 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           </svg>
         )}
         {!loading && icon && iconPosition === 'left' && (
-          <span className="shrink-0">{icon}</span>
+          <span className="shrink-0 inline-flex items-center justify-center">{icon}</span>
         )}
-        {children && <span>{children}</span>}
+        {children && <span className="inline-flex items-center justify-center gap-2">{children}</span>}
         {!loading && icon && iconPosition === 'right' && (
-          <span className="shrink-0">{icon}</span>
+          <span className="shrink-0 inline-flex items-center justify-center">{icon}</span>
         )}
       </button>
     )
