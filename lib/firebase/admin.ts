@@ -3,23 +3,20 @@ import type { NextRequest } from 'next/server';
 
 export function getAdminDb() {
   if (!admin.apps.length) {
-    const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID;
+    const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'lexmedia-client-system';
     const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
     const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, '\n');
 
-    if (!projectId || !clientEmail || !privateKey) {
-      throw new Error(
-        'Firebase Admin SDK is not configured. Missing FIREBASE_ADMIN_PROJECT_ID, FIREBASE_ADMIN_CLIENT_EMAIL, or FIREBASE_ADMIN_PRIVATE_KEY in .env.local.'
-      );
-    }
-
     try {
-      admin.initializeApp({
-        credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
-      });
+      if (projectId && clientEmail && privateKey) {
+        admin.initializeApp({
+          credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
+        });
+      } else {
+        admin.initializeApp({ projectId });
+      }
     } catch (error: any) {
       console.error('Firebase Admin init error:', error.stack);
-      throw new Error('Failed to initialize Firebase Admin SDK. Please check your credentials.');
     }
   }
 

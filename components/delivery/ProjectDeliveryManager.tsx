@@ -414,6 +414,24 @@ export function ProjectDeliveryManager({
       } catch (err: any) {
         console.error(`Failed to upload ${staged.name}:`, err)
         toast.error(`Upload error on "${staged.name}": ${err?.message || 'Upload failed.'}`)
+        setUploadProgress((prev) => ({
+          ...prev,
+          [staged.id]: {
+            fileId: staged.id,
+            fileName: staged.name,
+            fileSize: staged.size,
+            bytesUploaded: 0,
+            percent: 0,
+            status: 'error',
+            statusMessage: err?.message || 'Upload failed.',
+            speedBytesPerSec: 0,
+            estimatedTimeRemainingSeconds: 0,
+            retryAttempt: 0,
+            maxRetries: 5,
+            error: err?.message || 'Upload failed.',
+            isPermanentError: true,
+          },
+        }))
       }
     }
 

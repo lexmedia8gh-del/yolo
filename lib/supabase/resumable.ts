@@ -216,15 +216,78 @@ export class ResumableUploadTask {
       try {
         return await this.startDirectStandardUpload()
       } catch (err: any) {
-        console.warn('[Direct Upload] Upload failed, falling back to TUS resumable:', err?.message)
+        console.warn('[Direct Upload] Standard upload failed, attempting TUS resumable:', err?.message)
         try {
           return await this.startTusUpload(supabaseUrl, supabaseAnonKey)
         } catch (tusErr: any) {
-          throw new Error(tusErr?.message || err?.message || 'Supabase Storage upload failed.')
+          console.warn('[Resumable Upload] TUS failed, attempting server API gateway:', tusErr?.message)
+          try {
+            return await this.startServerApiUpload()
+          } catch (serverErr: any) {
+            this.status = 'error'
+            this.statusMessage = serverErr?.message || 'Upload failed'
+            this.errorDetail = serverErr?.message || 'Upload failed'
+            this.isPermanentErr = true
+            this.notify()
+            throw serverErr
+          }
         }
       }
     } else {
-      throw new Error('Supabase Storage is not configured. Please check your settings.')
+      try {
+        return await this.startServerApiUpload()
+      } catch (serverErr: any) {
+        this.status = 'error'
+        this.statusMessage = serverErr?.message || 'Upload failed'
+        this.errorDetail = serverErr?.message || 'Upload failed'
+        this.isPermanentErr = true
+        this.notify()
+        throw serverErr
+      }
+    }
+  }
+
+  /**
+   * Server API Gateway upload fallback via /api/delivery/upload
+   */
+  private async startServerApiUpload(): Promise<{ downloadUrl: string; storagePath: string }> {
+    this.status = 'uploading'
+    this.statusMessage = 'Uploading via server gateway...'
+    this.notify()
+
+    const formData = new FormData()
+    formData.append('file', this.file)
+    if (this.projectId) formData.append('projectId', this.projectId)
+    if (this.quickJobId) formData.append('quickJobId', this.quickJobId)
+    formData.append('deliveryId', this.deliveryId)
+    formData.append('fileDocId', this.fileId)
+    if (this.clientId) formData.append('clientId', this.clientId)
+
+    const res = await fetch('/api/delivery/upload', {
+      method: 'POST',
+      body: formData,
+    })
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}))
+      const msg = errData.error || `Server upload failed with HTTP ${res.status}`
+      this.status = 'error'
+      this.statusMessage = msg
+      this.errorDetail = msg
+      this.isPermanentErr = true
+      this.notify()
+      throw new Error(msg)
+    }
+
+    const data = await res.json()
+    this.bytesUploaded = this.fileSize
+    this.status = 'done'
+    this.statusMessage = 'Upload completed successfully'
+    this.notify()
+
+    return {
+      downloadUrl: data.downloadUrl || `/api/files?id=${this.fileId}`,
+      storagePath: data.storagePath || this.storagePath,
     }
   }
 
