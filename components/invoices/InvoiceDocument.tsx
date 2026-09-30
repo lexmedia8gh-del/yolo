@@ -24,7 +24,7 @@ export function InvoiceDocument({
   const symbol = invoice.currencySymbol || (currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : 'GH₵')
   
   const business = invoice.businessInfo || {
-    name: 'LEXMEDIA',
+    name: 'LEXMEDIA.GH',
     address: 'East Legon, Accra, Ghana',
     phone: '+233 24 123 4567',
     whatsapp: '+233 24 123 4567',
@@ -383,7 +383,7 @@ export function InvoiceDocument({
       {/* ─── Thank You & Footer Banner ─── */}
       <div className="mt-12 pt-6 border-t border-gray-200 text-center text-xs text-gray-400 space-y-1">
         <p className="font-medium text-gray-700">
-          {invoice.thankYouMessage || 'Thank you for your business with LexMedia!'}
+          {invoice.thankYouMessage || 'Thank you for your business with LEXMEDIA.GH!'}
         </p>
         <p className="text-[11px]">
           For inquiries or assistance regarding this invoice, contact us at {business.email || 'billing@your-website.com'}

@@ -8,11 +8,11 @@ export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
   title: {
-    default: 'Lexmedia — Client & Payment Management',
-    template: '%s | Lexmedia',
+    default: 'LEXMEDIA.GH • Ctrl Room',
+    template: '%s | LEXMEDIA.GH',
   },
   description:
-    'Professional client and payment management system for Lexmedia creative agency.',
+    'Operations management system for LEXMEDIA.GH.',
   icons: {
     icon: '/favicon.ico',
   },

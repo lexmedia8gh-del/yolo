@@ -920,7 +920,7 @@ export function ProjectDeliveryManager({
     try {
       const deliveryUrl = getDeliveryLink(delivery.accessToken)
 
-      const messageBody = `Hi ${delivery.clientName}, your LexMedia project is ready! 🎉\n\nYour final files are now available for download.\n\nProject: ${delivery.projectName}\n\n📁 Download your files:\n${deliveryUrl}\n\nThank you for choosing LexMedia.`
+      const messageBody = `Hi ${delivery.clientName}, your LEXMEDIA.GH project is ready! 🎉\n\nYour final files are now available for download.\n\nProject: ${delivery.projectName}\n\n📁 Download your files:\n${deliveryUrl}\n\nThank you for choosing LEXMEDIA.GH.`
 
       const res = await fetch('/api/whatsapp/send', {
         method: 'POST',
@@ -1945,7 +1945,7 @@ export function ProjectDeliveryManager({
       >
         <div className="space-y-4">
           <p className="text-xs text-gray-500">
-            Set when the client access link expires. Clients accessing after expiration will be requested to contact LexMedia for a refreshed link.
+            Set when the client access link expires. Clients accessing after expiration will be requested to contact LEXMEDIA.GH for a refreshed link.
           </p>
 
           <div className="space-y-2">

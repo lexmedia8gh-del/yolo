@@ -474,7 +474,7 @@ export default function ClientProfilePage() {
                 <a
                   href={generateWhatsAppLink(
                     client.whatsappNumber || client.phone,
-                    `Hello ${client.fullName}! 👋 Reaching out from LexMedia regarding your project.`
+                    `Hello ${client.fullName}! 👋 Reaching out from LEXMEDIA.GH regarding your project.`
                   )}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -928,7 +928,7 @@ export default function ClientProfilePage() {
                           <a
                             href={generateWhatsAppLink(
                               client.whatsappNumber || client.phone,
-                              `Hello ${client.fullName}! 👋 Reaching out from LexMedia regarding your project.`
+                              `Hello ${client.fullName}! 👋 Reaching out from LEXMEDIA.GH regarding your project.`
                             )}
                             target="_blank"
                             rel="noopener noreferrer"

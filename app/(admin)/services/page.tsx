@@ -219,7 +219,7 @@ export default function ServicesPage() {
       {/* Header */}
       <PageHeader
         title="Services"
-        subtitle="Manage services offered by LexMedia, set base prices, and configure pricing types."
+        subtitle="Manage services, set base prices, and configure pricing types."
         action={
           <Button onClick={openAddModal} variant="primary" icon={<Plus size={18} />}>
             Add Service

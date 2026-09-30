@@ -80,7 +80,7 @@ export function ReportsView({
     const encodedUri = encodeURI(csvContent)
     const link = document.createElement('a')
     link.setAttribute('href', encodedUri)
-    link.setAttribute('download', `LexMedia_${activeReport}_report.csv`)
+    link.setAttribute('download', `LEXMEDIA.GH_${activeReport}_report.csv`)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -135,7 +135,7 @@ export function ReportsView({
         <div className="border-b border-gray-200 dark:border-gray-800 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 capitalize">
-              LexMedia {activeReport} Executive Report
+              LEXMEDIA.GH {activeReport} Executive Report
             </h2>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
               Period: {filter.period.replace('_', ' ').toUpperCase()}{' '}

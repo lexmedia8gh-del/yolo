@@ -134,10 +134,10 @@ export function Sidebar({ isOpen = true, onClose }: SidebarProps) {
             </div>
             <div>
               <span className="font-bold text-gray-900 dark:text-gray-100 text-sm tracking-tight block leading-tight">
-                LexMedia
+                LEXMEDIA.GH
               </span>
               <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium block leading-tight">
-                Admin Suite
+                Ctrl Room
               </span>
             </div>
           </Link>
@@ -191,7 +191,7 @@ export function Sidebar({ isOpen = true, onClose }: SidebarProps) {
                 <Avatar name={lexUser?.name || 'Admin'} src={lexUser?.photoURL} size="sm" />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">
-                    {lexUser?.name || 'Lexmedia Admin'}
+                    {lexUser?.name || 'Admin'}
                   </p>
                   <p className="text-[11px] text-gray-700 dark:text-gray-300 truncate">
                     {lexUser?.email || ''}

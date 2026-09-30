@@ -46,20 +46,20 @@ const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
 ]
 
 const DEFAULT_SETTINGS: Partial<BusinessSettings> = {
-  businessName: 'Lexmedia',
+  businessName: 'LEXMEDIA.GH',
   currency: 'GHS',
   currencySymbol: 'GH₵',
   invoicePrefix: 'LM-INV',
   invoiceStartNumber: 1,
   defaultTaxRate: 0,
   defaultWhatsAppMessage:
-    'Hello {{clientName}}, your Lexmedia package is ready. Please review the details and complete your payment here: {{link}}',
+    'Hello {{clientName}}, your LEXMEDIA.GH package is ready. Please review the details and complete your payment here: {{link}}',
   defaultWelcomeSmsTemplate:
     'Hello {clientName}, welcome to LEXMEDIA.GH. We are happy to have you as our client.',
 }
 
 const DEFAULT_BRANDING: BrandingSettings = {
-  businessName: 'LexMedia',
+  businessName: 'LEXMEDIA.GH',
   shortName: 'Lex',
   tagline: 'Professional Digital Services',
   logoUrl: '',
@@ -368,7 +368,7 @@ export default function SettingsPage() {
     <div className="animate-fade-in">
       <PageHeader
         title="Settings"
-        subtitle="Configure your Lexmedia business system"
+        subtitle="Configure system settings"
         action={
           <Button
             variant="primary"

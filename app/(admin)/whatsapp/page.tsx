@@ -97,8 +97,8 @@ export default function WhatsAppPage() {
   return (
     <div className="space-y-6 animate-fade-in max-w-5xl mx-auto">
       <PageHeader
-        title="WhatsApp Communication Hub"
-        subtitle="Prepare client intake questionnaires, project briefs, and payment requests with ready-to-send WhatsApp links."
+        title="WhatsApp Messages"
+        subtitle="Send client questionnaires, project briefs, and payment links via WhatsApp."
       />
 
       {/* Overview Banner */}
@@ -106,14 +106,14 @@ export default function WhatsAppPage() {
         <div className="relative z-10 space-y-3 max-w-2xl">
           <div className="inline-flex items-center gap-2 bg-white/20 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-md">
             <Sparkles size={14} />
-            <span>Direct WhatsApp Link Engine</span>
+            <span>WhatsApp Link Generator</span>
           </div>
           <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
-            Seamless Manual-Send WhatsApp Integration
+            WhatsApp Messages
           </h2>
           <p className="text-xs sm:text-sm text-emerald-100 leading-relaxed">
-            Generate properly formatted <code className="bg-emerald-950/60 px-1.5 py-0.5 rounded text-emerald-300 font-mono">wa.me</code> links with pre-filled messages and payment links.
-            Links launch WhatsApp or WhatsApp Web instantly, leaving you in complete control to review, edit, and send each message manually.
+            Generate formatted <code className="bg-emerald-950/60 px-1.5 py-0.5 rounded text-emerald-300 font-mono">wa.me</code> links with pre-filled messages and payment links.
+            Links launch WhatsApp or WhatsApp Web for easy messaging.
           </p>
         </div>
       </div>

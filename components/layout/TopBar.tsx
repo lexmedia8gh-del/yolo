@@ -88,7 +88,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
 
         {/* Desktop Breadcrumb */}
         <div className="hidden lg:flex items-center gap-2 text-sm">
-          <span className="text-gray-400 dark:text-gray-500 font-medium">LexMedia</span>
+          <span className="text-gray-400 dark:text-gray-500 font-medium">LEXMEDIA.GH</span>
           <span className="text-gray-300 dark:text-gray-700">/</span>
           <span className="text-gray-900 dark:text-gray-100 font-semibold">{getPageTitle(pathname)}</span>
         </div>

@@ -631,9 +631,9 @@ function ClientPreviewPortalInner() {
               onClick={() => {
                 const phone = (branding as any)?.phone || (branding as any)?.supportPhone || ''
                 if (phone) {
-                  window.open(`https://wa.me/${phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent('Hi LexMedia, my preview link has expired. Could you kindly generate a renewed link for me?')}`, '_blank')
+                  window.open(`https://wa.me/${phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent('Hi LEXMEDIA.GH, my preview link has expired. Could you kindly generate a renewed link for me?')}`, '_blank')
                 } else {
-                  toast('Please reach out directly to your studio contact or LexMedia.', { icon: '✉️' })
+                  toast('Please reach out directly to your studio contact or LEXMEDIA.GH.', { icon: '✉️' })
                 }
               }}
             >
@@ -1126,7 +1126,7 @@ function ClientPreviewPortalInner() {
           </span>
         </div>
         <div className="text-slate-400 text-center sm:text-right">
-          © {new Date().getFullYear()} {branding?.businessName || 'LexMedia'} • Confidential Client Review Portal
+          © {new Date().getFullYear()} {branding?.businessName || 'LEXMEDIA.GH'} • Confidential Client Review Portal
         </div>
       </footer>
 

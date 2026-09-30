@@ -343,11 +343,11 @@ function ClientDeliveryPageInner() {
             <div className="space-y-2">
               <h1 className="text-xl font-bold text-white">Delivery Link Expired</h1>
               <p className="text-sm text-slate-400 leading-relaxed">
-                Please contact {branding.businessName || 'LexMedia'} to request a refreshed access link.
+                Please contact {branding.businessName || 'LEXMEDIA.GH'} to request a refreshed access link.
               </p>
             </div>
             <div className="pt-4 border-t border-slate-800">
-              <p className="text-xs text-slate-500 font-mono">LexMedia Studio Delivery System</p>
+              <p className="text-xs text-slate-500 font-mono">LEXMEDIA.GH Delivery System</p>
             </div>
           </CardReveal>
         </div>
@@ -495,8 +495,8 @@ function ClientDeliveryPageInner() {
 
           {/* Footer */}
           <footer className="border-t border-slate-800/80 bg-slate-900/40 py-6 px-4 sm:px-6 text-center text-xs text-slate-400 space-y-1">
-            <p className="font-semibold text-slate-300">Thank you for choosing {branding.businessName || 'LexMedia'} Studio.</p>
-            <p>© {new Date().getFullYear()} {branding.businessName || 'LexMedia'}. All rights reserved.</p>
+            <p className="font-semibold text-slate-300">Thank you for choosing {branding.businessName || 'LEXMEDIA.GH'}.</p>
+            <p>© {new Date().getFullYear()} {branding.businessName || 'LEXMEDIA.GH'}. All rights reserved.</p>
           </footer>
         </div>
       </PageEnter>
@@ -605,8 +605,8 @@ function ClientDeliveryPageInner() {
 
           {/* Footer */}
           <footer className="border-t border-slate-800/80 bg-slate-900/40 py-6 px-4 sm:px-6 text-center text-xs text-slate-400 space-y-1">
-            <p className="font-semibold text-slate-300">Thank you for choosing {branding.businessName || 'LexMedia'} Studio.</p>
-            <p>© {new Date().getFullYear()} {branding.businessName || 'LexMedia'}. All rights reserved.</p>
+            <p className="font-semibold text-slate-300">Thank you for choosing {branding.businessName || 'LEXMEDIA.GH'}.</p>
+            <p>© {new Date().getFullYear()} {branding.businessName || 'LEXMEDIA.GH'}. All rights reserved.</p>
           </footer>
         </div>
       </PageEnter>
@@ -840,8 +840,8 @@ function ClientDeliveryPageInner() {
         {/* Footer */}
         <FadeIn delay={0.3}>
           <footer className="border-t border-slate-800/80 bg-slate-900/40 py-8 px-4 sm:px-6 text-center text-xs text-slate-400 space-y-2">
-            <p className="font-semibold text-slate-300">Thank you for choosing {branding.businessName || 'LexMedia'} Studio.</p>
-            <p>© {new Date().getFullYear()} {branding.businessName || 'LexMedia'}. All rights reserved.</p>
+            <p className="font-semibold text-slate-300">Thank you for choosing {branding.businessName || 'LEXMEDIA.GH'}.</p>
+            <p>© {new Date().getFullYear()} {branding.businessName || 'LEXMEDIA.GH'}. All rights reserved.</p>
           </footer>
         </FadeIn>
 

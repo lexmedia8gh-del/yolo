@@ -38,7 +38,7 @@ export function PageLoader() {
           <span className="text-white font-bold text-xl">L</span>
         </div>
         <Spinner size="lg" />
-        <p className="text-sm text-muted">Loading Lexmedia...</p>
+        <p className="text-sm text-muted">Loading LEXMEDIA.GH...</p>
       </div>
     </div>
   )

@@ -154,7 +154,7 @@ export default function ProjectDetailPage() {
     
     setSendingWA(true)
     try {
-      const msg = `Hello ${project.clientName}! 👋\n\nYour invoice ${project.invoiceNumber} is ready.\n\n📋 Service: ${project.serviceName}\n📦 Package: ${project.packageTitle}\n💰 Total: ${formatCurrency(project.price)}\n🔐 Deposit Due: ${formatCurrency(project.depositAmount || 0)}\n\nClick the link below to pay securely:\n${paymentUrl}\n\nThank you for choosing LexMedia! 🙏`
+      const msg = `Hello ${project.clientName}! 👋\n\nYour invoice ${project.invoiceNumber} is ready.\n\n📋 Service: ${project.serviceName}\n📦 Package: ${project.packageTitle}\n💰 Total: ${formatCurrency(project.price)}\n🔐 Deposit Due: ${formatCurrency(project.depositAmount || 0)}\n\nClick the link below to pay securely:\n${paymentUrl}\n\nThank you for choosing LEXMEDIA.GH! 🙏`
       
       const res = await fetch('/api/whatsapp/send', {
         method: 'POST',

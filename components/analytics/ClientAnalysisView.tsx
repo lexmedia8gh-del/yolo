@@ -83,7 +83,7 @@ export function ClientAnalysisView({ clientList, onSelectClient }: ClientAnalysi
             {totalClients > 0 ? `${Math.round((returningClients / totalClients) * 100)}%` : '0%'}
             )
           </div>
-          <p className="text-xs text-gray-500 mt-0.5">&gt;1 booking with LexMedia</p>
+          <p className="text-xs text-gray-500 mt-0.5">&gt;1 project with LEXMEDIA.GH</p>
         </div>
 
         <div className="bg-white dark:bg-gray-900 border border-emerald-100 dark:border-emerald-900/50 rounded-xl p-4 shadow-xs">

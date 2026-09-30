@@ -5,7 +5,7 @@ import { subscribeToDocument, COLLECTIONS } from '@/lib/firebase/firestore'
 import type { BrandingSettings } from '@/lib/types'
 
 export const DEFAULT_BRANDING: BrandingSettings = {
-  businessName: 'LexMedia',
+  businessName: 'LEXMEDIA.GH',
   shortName: 'Lex',
   tagline: 'Professional Digital Services',
   logoUrl: '',

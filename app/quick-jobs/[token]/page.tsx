@@ -317,7 +317,7 @@ function QuickJobPortalContent() {
               <span>Secure Quick Job Portal</span>
             </div>
             <h1 className="text-2xl font-black tracking-tight text-white">
-              {branding.businessName || 'LexMedia'} Studio
+              {branding.businessName || 'LEXMEDIA.GH'}
             </h1>
             <p className="text-xs text-slate-400 mt-0.5">
               Client: <strong className="text-slate-200">{job.clientName}</strong>
@@ -611,7 +611,7 @@ function QuickJobPortalContent() {
 
         {/* Footer */}
         <footer className="text-center text-xs text-slate-500 pt-4">
-          <p>© {new Date().getFullYear()} {branding.businessName || 'LexMedia'} Studio. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} {branding.businessName || 'LEXMEDIA.GH'}. All rights reserved.</p>
         </footer>
       </div>
     </div>

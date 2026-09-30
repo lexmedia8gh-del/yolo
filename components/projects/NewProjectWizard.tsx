@@ -420,7 +420,7 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
     
     setSendingWA(true)
     try {
-      const msg = `Hello ${client.fullName}! 👋\n\nYour invoice ${result.invoiceNumber} is ready.\n\n📋 Service: ${result.service.name}\n📦 Package: ${result.pkg.title}\n💰 Total: ${formatCurrency(result.totalAmount)}\n🔐 Deposit: ${formatCurrency(result.depositAmount)}\n\nClick the link below to pay securely:\n${result.paymentUrl}\n\nThank you for choosing LexMedia! 🙏`
+      const msg = `Hello ${client.fullName}! 👋\n\nYour invoice ${result.invoiceNumber} is ready.\n\n📋 Service: ${result.service.name}\n📦 Package: ${result.pkg.title}\n💰 Total: ${formatCurrency(result.totalAmount)}\n🔐 Deposit: ${formatCurrency(result.depositAmount)}\n\nClick the link below to pay securely:\n${result.paymentUrl}\n\nThank you for choosing LEXMEDIA.GH! 🙏`
       
       const res = await fetch('/api/whatsapp/send', {
         method: 'POST',

@@ -504,7 +504,7 @@ export async function sendPaymentConfirmedDeliveryEmail({
     clientLogoUrl,
   })
 
-  const subject = `Payment Confirmed — Your LexMedia Deliverables Are Ready`
+  const subject = `Payment Confirmed — Your LEXMEDIA.GH Deliverables Are Ready`
 
   return sendBrevoEmail({
     toEmail,
@@ -528,7 +528,7 @@ export async function sendInvoiceEmail({
   paymentUrl,
   personalMessage,
   items = [],
-  businessName = 'LexMedia',
+  businessName = 'LEXMEDIA.GH',
   businessLogoUrl,
 }: SendInvoiceEmailParams): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const apiKey = process.env.BREVO_API_KEY
@@ -709,7 +709,7 @@ export async function sendPaymentRequestEmail({
   title,
   dueDate,
   personalMessage,
-  businessName = 'LexMedia',
+  businessName = 'LEXMEDIA.GH',
   businessLogoUrl,
 }: SendPaymentRequestEmailParams): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const apiKey = process.env.BREVO_API_KEY

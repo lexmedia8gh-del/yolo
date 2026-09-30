@@ -106,7 +106,7 @@ export function InvoiceBuilderModal({
   const [isUploadingLogo, setIsUploadingLogo] = useState(false)
 
   // ─── Business Info State ───
-  const [businessName, setBusinessName] = useState('LEXMEDIA')
+  const [businessName, setBusinessName] = useState('LEXMEDIA.GH')
   const [businessLogo, setBusinessLogo] = useState('')
   const [businessAddress, setBusinessAddress] = useState('East Legon, Accra, Ghana')
   const [businessPhone, setBusinessPhone] = useState('+233 24 123 4567')
@@ -163,10 +163,10 @@ export function InvoiceBuilderModal({
     'Payment is due according to selected payment terms. Production deliverables will be released upon full invoice settlement.'
   )
   const [paymentInstructions, setPaymentInstructions] = useState(
-    'Mobile Money: 024 123 4567 (LEXMEDIA)\nBank Transfer: Standard Chartered Bank, Acc: 010023456789'
+    'Mobile Money: 024 123 4567 (LEXMEDIA.GH)\nBank Transfer: Standard Chartered Bank, Acc: 010023456789'
   )
   const [thankYouMessage, setThankYouMessage] = useState(
-    'Thank you for partnering with LexMedia! We appreciate your business.'
+    'Thank you for partnering with LEXMEDIA.GH! We appreciate your business.'
   )
 
   const logoInputRef = useRef<HTMLInputElement>(null)
