@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import {
   Eye,
   EyeOff,
@@ -15,20 +15,8 @@ import {
   ArrowRight,
   AlertCircle,
   ShieldCheck,
-  Sparkles,
-  Users,
-  FolderKanban,
-  CreditCard,
-  UploadCloud,
   CheckCircle2,
   ArrowLeft,
-  Search,
-  Bell,
-  Check,
-  Activity,
-  Layers,
-  FileCheck,
-  TrendingUp,
 } from 'lucide-react'
 import { signInWithEmail, signInWithGoogle, sendPasswordReset } from '@/lib/firebase/auth'
 import { getFirebaseErrorMessage } from '@/lib/utils'
@@ -169,451 +157,338 @@ function LoginFormContent() {
     }
   }
 
-  const businessName = branding?.businessName || 'LEXMEDIA / CTRL ROOM'
-  const tagline = branding?.tagline || 'STUDIO OPERATIONS & CLIENT DELIVERIES'
+  const businessName = branding?.businessName || 'LEXMEDIA.GH'
   const logoImage = branding?.logoLightUrl || branding?.logoUrl
 
   return (
-    <main className="min-h-screen w-full flex flex-col lg:flex-row bg-[#0B0F19] text-slate-100 selection:bg-blue-600 selection:text-white">
-      {/* ================================================== */}
-      {/* LEFT PANEL — BRAND ARCHITECTURE & SYSTEM TELEMETRY */}
-      {/* ================================================== */}
-      <section
-        id="login-brand-panel"
-        className="w-full lg:w-[48%] xl:w-[50%] relative flex flex-col justify-between p-8 sm:p-12 xl:p-16 bg-[#090D16] border-b lg:border-b-0 lg:border-r border-slate-800/80 overflow-hidden"
-      >
-        {/* Subtle geometric background structure */}
-        <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
-          <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full bg-blue-600/10 blur-[120px]" />
-          <div className="absolute top-1/2 -right-32 w-96 h-96 rounded-full bg-indigo-600/10 blur-[130px]" />
-          <div
-            className="absolute inset-0 opacity-[0.035]"
-            style={{
-              backgroundImage: 'radial-gradient(circle at 1px 1px, #ffffff 1px, transparent 0)',
-              backgroundSize: '28px 28px',
-            }}
-          />
-        </div>
+    <main className="min-h-screen w-full bg-[#06080E] text-slate-100 flex flex-col justify-between items-center p-4 sm:p-6 lg:p-8 relative overflow-hidden selection:bg-blue-600 selection:text-white">
+      {/* Subtle Background Lighting & Radial Glows */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
+        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full bg-blue-600/15 blur-[140px]" />
+        <div className="absolute -bottom-40 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full bg-indigo-600/10 blur-[130px]" />
+        <div
+          className="absolute inset-0 opacity-[0.025]"
+          style={{
+            backgroundImage: 'radial-gradient(circle at 1px 1px, #ffffff 1px, transparent 0)',
+            backgroundSize: '24px 24px',
+          }}
+        />
+      </div>
 
-        {/* --- Top Brand Bar --- */}
-        <header className="relative z-10 flex items-center justify-between">
-          <div className="flex items-center gap-3.5">
-            <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700/80 flex items-center justify-center p-2 shadow-sm">
-              {logoImage ? (
-                <Image
-                  src={logoImage}
-                  alt={businessName}
-                  width={24}
-                  height={24}
-                  unoptimized
-                  className="h-6 w-auto object-contain"
-                />
-              ) : (
-                <LexMediaEmblem className="w-6 h-6" />
-              )}
-            </div>
-            <div>
-              <span className="font-bold text-[13px] tracking-[0.16em] uppercase text-white block leading-none">
-                {businessName}
-              </span>
-              <span className="text-[10px] text-slate-400 tracking-[0.18em] uppercase font-semibold mt-1 block">
-                {tagline}
-              </span>
-            </div>
-          </div>
-
-          {/* Operational Status Pill */}
-          <div className="hidden sm:inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/90 border border-slate-800 text-[11px] font-medium text-slate-300">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Systems Online</span>
-          </div>
-        </header>
-
-        {/* --- Center Brand Pitch & Telemetry --- */}
-        <div className="relative z-10 my-auto py-10 space-y-8 max-w-xl">
-          <div className="space-y-4">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-md bg-blue-950/60 border border-blue-800/40 text-[11px] font-semibold text-blue-300 tracking-wide uppercase">
-              <Layers size={13} className="text-blue-400" />
-              <span>Agency Control Deck</span>
-            </div>
-            <h1 className="text-3xl sm:text-4xl xl:text-[40px] font-extrabold tracking-tight text-white leading-[1.18]">
-              High-velocity studio operations &amp; client escrow.
-            </h1>
-            <p className="text-sm sm:text-base text-slate-400 leading-relaxed max-w-lg">
-              Manage client relationships, track project deliverables, accept Paystack payments, and deliver final creative assets with bank-grade link protection.
-            </p>
-          </div>
-
-          {/* 3 Telemetry Metric Cards */}
-          <div className="grid grid-cols-3 gap-3 pt-2">
-            <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800/90 space-y-1">
-              <div className="flex items-center justify-between text-slate-400 text-xs">
-                <span>Active Jobs</span>
-                <FolderKanban size={13} className="text-blue-400" />
-              </div>
-              <div className="text-xl font-bold text-white tracking-tight">32 Live</div>
-              <div className="text-[10px] text-emerald-400 font-medium">+14% this quarter</div>
-            </div>
-
-            <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800/90 space-y-1">
-              <div className="flex items-center justify-between text-slate-400 text-xs">
-                <span>Settlement</span>
-                <CreditCard size={13} className="text-blue-400" />
-              </div>
-              <div className="text-xl font-bold text-white tracking-tight">99.4%</div>
-              <div className="text-[10px] text-emerald-400 font-medium">Instant Escrow</div>
-            </div>
-
-            <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800/90 space-y-1">
-              <div className="flex items-center justify-between text-slate-400 text-xs">
-                <span>Turnaround</span>
-                <FileCheck size={13} className="text-blue-400" />
-              </div>
-              <div className="text-xl font-bold text-white tracking-tight">3.2 Days</div>
-              <div className="text-[10px] text-slate-400 font-medium">Average Signoff</div>
-            </div>
-          </div>
-
-          {/* Studio Activity Micro-Feed */}
-          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800/80 space-y-2.5">
-            <div className="flex items-center justify-between text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-              <span>Recent Operations Stream</span>
-              <Activity size={13} className="text-blue-400" />
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs py-1 border-b border-slate-800/60">
-                <span className="text-slate-200 truncate max-w-[200px]">Brand Campaign Deliverables</span>
-                <span className="px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/50 text-[10px] font-semibold">
-                  Approved
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs py-1 border-b border-slate-800/60">
-                <span className="text-slate-200 truncate max-w-[200px]">Invoice #INV-2026-44</span>
-                <span className="px-2 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/50 text-[10px] font-semibold">
-                  Settled
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs py-1">
-                <span className="text-slate-200 truncate max-w-[200px]">Client Token Delivery Generated</span>
-                <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-semibold">
-                  Active
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* --- Bottom Trust & Compliance Footer --- */}
-        <footer className="relative z-10 flex items-center justify-between pt-6 border-t border-slate-800/60 text-xs text-slate-400">
-          <div className="flex items-center gap-2">
-            <ShieldCheck size={14} className="text-emerald-400" />
-            <span>SOC2 Type II Workflow · TLS 1.3 Encryption</span>
-          </div>
-          <span>v2.4 Enterprise</span>
-        </footer>
-      </section>
-
-      {/* ================================================== */}
-      {/* RIGHT PANEL — DISTRACTION-FREE AUTHENTICATION DECK */}
-      {/* ================================================== */}
-      <section
-        id="login-form-container"
-        className="w-full lg:w-[52%] xl:w-[50%] flex flex-col justify-between p-6 sm:p-12 xl:p-16 bg-[#F8FAFC] text-slate-900 relative"
-      >
-        {/* Subtle Ambient Radial Lighting */}
-        <div className="absolute top-0 right-0 w-80 h-80 rounded-full bg-blue-100/40 blur-3xl pointer-events-none" />
-
-        {/* Top Header Tagline (Mobile brand display + right badge) */}
-        <div className="w-full flex items-center justify-between z-10 mb-6 lg:mb-0">
-          <div className="lg:hidden flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-700 flex items-center justify-center p-1.5 shadow-sm">
+      {/* Top Header Bar */}
+      <header className="w-full max-w-md pt-2 pb-4 flex items-center justify-between z-10">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-slate-900/90 border border-slate-800 flex items-center justify-center p-1.5 shadow-sm">
+            {logoImage ? (
+              <Image
+                src={logoImage}
+                alt={businessName}
+                width={20}
+                height={20}
+                unoptimized
+                className="h-5 w-auto object-contain"
+              />
+            ) : (
               <LexMediaEmblem className="w-5 h-5" />
-            </div>
-            <span className="font-bold text-xs tracking-wider uppercase text-slate-900">
-              {businessName}
-            </span>
+            )}
           </div>
-
-          <div className="ml-auto flex items-center gap-2 text-[11px] font-semibold text-slate-400 uppercase tracking-widest">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
-            <span>Secure Access Point</span>
-          </div>
+          <span className="font-semibold text-xs tracking-wider uppercase text-slate-400">
+            {businessName}
+          </span>
         </div>
 
-        {/* Centered Authentication Card */}
-        <div className="my-auto py-6 sm:py-10 flex flex-col items-center justify-center z-10 w-full">
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45, ease: 'easeOut' }}
-            className="w-full max-w-[440px]"
+        <div className="flex items-center gap-2 text-[11px] font-medium text-slate-500">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          <span>System Online</span>
+        </div>
+      </header>
+
+      {/* Main Centered Login Card */}
+      <div className="my-auto py-4 w-full max-w-[420px] z-10">
+        <motion.div
+          initial={{ opacity: 0, y: 16, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          className="w-full"
+        >
+          <div
+            id="login-card"
+            className="w-full bg-[#0D121F]/80 backdrop-blur-xl rounded-2xl border border-slate-800/80 p-6 sm:p-9 shadow-[0_0_50px_-12px_rgba(37,99,235,0.2),0_10px_30px_-10px_rgba(0,0,0,0.5)] relative overflow-hidden"
           >
-            {/* The Authentication Card */}
-            <div
-              id="login-card"
-              className="bg-white rounded-2xl border border-slate-200/90 p-8 sm:p-10 shadow-[0_10px_30px_-10px_rgba(15,23,42,0.06),0_0_1px_1px_rgba(15,23,42,0.04)]"
-            >
-              {/* Card Title & Context */}
-              <div className="mb-6 space-y-1.5">
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-100 text-slate-700 text-[10px] font-bold uppercase tracking-wider mb-2">
-                  <span>Authorized Personnel</span>
-                </div>
-                <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-                  {isResetMode ? 'Recover Access' : 'Sign in to Control Room'}
-                </h2>
-                <p className="text-xs sm:text-sm text-slate-500 font-normal leading-relaxed">
-                  {isResetMode
-                    ? 'Enter your registered email address to receive password reset instructions.'
-                    : 'Access your studio management workspace and client portal.'}
-                </p>
+            {/* Subtle top ambient accent line */}
+            <div className="absolute top-0 inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-blue-500/40 to-transparent" />
+
+            {/* Branding Header Inside Card */}
+            <div className="text-center space-y-1.5 mb-6">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-950/50 border border-blue-800/30 text-blue-400 text-[11px] font-semibold tracking-wider uppercase mb-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                <span>CTRL ROOM</span>
               </div>
 
-              {/* Error Banner */}
-              {authError && (
-                <motion.div
-                  initial={{ opacity: 0, y: -6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="flex items-start gap-2.5 p-3.5 rounded-xl bg-rose-50 border border-rose-200/90 text-rose-800 text-xs mb-5"
-                >
-                  <AlertCircle size={15} className="text-rose-600 shrink-0 mt-0.5" />
-                  <span className="font-medium leading-relaxed">{authError}</span>
-                </motion.div>
-              )}
+              <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
+                {isResetMode ? 'Reset Password' : 'Welcome back'}
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-400 font-normal leading-relaxed">
+                {isResetMode
+                  ? 'Enter your account email to receive recovery instructions.'
+                  : 'Sign in to your operations workspace.'}
+              </p>
+            </div>
 
-              {/* ================================================== */}
-              {/* PASSWORD RESET SUB-VIEW                            */}
-              {/* ================================================== */}
-              {isResetMode ? (
-                <form id="reset-password-form" onSubmit={handlePasswordReset} className="space-y-4">
-                  {resetSuccess ? (
-                    <div className="space-y-4">
-                      <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-medium space-y-1.5">
-                        <div className="flex items-center gap-2 text-emerald-700 font-bold">
-                          <CheckCircle2 size={16} />
-                          <span>Recovery Link Dispatched</span>
-                        </div>
-                        <p>
-                          We sent a secure password reset link to{' '}
-                          <strong className="font-semibold">{resetEmail}</strong>.
-                        </p>
-                        <p className="text-emerald-700/80">Please check your inbox and spam folder.</p>
+            {/* Error Banner */}
+            {authError && (
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-start gap-2.5 p-3.5 rounded-xl bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs mb-5"
+              >
+                <AlertCircle size={15} className="text-rose-400 shrink-0 mt-0.5" />
+                <span className="font-medium leading-relaxed">{authError}</span>
+              </motion.div>
+            )}
+
+            {/* Password Reset Form */}
+            {isResetMode ? (
+              <form id="reset-password-form" onSubmit={handlePasswordReset} className="space-y-4">
+                {resetSuccess ? (
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-xl bg-emerald-950/50 border border-emerald-800/60 text-emerald-300 text-xs font-normal space-y-1.5">
+                      <div className="flex items-center gap-2 text-emerald-400 font-semibold">
+                        <CheckCircle2 size={15} />
+                        <span>Recovery Link Dispatched</span>
                       </div>
-
-                      <button
-                        id="reset-return-button"
-                        type="button"
-                        onClick={() => {
-                          setIsResetMode(false)
-                          setResetSuccess(false)
-                          setResetEmail('')
-                          setAuthError('')
-                        }}
-                        className="w-full h-12 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs transition-colors flex items-center justify-center gap-2"
-                      >
-                        <ArrowLeft size={14} />
-                        <span>Return to Sign In</span>
-                      </button>
+                      <p className="text-slate-300">
+                        We sent a password reset link to{' '}
+                        <strong className="text-white font-medium">{resetEmail}</strong>.
+                      </p>
+                      <p className="text-slate-400 text-[11px]">Please check your inbox and spam folder.</p>
                     </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="space-y-1.5">
-                        <label
-                          htmlFor="reset-email-input"
-                          className="block text-xs font-semibold text-slate-700"
-                        >
-                          Email Address <span className="text-rose-500">*</span>
-                        </label>
-                        <div className="relative">
-                          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                            <Mail size={16} />
-                          </div>
-                          <input
-                            id="reset-email-input"
-                            type="email"
-                            required
-                            autoComplete="email"
-                            placeholder="staff@lexmedia.com"
-                            value={resetEmail}
-                            onChange={(e) => setResetEmail(e.target.value)}
-                            className="w-full h-12 pl-11 pr-4 rounded-xl border border-slate-200 bg-white text-slate-900 text-sm placeholder-slate-400 transition-colors focus:outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10"
-                          />
-                        </div>
-                      </div>
-
-                      <button
-                        id="reset-submit-button"
-                        type="submit"
-                        disabled={isResetLoading}
-                        className="w-full h-12 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs tracking-wide shadow-sm hover:shadow transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none"
-                      >
-                        {isResetLoading ? (
-                          <span>Sending link...</span>
-                        ) : (
-                          <>
-                            <span>Send Recovery Link</span>
-                            <ArrowRight size={14} />
-                          </>
-                        )}
-                      </button>
-
-                      <button
-                        id="reset-back-button"
-                        type="button"
-                        onClick={() => {
-                          setIsResetMode(false)
-                          setAuthError('')
-                        }}
-                        className="w-full text-center text-xs text-slate-500 hover:text-slate-800 font-semibold py-1 transition-colors flex items-center justify-center gap-1.5"
-                      >
-                        <ArrowLeft size={13} />
-                        <span>Back to Sign In</span>
-                      </button>
-                    </div>
-                  )}
-                </form>
-              ) : (
-                /* ================================================== */
-                /* PRIMARY CREDENTIAL FORM                            */
-                /* ================================================== */
-                <form
-                  id="primary-login-form"
-                  onSubmit={handleSubmit(onSubmit)}
-                  className="space-y-4"
-                >
-                  {/* Email Input */}
-                  <div className="space-y-1.5">
-                    <label
-                      htmlFor="login-email-input"
-                      className="block text-xs font-semibold text-slate-700"
-                    >
-                      Email Address <span className="text-rose-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                        <Mail size={16} />
-                      </div>
-                      <input
-                        id="login-email-input"
-                        type="email"
-                        autoComplete="email"
-                        placeholder="staff@lexmedia.com"
-                        required
-                        className={`w-full h-12 pl-11 pr-4 rounded-xl border bg-white text-slate-900 text-sm placeholder-slate-400 transition-colors focus:outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10 ${
-                          errors.email ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-500/10' : 'border-slate-200'
-                        }`}
-                        {...register('email')}
-                      />
-                    </div>
-                    {errors.email && (
-                      <p className="text-[11px] text-rose-600 font-medium">{errors.email.message}</p>
-                    )}
-                  </div>
-
-                  {/* Password Input */}
-                  <div className="space-y-1.5">
-                    <label
-                      htmlFor="login-password-input"
-                      className="block text-xs font-semibold text-slate-700"
-                    >
-                      Password <span className="text-rose-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                        <Lock size={16} />
-                      </div>
-                      <input
-                        id="login-password-input"
-                        type={showPassword ? 'text' : 'password'}
-                        autoComplete="current-password"
-                        placeholder="••••••••••••"
-                        required
-                        className={`w-full h-12 pl-11 pr-11 rounded-xl border bg-white text-slate-900 text-sm placeholder-slate-400 transition-colors focus:outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10 ${
-                          errors.password ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-500/10' : 'border-slate-200'
-                        }`}
-                        {...register('password')}
-                      />
-                      <button
-                        id="login-password-toggle"
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
-                        tabIndex={-1}
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      >
-                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </button>
-                    </div>
-                    {errors.password && (
-                      <p className="text-[11px] text-rose-600 font-medium">{errors.password.message}</p>
-                    )}
-                  </div>
-
-                  {/* Remember Me & Forgot Password Row */}
-                  <div className="flex items-center justify-between pt-1 select-none text-xs">
-                    <label className="flex items-center gap-2 cursor-pointer group">
-                      <input
-                        id="remember-me-checkbox"
-                        type="checkbox"
-                        className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900 focus:ring-offset-0 cursor-pointer"
-                        {...register('rememberMe')}
-                      />
-                      <span className="text-slate-600 group-hover:text-slate-900 font-medium transition-colors">
-                        Remember me
-                      </span>
-                    </label>
 
                     <button
-                      id="forgot-password-toggle"
+                      id="reset-return-button"
                       type="button"
                       onClick={() => {
-                        setIsResetMode(true)
+                        setIsResetMode(false)
+                        setResetSuccess(false)
+                        setResetEmail('')
                         setAuthError('')
                       }}
-                      className="font-semibold text-slate-700 hover:text-slate-900 transition-colors hover:underline"
+                      className="w-full h-11 rounded-xl border border-slate-800 hover:bg-slate-900 text-slate-300 font-medium text-xs transition-colors flex items-center justify-center gap-2"
                     >
-                      Forgot password?
+                      <ArrowLeft size={14} />
+                      <span>Return to Sign In</span>
                     </button>
                   </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label
+                        htmlFor="reset-email-input"
+                        className="block text-xs font-medium text-slate-300"
+                      >
+                        Email Address <span className="text-rose-400">*</span>
+                      </label>
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                          <Mail size={16} />
+                        </div>
+                        <input
+                          id="reset-email-input"
+                          type="email"
+                          required
+                          autoComplete="email"
+                          placeholder="staff@lexmedia.com"
+                          value={resetEmail}
+                          onChange={(e) => setResetEmail(e.target.value)}
+                          className="w-full h-11 pl-10 pr-4 rounded-xl bg-slate-900/90 border border-slate-800 text-slate-100 text-xs sm:text-sm placeholder-slate-500 transition-all focus:outline-none focus:border-blue-500/80 focus:ring-2 focus:ring-blue-500/20"
+                        />
+                      </div>
+                    </div>
 
-                  {/* Primary Submit Button */}
-                  <button
-                    id="login-submit-button"
-                    type="submit"
-                    disabled={isSubmitting || isGoogleLoading}
-                    className="w-full h-12 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs tracking-wide shadow-sm hover:shadow transition-all flex items-center justify-center gap-2 mt-2 disabled:opacity-60 disabled:pointer-events-none active:scale-[0.99]"
-                  >
-                    {isSubmitting ? (
-                      <span>Signing in...</span>
-                    ) : (
-                      <>
-                        <span>Sign In</span>
-                        <ArrowRight size={14} />
-                      </>
-                    )}
-                  </button>
-                </form>
-              )}
+                    <button
+                      id="reset-submit-button"
+                      type="submit"
+                      disabled={isResetLoading}
+                      className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs tracking-wide shadow-[0_4px_16px_rgba(37,99,235,0.3)] transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none active:scale-[0.99]"
+                    >
+                      {isResetLoading ? (
+                        <span className="flex items-center gap-2">
+                          <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span>Sending link...</span>
+                        </span>
+                      ) : (
+                        <>
+                          <span>Send Reset Link</span>
+                          <ArrowRight size={14} />
+                        </>
+                      )}
+                    </button>
 
-              {/* Single Sign-On Divider */}
-              {!isResetMode && (
-                <>
-                  <div className="relative my-6 flex items-center justify-center">
-                    <div className="border-t border-slate-200 w-full" />
-                    <span className="absolute bg-white px-3 text-[10px] uppercase tracking-wider text-slate-400 font-bold whitespace-nowrap">
-                      OR
-                    </span>
-                    <div className="border-t border-slate-200 w-full" />
+                    <button
+                      id="reset-back-button"
+                      type="button"
+                      onClick={() => {
+                        setIsResetMode(false)
+                        setAuthError('')
+                      }}
+                      className="w-full text-center text-xs text-slate-400 hover:text-slate-200 font-medium py-1 transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <ArrowLeft size={13} />
+                      <span>Back to Sign In</span>
+                    </button>
                   </div>
-
-                  {/* Google SSO Button */}
-                  <button
-                    id="google-login-button"
-                    type="button"
-                    disabled={isSubmitting || isGoogleLoading}
-                    onClick={handleGoogleLogin}
-                    className="w-full h-12 rounded-xl bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold text-xs transition-colors flex items-center justify-center gap-3 disabled:opacity-60 disabled:pointer-events-none shadow-xs"
+                )}
+              </form>
+            ) : (
+              /* Primary Credential Form */
+              <form
+                id="primary-login-form"
+                onSubmit={handleSubmit(onSubmit)}
+                className="space-y-4"
+              >
+                {/* Email Input */}
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="login-email-input"
+                    className="block text-xs font-medium text-slate-300"
                   >
-                    {!isGoogleLoading && (
+                    Email Address <span className="text-rose-400">*</span>
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                      <Mail size={16} />
+                    </div>
+                    <input
+                      id="login-email-input"
+                      type="email"
+                      autoComplete="email"
+                      placeholder="staff@lexmedia.com"
+                      required
+                      className={`w-full h-11 pl-10 pr-4 rounded-xl bg-slate-900/90 border text-slate-100 text-xs sm:text-sm placeholder-slate-500 transition-all focus:outline-none focus:border-blue-500/80 focus:ring-2 focus:ring-blue-500/20 ${
+                        errors.email ? 'border-rose-500/80 focus:border-rose-500 focus:ring-rose-500/20' : 'border-slate-800'
+                      }`}
+                      {...register('email')}
+                    />
+                  </div>
+                  {errors.email && (
+                    <p className="text-[11px] text-rose-400 font-medium">{errors.email.message}</p>
+                  )}
+                </div>
+
+                {/* Password Input */}
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="login-password-input"
+                    className="block text-xs font-medium text-slate-300"
+                  >
+                    Password <span className="text-rose-400">*</span>
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                      <Lock size={16} />
+                    </div>
+                    <input
+                      id="login-password-input"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      placeholder="••••••••••••"
+                      required
+                      className={`w-full h-11 pl-10 pr-11 rounded-xl bg-slate-900/90 border text-slate-100 text-xs sm:text-sm placeholder-slate-500 transition-all focus:outline-none focus:border-blue-500/80 focus:ring-2 focus:ring-blue-500/20 ${
+                        errors.password ? 'border-rose-500/80 focus:border-rose-500 focus:ring-rose-500/20' : 'border-slate-800'
+                      }`}
+                      {...register('password')}
+                    />
+                    <button
+                      id="login-password-toggle"
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition-colors"
+                      tabIndex={-1}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                  {errors.password && (
+                    <p className="text-[11px] text-rose-400 font-medium">{errors.password.message}</p>
+                  )}
+                </div>
+
+                {/* Remember Me & Forgot Password Row */}
+                <div className="flex items-center justify-between pt-1 select-none text-xs">
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <input
+                      id="remember-me-checkbox"
+                      type="checkbox"
+                      className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+                      {...register('rememberMe')}
+                    />
+                    <span className="text-slate-400 group-hover:text-slate-200 font-normal transition-colors">
+                      Remember me
+                    </span>
+                  </label>
+
+                  <button
+                    id="forgot-password-toggle"
+                    type="button"
+                    onClick={() => {
+                      setIsResetMode(true)
+                      setAuthError('')
+                    }}
+                    className="font-medium text-blue-400 hover:text-blue-300 transition-colors hover:underline"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+
+                {/* Primary Submit Button */}
+                <button
+                  id="login-submit-button"
+                  type="submit"
+                  disabled={isSubmitting || isGoogleLoading}
+                  className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs tracking-wide shadow-[0_4px_16px_rgba(37,99,235,0.3)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.4)] transition-all flex items-center justify-center gap-2 mt-2 disabled:opacity-60 disabled:pointer-events-none active:scale-[0.99]"
+                >
+                  {isSubmitting ? (
+                    <span className="flex items-center gap-2">
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Signing in...</span>
+                    </span>
+                  ) : (
+                    <>
+                      <span>Sign In</span>
+                      <ArrowRight size={14} />
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
+
+            {/* Single Sign-On Divider */}
+            {!isResetMode && (
+              <>
+                <div className="relative my-5 flex items-center justify-center">
+                  <div className="border-t border-slate-800 w-full" />
+                  <span className="absolute bg-[#0D121F] px-3 text-[10px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap">
+                    OR
+                  </span>
+                  <div className="border-t border-slate-800 w-full" />
+                </div>
+
+                {/* Google SSO Button */}
+                <button
+                  id="google-login-button"
+                  type="button"
+                  disabled={isSubmitting || isGoogleLoading}
+                  onClick={handleGoogleLogin}
+                  className="w-full h-11 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 hover:bg-slate-800/80 text-slate-200 font-medium text-xs transition-all flex items-center justify-center gap-2.5 disabled:opacity-60 disabled:pointer-events-none"
+                >
+                  {isGoogleLoading ? (
+                    <span className="flex items-center gap-2">
+                      <span className="w-3.5 h-3.5 border-2 border-slate-400/30 border-t-slate-200 rounded-full animate-spin" />
+                      <span>Connecting...</span>
+                    </span>
+                  ) : (
+                    <>
                       <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
                         <path
                           d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -632,27 +507,27 @@ function LoginFormContent() {
                           fill="#EA4335"
                         />
                       </svg>
-                    )}
-                    <span>{isGoogleLoading ? 'Connecting to Google...' : 'Continue with Google'}</span>
-                  </button>
-                </>
-              )}
+                      <span>Continue with Google</span>
+                    </>
+                  )}
+                </button>
+              </>
+            )}
 
-              {/* Private Security Footnote */}
-              <div className="mt-8 pt-5 border-t border-slate-100 flex items-center justify-center gap-1.5 text-center text-[11px] text-slate-400 font-normal">
-                <ShieldCheck size={14} className="text-slate-400 shrink-0" />
-                <span>Private access restricted to authorized staff only.</span>
-              </div>
+            {/* Private Security Footnote inside card */}
+            <div className="mt-6 pt-4 border-t border-slate-800/60 flex items-center justify-center gap-1.5 text-center text-[11px] text-slate-500 font-normal">
+              <ShieldCheck size={14} className="text-blue-500/80 shrink-0" />
+              <span>Authorized LEXMEDIA.GH access only</span>
             </div>
-          </motion.div>
-        </div>
+          </div>
+        </motion.div>
+      </div>
 
-        {/* Bottom Copyright Bar */}
-        <div className="w-full flex items-center justify-between text-slate-400 text-xs font-normal z-10">
-          <span>© {new Date().getFullYear()} {branding?.businessName || 'LexMedia'}. All rights reserved.</span>
-          <span className="hidden sm:inline text-slate-400 text-[11px]">Protected by Firebase Auth</span>
-        </div>
-      </section>
+      {/* Footer Security Message */}
+      <footer className="w-full max-w-md pb-3 pt-2 text-center z-10 flex flex-col items-center gap-1 text-[11px] text-slate-500 font-normal">
+        <span>LEXMEDIA.GH • Ctrl Room</span>
+        <span className="text-slate-600">© {new Date().getFullYear()} All rights reserved.</span>
+      </footer>
     </main>
   )
 }
