@@ -78,7 +78,7 @@ export function Modal({
       {/* Modal */}
       <div
         className={cn(
-          'relative w-full bg-white dark:bg-gray-900 border border-gray-200/80 dark:border-gray-800 shadow-modal animate-scale-in text-gray-900 dark:text-gray-100',
+          'relative w-full max-w-[calc(100vw-1rem)] sm:max-w-none bg-white dark:bg-gray-900 border border-gray-200/80 dark:border-gray-800 shadow-modal animate-scale-in text-gray-900 dark:text-gray-100',
           'rounded-t-3xl sm:rounded-2xl',
           'max-h-[90vh] flex flex-col',
           sizeClasses[size],

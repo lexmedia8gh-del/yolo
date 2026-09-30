@@ -340,58 +340,93 @@ export function Dashboard() {
                 />
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-850/40 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      <th className="py-3 px-4">Client Name</th>
-                      <th className="py-3 px-4">Contact</th>
-                      <th className="py-3 px-4">Date Created</th>
-                      <th className="py-3 px-4">Status</th>
-                      <th className="py-3 px-4 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                    {recentClients.map((c) => (
-                      <tr key={c.id} className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors">
-                        <td className="py-3 px-4">
-                          <div className="font-semibold text-gray-900 dark:text-gray-100">{c.fullName}</div>
-                          {c.company && (
-                            <div className="text-xs text-gray-500 dark:text-gray-400">{c.company}</div>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 space-y-0.5 text-xs text-gray-600 dark:text-gray-300">
-                          <div className="flex items-center gap-1">
-                            <Mail size={12} className="text-gray-400" />
-                            <span className="truncate max-w-[140px]">{c.email}</span>
-                          </div>
-                          {c.phone && (
-                            <div className="flex items-center gap-1">
-                              <Phone size={12} className="text-gray-400" />
-                              <span>{c.phone}</span>
-                            </div>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 text-xs text-gray-500 dark:text-gray-400">
-                          {formatDate(c.createdAt)}
-                        </td>
-                        <td className="py-3 px-4">
-                          <Badge variant={c.status === 'active' ? 'success' : 'muted'} size="sm">
-                            {c.status}
-                          </Badge>
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <Link
-                            href={`/clients/${c.id}`}
-                            className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-1"
-                          >
-                            Profile <ArrowRight size={11} />
-                          </Link>
-                        </td>
+              <div>
+                {/* Desktop Table View */}
+                <div className="hidden sm:block overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-850/40 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        <th className="py-3 px-4">Client Name</th>
+                        <th className="py-3 px-4">Contact</th>
+                        <th className="py-3 px-4">Date Created</th>
+                        <th className="py-3 px-4">Status</th>
+                        <th className="py-3 px-4 text-right">Action</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {recentClients.map((c) => (
+                        <tr key={c.id} className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors">
+                          <td className="py-3 px-4">
+                            <div className="font-semibold text-gray-900 dark:text-gray-100">{c.fullName}</div>
+                            {c.company && (
+                              <div className="text-xs text-gray-500 dark:text-gray-400">{c.company}</div>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 space-y-0.5 text-xs text-gray-600 dark:text-gray-300">
+                            <div className="flex items-center gap-1">
+                              <Mail size={12} className="text-gray-400" />
+                              <span className="truncate max-w-[140px]">{c.email}</span>
+                            </div>
+                            {c.phone && (
+                              <div className="flex items-center gap-1">
+                                <Phone size={12} className="text-gray-400" />
+                                <span>{c.phone}</span>
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-xs text-gray-500 dark:text-gray-400">
+                            {formatDate(c.createdAt)}
+                          </td>
+                          <td className="py-3 px-4">
+                            <Badge variant={c.status === 'active' ? 'success' : 'muted'} size="sm">
+                              {c.status}
+                            </Badge>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <Link
+                              href={`/clients/${c.id}`}
+                              className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-1"
+                            >
+                              Profile <ArrowRight size={11} />
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Cards View */}
+                <div className="sm:hidden divide-y divide-gray-100 dark:divide-gray-800">
+                  {recentClients.map((c) => (
+                    <div key={c.id} className="p-3.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Link
+                          href={`/clients/${c.id}`}
+                          className="font-bold text-gray-900 dark:text-white text-sm hover:text-indigo-600 transition-colors"
+                        >
+                          {c.fullName}
+                        </Link>
+                        <Badge variant={c.status === 'active' ? 'success' : 'muted'} size="sm">
+                          {c.status}
+                        </Badge>
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 space-y-0.5">
+                        <div className="truncate">{c.email}</div>
+                        {c.phone && <div>{c.phone}</div>}
+                      </div>
+                      <div className="pt-1 flex items-center justify-between text-xs">
+                        <span className="text-gray-400">Added {formatDate(c.createdAt)}</span>
+                        <Link
+                          href={`/clients/${c.id}`}
+                          className="font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-1"
+                        >
+                          Profile <ArrowRight size={12} />
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -424,43 +459,68 @@ export function Dashboard() {
                 />
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-850/40 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      <th className="py-3 px-4">Client</th>
-                      <th className="py-3 px-4">Amount</th>
-                      <th className="py-3 px-4">Status</th>
-                      <th className="py-3 px-4">Date</th>
-                      <th className="py-3 px-4">Reference</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                    {recentPayments.map((pmt) => (
-                      <tr key={pmt.id} className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors">
-                        <td className="py-3 px-4 font-semibold text-gray-900 dark:text-gray-100">
-                          {pmt.clientName || 'Client'}
-                        </td>
-                        <td className="py-3 px-4 font-semibold text-emerald-600 dark:text-emerald-400">
-                          {formatCurrency(pmt.amount)}
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className={`text-[11px] font-medium px-2.5 py-0.5 rounded-full ${getStatusColor(pmt.status)}`}>
-                            {pmt.status === 'success' ? 'Successful' : pmt.status}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-xs text-gray-500 dark:text-gray-400">
-                          {formatDate(pmt.paidAt)}
-                        </td>
-                        <td className="py-3 px-4">
-                          <code className="text-[11px] font-mono text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
-                            {pmt.paystackReference?.slice(0, 16)}…
-                          </code>
-                        </td>
+              <div>
+                {/* Desktop Table View */}
+                <div className="hidden sm:block overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-850/40 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        <th className="py-3 px-4">Client</th>
+                        <th className="py-3 px-4">Amount</th>
+                        <th className="py-3 px-4">Status</th>
+                        <th className="py-3 px-4">Date</th>
+                        <th className="py-3 px-4">Reference</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {recentPayments.map((pmt) => (
+                        <tr key={pmt.id} className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors">
+                          <td className="py-3 px-4 font-semibold text-gray-900 dark:text-gray-100">
+                            {pmt.clientName || 'Client'}
+                          </td>
+                          <td className="py-3 px-4 font-semibold text-emerald-600 dark:text-emerald-400">
+                            {formatCurrency(pmt.amount)}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`text-[11px] font-medium px-2.5 py-0.5 rounded-full ${getStatusColor(pmt.status)}`}>
+                              {pmt.status === 'success' ? 'Successful' : pmt.status}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-xs text-gray-500 dark:text-gray-400">
+                            {formatDate(pmt.paidAt)}
+                          </td>
+                          <td className="py-3 px-4">
+                            <code className="text-[11px] font-mono text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
+                              {pmt.paystackReference?.slice(0, 16)}…
+                            </code>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Cards View */}
+                <div className="sm:hidden divide-y divide-gray-100 dark:divide-gray-800">
+                  {recentPayments.map((pmt) => (
+                    <div key={pmt.id} className="p-3.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-gray-900 dark:text-white text-sm">
+                          {pmt.clientName || 'Client'}
+                        </span>
+                        <span className="font-mono font-bold text-emerald-600 text-sm">
+                          {formatCurrency(pmt.amount)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-gray-500">
+                        <span>{formatDate(pmt.paidAt)}</span>
+                        <code className="font-mono text-[10px] text-gray-400">
+                          {pmt.paystackReference?.slice(0, 12)}…
+                        </code>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

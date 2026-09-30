@@ -258,139 +258,249 @@ export default function LinksPage() {
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50/60 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                  <th className="py-3 px-4">Client</th>
-                  <th className="py-3 px-4">Invoice #</th>
-                  <th className="py-3 px-4">Project</th>
-                  <th className="py-3 px-4">Amount</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Created Date</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 text-xs">
-                {filteredLinks.map((link) => {
-                  const publicUrl = link.customUrl ? getProductionUrl(link.customUrl) : getPaymentLink(link.token)
-                  const clientObj = clients.find((c) => c.id === link.clientId)
-                  const whatsappNum = clientObj?.whatsappNumber || clientObj?.phone
+          <div>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-gray-200 bg-gray-50/60 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                    <th className="py-3 px-4">Client</th>
+                    <th className="py-3 px-4">Invoice #</th>
+                    <th className="py-3 px-4">Project</th>
+                    <th className="py-3 px-4">Amount</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">Created Date</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-xs">
+                  {filteredLinks.map((link) => {
+                    const publicUrl = link.customUrl ? getProductionUrl(link.customUrl) : getPaymentLink(link.token)
+                    const clientObj = clients.find((c) => c.id === link.clientId)
+                    const whatsappNum = clientObj?.whatsappNumber || clientObj?.phone
 
-                  return (
-                    <tr key={link.id} className="hover:bg-gray-50/60 transition-colors">
-                      <td className="py-3 px-4">
-                        <div className="font-semibold text-gray-900">{link.clientName}</div>
-                        <div className="font-mono text-[10px] text-gray-400 mt-0.5">{link.token}</div>
-                      </td>
+                    return (
+                      <tr key={link.id} className="hover:bg-gray-50/60 transition-colors">
+                        <td className="py-3 px-4">
+                          <div className="font-semibold text-gray-900">{link.clientName}</div>
+                          <div className="font-mono text-[10px] text-gray-400 mt-0.5">{link.token}</div>
+                        </td>
 
-                      <td className="py-3 px-4 font-mono text-gray-900 font-bold">
-                        {link.invoiceNumber || '—'}
-                      </td>
+                        <td className="py-3 px-4 font-mono text-gray-900 font-bold">
+                          {link.invoiceNumber || '—'}
+                        </td>
 
-                      <td className="py-3 px-4 text-gray-700 max-w-[160px] truncate">
-                        {link.projectName || '—'}
-                      </td>
+                        <td className="py-3 px-4 text-gray-700 max-w-[160px] truncate">
+                          {link.projectName || '—'}
+                        </td>
 
-                      <td className="py-3 px-4 font-semibold text-gray-900">
-                        {formatCurrency(link.amount || 0)}
-                      </td>
+                        <td className="py-3 px-4 font-semibold text-gray-900">
+                          {formatCurrency(link.amount || 0)}
+                        </td>
 
-                      <td className="py-3 px-4">
-                        <Badge
-                          variant={
-                            link.status === 'Paid'
-                              ? 'success'
-                              : link.status === 'Cancelled'
-                              ? 'danger'
-                              : 'warning'
-                          }
-                          size="sm"
-                        >
-                          {link.status}
-                        </Badge>
-                      </td>
-
-                      <td className="py-3 px-4 text-[11px] text-gray-500 whitespace-nowrap">
-                        {link.createdAt ? formatDate(link.createdAt) : 'Recently'}
-                      </td>
-
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {/* Copy */}
-                          <button
-                            onClick={() => {
-                              copyToClipboard(publicUrl)
-                              toast.success('Payment link copied!')
-                            }}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-                            title="Copy Link"
+                        <td className="py-3 px-4">
+                          <Badge
+                            variant={
+                              link.status === 'Paid'
+                                ? 'success'
+                                : link.status === 'Cancelled'
+                                ? 'danger'
+                                : 'warning'
+                            }
+                            size="sm"
                           >
-                            <Copy size={14} />
-                          </button>
+                            {link.status}
+                          </Badge>
+                        </td>
 
-                          {/* Open */}
-                          <a
-                            href={publicUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-                            title="Open Payment Page"
-                          >
-                            <ExternalLink size={14} />
-                          </a>
+                        <td className="py-3 px-4 text-[11px] text-gray-500 whitespace-nowrap">
+                          {link.createdAt ? formatDate(link.createdAt) : 'Recently'}
+                        </td>
 
-                          {/* View Invoice */}
-                          {link.invoiceId && (
-                            <Link
-                              href="/invoices"
-                              className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-                              title="View Invoices"
-                            >
-                              <FileText size={14} />
-                            </Link>
-                          )}
-
-                          {/* Send via WhatsApp */}
-                          {whatsappNum && (
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {/* Copy */}
                             <button
                               onClick={() => {
-                                const msg = `Hello ${link.clientName}! 👋\n\nHere is your secure payment link for invoice ${link.invoiceNumber || ''}:\n${publicUrl}\n\nAmount due: ${formatCurrency(link.amount || 0)}\n\nThank you! 🙏`
-                                window.open(generateWhatsAppLink(whatsappNum, msg), '_blank')
+                                copyToClipboard(publicUrl)
+                                toast.success('Payment link copied!')
                               }}
-                              className="p-1.5 rounded-lg text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
-                              title="Send Link via WhatsApp"
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                              title="Copy Link"
                             >
-                              <MessageSquare size={14} />
+                              <Copy size={14} />
                             </button>
-                          )}
 
-                          {/* Revoke */}
-                          {link.status !== 'Cancelled' && link.status !== 'Paid' && (
+                            {/* Open */}
+                            <a
+                              href={publicUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                              title="Open Payment Page"
+                            >
+                              <ExternalLink size={14} />
+                            </a>
+
+                            {/* View Invoice */}
+                            {link.invoiceId && (
+                              <Link
+                                href="/invoices"
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                                title="View Invoices"
+                              >
+                                <FileText size={14} />
+                              </Link>
+                            )}
+
+                            {/* Send via WhatsApp */}
+                            {whatsappNum && (
+                              <button
+                                onClick={() => {
+                                  const msg = `Hello ${link.clientName}! 👋\n\nHere is your secure payment link for invoice ${link.invoiceNumber || ''}:\n${publicUrl}\n\nAmount due: ${formatCurrency(link.amount || 0)}\n\nThank you! 🙏`
+                                  window.open(generateWhatsAppLink(whatsappNum, msg), '_blank')
+                                }}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                                title="Send Link via WhatsApp"
+                              >
+                                <MessageSquare size={14} />
+                              </button>
+                            )}
+
+                            {/* Revoke */}
+                            {link.status !== 'Cancelled' && link.status !== 'Paid' && (
+                              <button
+                                onClick={() => setRevokingLink(link)}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                                title="Disable Link"
+                              >
+                                <Power size={14} />
+                              </button>
+                            )}
+
+                            {/* Delete */}
                             <button
-                              onClick={() => setRevokingLink(link)}
-                              className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
-                              title="Disable Link"
+                              onClick={() => setDeletingLink(link)}
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-danger-600 hover:bg-danger-50 transition-colors"
+                              title="Delete Link"
                             >
-                              <Power size={14} />
+                              <Trash2 size={14} />
                             </button>
-                          )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
 
-                          {/* Delete */}
-                          <button
-                            onClick={() => setDeletingLink(link)}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-danger-600 hover:bg-danger-50 transition-colors"
-                            title="Delete Link"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+            {/* Mobile Cards View */}
+            <div className="md:hidden divide-y divide-gray-100">
+              {filteredLinks.map((link) => {
+                const publicUrl = link.customUrl ? getProductionUrl(link.customUrl) : getPaymentLink(link.token)
+                const clientObj = clients.find((c) => c.id === link.clientId)
+                const whatsappNum = clientObj?.whatsappNumber || clientObj?.phone
+
+                return (
+                  <div key={link.id} className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="font-bold text-gray-900 text-sm">
+                          {link.clientName}
                         </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                        <div className="text-xs font-mono text-gray-500 mt-0.5">
+                          Invoice: {link.invoiceNumber || '—'}
+                        </div>
+                      </div>
+                      <Badge
+                        variant={
+                          link.status === 'Paid'
+                            ? 'success'
+                            : link.status === 'Cancelled'
+                            ? 'danger'
+                            : 'warning'
+                        }
+                        size="sm"
+                        className="shrink-0"
+                      >
+                        {link.status}
+                      </Badge>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs bg-gray-50 p-2.5 rounded-xl">
+                      <div>
+                        <span className="text-[10px] text-gray-400 block">Amount</span>
+                        <span className="font-bold text-gray-900 font-mono text-sm">
+                          {formatCurrency(link.amount || 0)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-400 block">Project</span>
+                        <span className="font-medium text-gray-800 truncate block">
+                          {link.projectName || '—'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="pt-1 flex items-center gap-1.5 flex-wrap text-xs">
+                      <a
+                        href={publicUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 h-9 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold flex items-center justify-center gap-1.5 shadow-xs"
+                      >
+                        <ExternalLink size={14} /> Open Link
+                      </a>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          copyToClipboard(publicUrl)
+                          toast.success('Payment link copied!')
+                        }}
+                        className="h-9 px-3 rounded-lg border border-gray-200 bg-white text-gray-700 font-medium flex items-center gap-1 hover:bg-gray-50"
+                      >
+                        <Copy size={13} /> Copy
+                      </button>
+
+                      {whatsappNum && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const msg = `Hello ${link.clientName}! 👋\n\nHere is your secure payment link for invoice ${link.invoiceNumber || ''}:\n${publicUrl}\n\nAmount due: ${formatCurrency(link.amount || 0)}\n\nThank you! 🙏`
+                            window.open(generateWhatsAppLink(whatsappNum, msg), '_blank')
+                          }}
+                          className="h-9 px-3 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 font-medium flex items-center gap-1 hover:bg-emerald-100"
+                        >
+                          <MessageSquare size={13} /> WhatsApp
+                        </button>
+                      )}
+
+                      {link.status !== 'Cancelled' && link.status !== 'Paid' && (
+                        <button
+                          type="button"
+                          onClick={() => setRevokingLink(link)}
+                          className="h-9 w-9 rounded-lg border border-gray-200 bg-white text-gray-500 hover:text-rose-600 flex items-center justify-center"
+                          title="Disable Link"
+                        >
+                          <Power size={14} />
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => setDeletingLink(link)}
+                        className="h-9 w-9 rounded-lg border border-gray-200 bg-white text-gray-400 hover:text-rose-600 flex items-center justify-center"
+                        title="Delete Link"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )}
       </div>

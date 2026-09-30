@@ -265,104 +265,175 @@ export default function PaymentsPage() {
             </Button>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50/60 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                  <th className="py-3 px-4">Reference</th>
-                  <th className="py-3 px-4">Type</th>
-                  <th className="py-3 px-4">Client</th>
-                  <th className="py-3 px-4">Invoice / Project</th>
-                  <th className="py-3 px-4">Amount</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Method</th>
-                  <th className="py-3 px-4">Date</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 text-xs">
-                {filtered.map((pmt) => {
-                  const isDeposit = pmt.paymentType === 'deposit' || pmt.isDeposit
-                  return (
-                    <tr
-                      key={pmt.id}
-                      onClick={() => setSelectedPaymentForDetails(pmt)}
-                      className="hover:bg-gray-50/70 transition-colors cursor-pointer"
-                    >
-                      <td className="py-3 px-4">
-                        <code className="text-[11px] font-mono text-gray-700 bg-gray-100 px-2 py-0.5 rounded">
-                          {pmt.paystackReference?.slice(0, 18)}…
-                        </code>
-                      </td>
-                      <td className="py-3 px-4">
+          <div>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-gray-200 bg-gray-50/60 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                    <th className="py-3 px-4">Reference</th>
+                    <th className="py-3 px-4">Type</th>
+                    <th className="py-3 px-4">Client</th>
+                    <th className="py-3 px-4">Invoice / Project</th>
+                    <th className="py-3 px-4">Amount</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">Method</th>
+                    <th className="py-3 px-4">Date</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-xs">
+                  {filtered.map((pmt) => {
+                    const isDeposit = pmt.paymentType === 'deposit' || pmt.isDeposit
+                    return (
+                      <tr
+                        key={pmt.id}
+                        onClick={() => setSelectedPaymentForDetails(pmt)}
+                        className="hover:bg-gray-50/70 transition-colors cursor-pointer"
+                      >
+                        <td className="py-3 px-4">
+                          <code className="text-[11px] font-mono text-gray-700 bg-gray-100 px-2 py-0.5 rounded">
+                            {pmt.paystackReference?.slice(0, 18)}…
+                          </code>
+                        </td>
+                        <td className="py-3 px-4">
+                          {isDeposit ? (
+                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                              Deposit
+                            </span>
+                          ) : (
+                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              Payment
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 font-medium text-gray-900" onClick={(e) => e.stopPropagation()}>
+                          {pmt.clientId ? (
+                            <Link
+                              href={`/clients/${pmt.clientId}`}
+                              className="text-indigo-600 hover:underline"
+                            >
+                              {pmt.clientName}
+                            </Link>
+                          ) : (
+                            <span>{pmt.clientName || '—'}</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-gray-600">
+                          {pmt.invoiceNumber ? (
+                            <span className="font-mono text-[11px]">{pmt.invoiceNumber}</span>
+                          ) : (
+                            <span className="text-gray-400">Direct Client</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 font-bold text-emerald-600">
+                          {formatCurrency(pmt.amount)}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${getStatusColor(pmt.status)}`}>
+                            {pmt.status === 'success' ? 'Successful' : pmt.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-gray-500 text-[11px] capitalize">
+                          {pmt.paymentMethod || pmt.channel || 'Card'}
+                        </td>
+                        <td className="py-3 px-4 text-gray-500 text-[11px] whitespace-nowrap">
+                          {formatDate(pmt.paidAt)}
+                        </td>
+                        <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => setSelectedPaymentForDetails(pmt)}
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors inline-flex"
+                              title="View Details"
+                            >
+                              <Eye size={15} />
+                            </button>
+                            {pmt.clientId && (
+                              <Link
+                                href={`/clients/${pmt.clientId}`}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors inline-flex"
+                                title="View Client"
+                              >
+                                <ExternalLink size={14} />
+                              </Link>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View */}
+            <div className="md:hidden divide-y divide-gray-100">
+              {filtered.map((pmt) => {
+                const isDeposit = pmt.paymentType === 'deposit' || pmt.isDeposit
+                return (
+                  <div key={pmt.id} className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="font-bold text-emerald-600 text-lg font-mono">
+                          {formatCurrency(pmt.amount)}
+                        </div>
+                        <div className="text-xs text-gray-700 font-semibold mt-0.5">
+                          {pmt.clientName || 'Valued Client'}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
                         {isDeposit ? (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
                             Deposit
                           </span>
                         ) : (
-                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
                             Payment
                           </span>
                         )}
-                      </td>
-                      <td className="py-3 px-4 font-medium text-gray-900" onClick={(e) => e.stopPropagation()}>
-                        {pmt.clientId ? (
-                          <Link
-                            href={`/clients/${pmt.clientId}`}
-                            className="text-indigo-600 hover:underline"
-                          >
-                            {pmt.clientName}
-                          </Link>
-                        ) : (
-                          <span>{pmt.clientName || '—'}</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 text-gray-600">
-                        {pmt.invoiceNumber ? (
-                          <span className="font-mono text-[11px]">{pmt.invoiceNumber}</span>
-                        ) : (
-                          <span className="text-gray-400">Direct Client</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 font-bold text-emerald-600">
-                        {formatCurrency(pmt.amount)}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${getStatusColor(pmt.status)}`}>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${getStatusColor(pmt.status)}`}>
                           {pmt.status === 'success' ? 'Successful' : pmt.status}
                         </span>
-                      </td>
-                      <td className="py-3 px-4 text-gray-500 text-[11px] capitalize">
-                        {pmt.paymentMethod || pmt.channel || 'Card'}
-                      </td>
-                      <td className="py-3 px-4 text-gray-500 text-[11px] whitespace-nowrap">
-                        {formatDate(pmt.paidAt)}
-                      </td>
-                      <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => setSelectedPaymentForDetails(pmt)}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors inline-flex"
-                            title="View Details"
-                          >
-                            <Eye size={15} />
-                          </button>
-                          {pmt.clientId && (
-                            <Link
-                              href={`/clients/${pmt.clientId}`}
-                              className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors inline-flex"
-                              title="View Client"
-                            >
-                              <ExternalLink size={14} />
-                            </Link>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs bg-gray-50 p-2.5 rounded-xl">
+                      <div>
+                        <span className="text-[10px] text-gray-400 block">Reference</span>
+                        <code className="font-mono text-[11px] text-gray-800 truncate block">
+                          {pmt.paystackReference?.slice(0, 16)}…
+                        </code>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-400 block">Method / Date</span>
+                        <span className="text-gray-700 font-medium capitalize block truncate">
+                          {pmt.paymentMethod || pmt.channel || 'Card'} · {formatDate(pmt.paidAt)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="pt-1 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPaymentForDetails(pmt)}
+                        className="flex-1 h-9 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-xs"
+                      >
+                        <Eye size={14} /> View Details
+                      </button>
+                      {pmt.clientId && (
+                        <Link
+                          href={`/clients/${pmt.clientId}`}
+                          className="h-9 px-3 rounded-lg border border-gray-200 bg-white text-gray-700 text-xs font-medium flex items-center gap-1.5 hover:bg-gray-50"
+                        >
+                          <ExternalLink size={13} /> Client
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )}
       </div>

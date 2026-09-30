@@ -290,170 +290,277 @@ export default function AdminPreviewsPage() {
             </Button>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-gray-100 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-950 text-[11px] text-gray-500 font-semibold uppercase tracking-wider">
-                  <th className="py-3 px-4">Proof Deliverable</th>
-                  <th className="py-3 px-4">Client & Project</th>
-                  <th className="py-3 px-4">Status & Expiration</th>
-                  <th className="py-3 px-4">Assets & Watermark</th>
-                  <th className="py-3 px-4">Audited Views</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {filtered.map((item) => {
-                  const expired = isPreviewExpired(item)
-                  const previewUrl = buildClientPreviewUrl(item.token)
+          <div>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-gray-100 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-950 text-[11px] text-gray-500 font-semibold uppercase tracking-wider">
+                    <th className="py-3 px-4">Proof Deliverable</th>
+                    <th className="py-3 px-4">Client & Project</th>
+                    <th className="py-3 px-4">Status & Expiration</th>
+                    <th className="py-3 px-4">Assets & Watermark</th>
+                    <th className="py-3 px-4">Audited Views</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                  {filtered.map((item) => {
+                    const expired = isPreviewExpired(item)
+                    const previewUrl = buildClientPreviewUrl(item.token)
 
-                  return (
-                    <tr
-                      key={item.id}
-                      className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition"
-                    >
-                      {/* Deliverable Info */}
-                      <td className="py-3.5 px-4">
-                        <div className="font-semibold text-gray-900 dark:text-white text-xs flex items-center gap-1.5">
+                    return (
+                      <tr
+                        key={item.id}
+                        className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition"
+                      >
+                        {/* Deliverable Info */}
+                        <td className="py-3.5 px-4">
+                          <div className="font-semibold text-gray-900 dark:text-white text-xs flex items-center gap-1.5">
+                            {item.title}
+                          </div>
+                          <div className="text-[11px] text-gray-400 mt-0.5 font-mono truncate max-w-[200px]">
+                            Token: {item.token}
+                          </div>
+                        </td>
+
+                        {/* Client & Project */}
+                        <td className="py-3.5 px-4">
+                          <div className="font-medium text-gray-800 dark:text-gray-200">
+                            {item.clientName}
+                          </div>
+                          <div className="text-[11px] text-gray-400 truncate max-w-[180px]">
+                            {item.projectName}
+                          </div>
+                        </td>
+
+                        {/* Status & Expiration */}
+                        <td className="py-3.5 px-4">
+                          <div className="flex items-center gap-2">
+                            {item.status === 'Revoked' ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                                <ShieldX size={11} /> Revoked
+                              </span>
+                            ) : expired ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                <Clock size={11} /> Expired
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                                <ShieldCheck size={11} /> Active
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-gray-400 mt-1">
+                            {item.expiresAt ? (
+                              <>Expires {formatDate(item.expiresAt)}</>
+                            ) : (
+                              'No expiration'
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Assets & Watermark */}
+                        <td className="py-3.5 px-4">
+                          <div className="text-xs text-gray-700 dark:text-gray-300 font-medium">
+                            {item.assets?.length || 0} {item.assets?.length === 1 ? 'file' : 'files'}
+                          </div>
+                          <div className="text-[10px] text-gray-400">
+                            {item.watermark?.enabled !== false ? '🛡️ Forensic watermark' : 'Plain proof'}
+                          </div>
+                        </td>
+
+                        {/* Audited Views */}
+                        <td className="py-3.5 px-4">
+                          <div className="text-xs font-semibold text-gray-900 dark:text-white">
+                            {item.viewCount || 0} views
+                          </div>
+                          {item.lastViewedAt && (
+                            <div className="text-[10px] text-gray-400">
+                              Last: {formatDate(item.lastViewedAt)}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Actions */}
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleCopyLink(item.token)}
+                              className="p-1.5 rounded-lg text-gray-500 hover:text-indigo-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                              title="Copy Client Preview URL"
+                            >
+                              <Copy size={14} />
+                            </button>
+
+                            <a
+                              href={`/client-preview/${encodeURIComponent(item.token)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 rounded-lg text-gray-500 hover:text-indigo-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                              title="Open Preview Portal"
+                            >
+                              <ExternalLink size={14} />
+                            </a>
+
+                            <button
+                              type="button"
+                              onClick={() => setAuditLogsModalPreview(item)}
+                              className="p-1.5 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                              title="View Forensic Audit Logs"
+                            >
+                              <Shield size={14} />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setExpirationModalPreview(item)}
+                              className="p-1.5 rounded-lg text-gray-500 hover:text-amber-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                              title="Adjust Expiration"
+                            >
+                              <Clock size={14} />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setRevokingPreview(item)}
+                              className={`p-1.5 rounded-lg transition ${
+                                item.status === 'Revoked'
+                                  ? 'text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                                  : 'text-gray-500 hover:text-rose-600 hover:bg-gray-100 dark:hover:bg-gray-800'
+                              }`}
+                              title={item.status === 'Revoked' ? 'Reactivate Preview' : 'Revoke Preview'}
+                            >
+                              <Power size={14} />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setDeletingPreview(item)}
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                              title="Delete Preview"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View */}
+            <div className="md:hidden divide-y divide-gray-100 dark:divide-gray-800">
+              {filtered.map((item) => {
+                const expired = isPreviewExpired(item)
+                return (
+                  <div key={item.id} className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <h4 className="font-bold text-gray-900 dark:text-white text-sm truncate">
                           {item.title}
-                        </div>
-                        <div className="text-[11px] text-gray-400 mt-0.5 font-mono truncate max-w-[200px]">
+                        </h4>
+                        <div className="text-[11px] font-mono text-gray-400 mt-0.5 truncate">
                           Token: {item.token}
                         </div>
-                      </td>
-
-                      {/* Client & Project */}
-                      <td className="py-3.5 px-4">
-                        <div className="font-medium text-gray-800 dark:text-gray-200">
-                          {item.clientName}
-                        </div>
-                        <div className="text-[11px] text-gray-400 truncate max-w-[180px]">
-                          {item.projectName}
-                        </div>
-                      </td>
-
-                      {/* Status & Expiration */}
-                      <td className="py-3.5 px-4">
-                        <div className="flex items-center gap-2">
-                          {item.status === 'Revoked' ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
-                              <ShieldX size={11} /> Revoked
-                            </span>
-                          ) : expired ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                              <Clock size={11} /> Expired
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                              <ShieldCheck size={11} /> Active
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[10px] text-gray-400 mt-1">
-                          {item.expiresAt ? (
-                            <>Expires {formatDate(item.expiresAt)}</>
-                          ) : (
-                            'No expiration'
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Assets & Watermark */}
-                      <td className="py-3.5 px-4">
-                        <div className="text-xs text-gray-700 dark:text-gray-300 font-medium">
-                          {item.assets?.length || 0} {item.assets?.length === 1 ? 'file' : 'files'}
-                        </div>
-                        <div className="text-[10px] text-gray-400">
-                          {item.watermark?.enabled !== false ? '🛡️ Forensic watermark' : 'Plain proof'}
-                        </div>
-                      </td>
-
-                      {/* Audited Views */}
-                      <td className="py-3.5 px-4">
-                        <div className="text-xs font-semibold text-gray-900 dark:text-white">
-                          {item.viewCount || 0} views
-                        </div>
-                        {item.lastViewedAt && (
-                          <div className="text-[10px] text-gray-400">
-                            Last: {formatDate(item.lastViewedAt)}
-                          </div>
+                      </div>
+                      <div className="shrink-0">
+                        {item.status === 'Revoked' ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                            <ShieldX size={11} /> Revoked
+                          </span>
+                        ) : expired ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                            <Clock size={11} /> Expired
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                            <ShieldCheck size={11} /> Active
+                          </span>
                         )}
-                      </td>
+                      </div>
+                    </div>
 
-                      {/* Actions */}
-                      <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {/* Copy Link */}
-                          <button
-                            type="button"
-                            onClick={() => handleCopyLink(item.token)}
-                            className="p-1.5 rounded-lg text-gray-500 hover:text-indigo-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
-                            title="Copy Client Preview URL"
-                          >
-                            <Copy size={14} />
-                          </button>
+                    <div className="grid grid-cols-2 gap-2 text-xs bg-gray-50/70 dark:bg-gray-800/50 p-2.5 rounded-xl">
+                      <div>
+                        <span className="text-[10px] text-gray-400 block">Client</span>
+                        <span className="font-medium text-gray-800 dark:text-gray-200 truncate block">
+                          {item.clientName || 'Valued Client'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-400 block">Project</span>
+                        <span className="font-medium text-gray-800 dark:text-gray-200 truncate block">
+                          {item.projectName || '—'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-400 block">Assets</span>
+                        <span className="font-semibold text-gray-900 dark:text-white">
+                          {item.assets?.length || 0} file{(item.assets?.length || 0) === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-400 block">Audited Views</span>
+                        <span className="font-semibold text-gray-900 dark:text-white">
+                          {item.viewCount || 0} views
+                        </span>
+                      </div>
+                    </div>
 
-                          {/* Open Live Preview */}
-                          <a
-                            href={`/client-preview/${encodeURIComponent(item.token)}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-1.5 rounded-lg text-gray-500 hover:text-indigo-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
-                            title="Open Preview Portal"
-                          >
-                            <ExternalLink size={14} />
-                          </a>
+                    {/* Primary & Secondary Action Bar */}
+                    <div className="pt-1 space-y-2">
+                      <a
+                        href={`/client-preview/${encodeURIComponent(item.token)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full h-10 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-xs transition-colors"
+                      >
+                        <ExternalLink size={14} /> Open Client Preview
+                      </a>
 
-                          {/* Audit Logs */}
-                          <button
-                            type="button"
-                            onClick={() => setAuditLogsModalPreview(item)}
-                            className="p-1.5 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
-                            title="View Forensic Audit Logs"
-                          >
-                            <Shield size={14} />
-                          </button>
+                      <div className="grid grid-cols-2 gap-1.5 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => handleCopyLink(item.token)}
+                          className="h-9 px-2.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 font-medium flex items-center justify-center gap-1.5"
+                        >
+                          <Copy size={13} className="text-gray-400" /> Copy Link
+                        </button>
 
-                          {/* Adjust Expiration */}
-                          <button
-                            type="button"
-                            onClick={() => setExpirationModalPreview(item)}
-                            className="p-1.5 rounded-lg text-gray-500 hover:text-amber-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
-                            title="Adjust Expiration"
-                          >
-                            <Clock size={14} />
-                          </button>
+                        <button
+                          type="button"
+                          onClick={() => setAuditLogsModalPreview(item)}
+                          className="h-9 px-2.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 font-medium flex items-center justify-center gap-1.5"
+                        >
+                          <Shield size={13} className="text-emerald-500" /> Audit Logs
+                        </button>
 
-                          {/* Toggle Revoke */}
-                          <button
-                            type="button"
-                            onClick={() => setRevokingPreview(item)}
-                            className={`p-1.5 rounded-lg transition ${
-                              item.status === 'Revoked'
-                                ? 'text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40'
-                                : 'text-gray-500 hover:text-rose-600 hover:bg-gray-100 dark:hover:bg-gray-800'
-                            }`}
-                            title={item.status === 'Revoked' ? 'Reactivate Preview' : 'Revoke Preview'}
-                          >
-                            <Power size={14} />
-                          </button>
+                        <button
+                          type="button"
+                          onClick={() => setExpirationModalPreview(item)}
+                          className="h-9 px-2.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 font-medium flex items-center justify-center gap-1.5"
+                        >
+                          <Clock size={13} className="text-amber-500" /> Expiration
+                        </button>
 
-                          {/* Delete */}
-                          <button
-                            type="button"
-                            onClick={() => setDeletingPreview(item)}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
-                            title="Delete Preview"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                        <button
+                          type="button"
+                          onClick={() => setRevokingPreview(item)}
+                          className="h-9 px-2.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 font-medium flex items-center justify-center gap-1.5"
+                        >
+                          <Power size={13} className={item.status === 'Revoked' ? 'text-emerald-500' : 'text-rose-500'} />
+                          {item.status === 'Revoked' ? 'Reactivate' : 'Revoke'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )}
       </div>

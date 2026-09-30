@@ -173,7 +173,7 @@ export function PreviewAccessLogsModal({
         </div>
 
         {/* Table / List */}
-        <div className="border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden max-h-96 overflow-y-auto">
+        <div className="border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden max-h-96 overflow-y-auto overflow-x-auto">
           {loading ? (
             <div className="py-16 text-center">
               <Spinner size="md" />

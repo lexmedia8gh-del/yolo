@@ -401,120 +401,215 @@ export default function ClientsPage() {
             />
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-850/40 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  <th className="py-3 px-4">Client Name</th>
-                  <th className="py-3 px-4">Contact Info</th>
-                  <th className="py-3 px-4">Company</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Projects</th>
-                  <th className="py-3 px-4">Total Paid</th>
-                  <th className="py-3 px-4">Outstanding</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-sm">
-                {filteredClients.map((client) => (
-                  <tr key={client.id} className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors">
-                    <td className="py-3 px-4">
+          <div>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-850/40 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    <th className="py-3 px-4">Client Name</th>
+                    <th className="py-3 px-4">Contact Info</th>
+                    <th className="py-3 px-4">Company</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">Projects</th>
+                    <th className="py-3 px-4">Total Paid</th>
+                    <th className="py-3 px-4">Outstanding</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-sm">
+                  {filteredClients.map((client) => (
+                    <tr key={client.id} className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-colors">
+                      <td className="py-3 px-4">
+                        <Link
+                          href={`/clients/${client.id}`}
+                          className="font-semibold text-gray-900 dark:text-gray-100 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                        >
+                          {client.fullName}
+                        </Link>
+                        <div className="text-xs text-gray-400 dark:text-gray-500">
+                          Added {client.createdAt ? formatDate(client.createdAt) : 'Recently'}
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-4 space-y-0.5">
+                        <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300 text-xs">
+                          <Mail size={12} className="text-gray-400 shrink-0" />
+                          <span className="truncate max-w-[180px]">{client.email}</span>
+                        </div>
+                        {client.phone && (
+                          <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300 text-xs">
+                            <Phone size={12} className="text-gray-400 shrink-0" />
+                            <span>{client.phone}</span>
+                          </div>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-4">
+                        {client.company ? (
+                          <div className="flex items-center gap-1.5 text-gray-700 dark:text-gray-300 text-xs">
+                            <Building2 size={13} className="text-gray-400 shrink-0" />
+                            <span>{client.company}</span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-4">
+                        <Badge
+                          variant={client.status === 'active' ? 'success' : 'muted'}
+                          size="sm"
+                        >
+                          {client.status === 'active' ? 'Active' : 'Inactive'}
+                        </Badge>
+                      </td>
+
+                      <td className="py-3 px-4 font-medium text-gray-700 dark:text-gray-300 text-xs">
+                        {client.projectCount || 0}
+                      </td>
+
+                      <td className="py-3 px-4 font-semibold text-emerald-600 dark:text-emerald-400 text-xs">
+                        {formatCurrency(client.totalPaid || 0)}
+                      </td>
+
+                      <td className="py-3 px-4 font-semibold text-rose-600 dark:text-rose-400 text-xs">
+                        {formatCurrency(client.outstandingBalance || 0)}
+                      </td>
+
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Link
+                            href={`/clients/${client.id}`}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-indigo-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                            title="View Client Profile"
+                          >
+                            <Eye size={15} />
+                          </Link>
+                          <button
+                            onClick={() => openEditModal(client)}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-blue-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                            title="Edit Client"
+                          >
+                            <Edit2 size={15} />
+                          </button>
+                          <button
+                            onClick={() => setDeactivatingClient(client)}
+                            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                              client.status === 'active'
+                                ? 'text-gray-400 hover:text-rose-600 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                : 'text-gray-400 hover:text-emerald-600 hover:bg-gray-100 dark:hover:bg-gray-800'
+                            }`}
+                            title={client.status === 'active' ? 'Deactivate Client' : 'Activate Client'}
+                          >
+                            <Power size={15} />
+                          </button>
+                          <button
+                            onClick={() => setDeletingClient(client)}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-rose-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                            title="Delete Client"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View */}
+            <div className="md:hidden divide-y divide-gray-100 dark:divide-gray-800">
+              {filteredClients.map((client) => (
+                <div key={client.id} className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
                       <Link
                         href={`/clients/${client.id}`}
-                        className="font-semibold text-gray-900 dark:text-gray-100 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                        className="font-bold text-gray-900 dark:text-white text-base hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors block truncate"
                       >
                         {client.fullName}
                       </Link>
-                      <div className="text-xs text-gray-400 dark:text-gray-500">
-                        Added {client.createdAt ? formatDate(client.createdAt) : 'Recently'}
-                      </div>
-                    </td>
-
-                    <td className="py-3 px-4 space-y-0.5">
-                      <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300 text-xs">
-                        <Mail size={12} className="text-gray-400 shrink-0" />
-                        <span className="truncate max-w-[180px]">{client.email}</span>
-                      </div>
-                      {client.phone && (
-                        <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300 text-xs">
-                          <Phone size={12} className="text-gray-400 shrink-0" />
-                          <span>{client.phone}</span>
+                      {client.company && (
+                        <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1 mt-0.5">
+                          <Building2 size={12} className="shrink-0" />
+                          <span className="truncate">{client.company}</span>
                         </div>
                       )}
-                    </td>
+                    </div>
+                    <Badge variant={client.status === 'active' ? 'success' : 'muted'} size="sm" className="shrink-0">
+                      {client.status === 'active' ? 'Active' : 'Inactive'}
+                    </Badge>
+                  </div>
 
-                    <td className="py-3 px-4">
-                      {client.company ? (
-                        <div className="flex items-center gap-1.5 text-gray-700 dark:text-gray-300 text-xs">
-                          <Building2 size={13} className="text-gray-400 shrink-0" />
-                          <span>{client.company}</span>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
-                      )}
-                    </td>
-
-                    <td className="py-3 px-4">
-                      <Badge
-                        variant={client.status === 'active' ? 'success' : 'muted'}
-                        size="sm"
-                      >
-                        {client.status === 'active' ? 'Active' : 'Inactive'}
-                      </Badge>
-                    </td>
-
-                    <td className="py-3 px-4 font-medium text-gray-700 dark:text-gray-300 text-xs">
-                      {client.projectCount || 0}
-                    </td>
-
-                    <td className="py-3 px-4 font-semibold text-emerald-600 dark:text-emerald-400 text-xs">
-                      {formatCurrency(client.totalPaid || 0)}
-                    </td>
-
-                    <td className="py-3 px-4 font-semibold text-rose-600 dark:text-rose-400 text-xs">
-                      {formatCurrency(client.outstandingBalance || 0)}
-                    </td>
-
-                    <td className="py-3 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Link
-                          href={`/clients/${client.id}`}
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-indigo-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                          title="View Client Profile"
-                        >
-                          <Eye size={15} />
-                        </Link>
-                        <button
-                          onClick={() => openEditModal(client)}
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-blue-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                          title="Edit Client"
-                        >
-                          <Edit2 size={15} />
-                        </button>
-                        <button
-                          onClick={() => setDeactivatingClient(client)}
-                          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-                            client.status === 'active'
-                              ? 'text-gray-400 hover:text-rose-600 hover:bg-gray-100 dark:hover:bg-gray-800'
-                              : 'text-gray-400 hover:text-emerald-600 hover:bg-gray-100 dark:hover:bg-gray-800'
-                          }`}
-                          title={client.status === 'active' ? 'Deactivate Client' : 'Activate Client'}
-                        >
-                          <Power size={15} />
-                        </button>
-                        <button
-                          onClick={() => setDeletingClient(client)}
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-rose-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                          title="Delete Client"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                  <div className="space-y-1 text-xs text-gray-600 dark:text-gray-300">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <Mail size={12} className="text-gray-400 shrink-0" />
+                      <span className="truncate">{client.email}</span>
+                    </div>
+                    {client.phone && (
+                      <div className="flex items-center gap-1.5">
+                        <Phone size={12} className="text-gray-400 shrink-0" />
+                        <span>{client.phone}</span>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-xs bg-gray-50/70 dark:bg-gray-800/50 p-2.5 rounded-xl text-center">
+                    <div>
+                      <span className="text-[10px] text-gray-400 block">Projects</span>
+                      <span className="font-semibold text-gray-900 dark:text-white">
+                        {client.projectCount || 0}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-gray-400 block">Total Paid</span>
+                      <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                        {formatCurrency(client.totalPaid || 0)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-gray-400 block">Balance</span>
+                      <span className="font-bold text-rose-600 dark:text-rose-400">
+                        {formatCurrency(client.outstandingBalance || 0)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-1 flex items-center gap-2">
+                    <Link
+                      href={`/clients/${client.id}`}
+                      className="flex-1 h-9 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+                    >
+                      <Eye size={14} /> Profile
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(client)}
+                      className="h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 text-xs font-medium flex items-center gap-1 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                      <Edit2 size={13} className="text-blue-500" /> Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeactivatingClient(client)}
+                      className="h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 text-xs font-medium flex items-center gap-1 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                      <Power size={13} className={client.status === 'active' ? 'text-rose-500' : 'text-emerald-500'} />
+                      {client.status === 'active' ? 'Off' : 'On'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeletingClient(client)}
+                      className="h-9 w-9 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-400 hover:text-rose-600 flex items-center justify-center"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

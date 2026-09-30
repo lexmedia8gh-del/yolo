@@ -603,181 +603,281 @@ export default function InvoicesPage() {
             </Button>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-gray-50/80 border-b border-gray-200 text-[11px] font-bold uppercase tracking-wider text-gray-500">
-                  <th className="py-3 px-4">Invoice #</th>
-                  <th className="py-3 px-4">Client</th>
-                  <th className="py-3 px-4">Invoice Date</th>
-                  <th className="py-3 px-4">Due Date</th>
-                  <th className="py-3 px-4 text-right">Total</th>
-                  <th className="py-3 px-4 text-right">Amount Paid</th>
-                  <th className="py-3 px-4 text-right">Balance Due</th>
-                  <th className="py-3 px-4 text-center">Status</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 text-xs">
-                {filteredInvoices.map((inv) => {
-                  const currency = inv.currency || 'GHS'
-                  const symbol = inv.currencySymbol || (currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : 'GH₵')
-                  const total = Number(inv.total) || 0
-                  const paid = Number(inv.amountPaid) || 0
-                  const balance = Number(inv.balanceDue) !== undefined ? Number(inv.balanceDue) : Math.max(0, total - paid)
+          <div>
+            {/* Desktop Table View */}
+            <div className="hidden lg:block overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-gray-50/80 border-b border-gray-200 text-[11px] font-bold uppercase tracking-wider text-gray-500">
+                    <th className="py-3 px-4">Invoice #</th>
+                    <th className="py-3 px-4">Client</th>
+                    <th className="py-3 px-4">Invoice Date</th>
+                    <th className="py-3 px-4">Due Date</th>
+                    <th className="py-3 px-4 text-right">Total</th>
+                    <th className="py-3 px-4 text-right">Amount Paid</th>
+                    <th className="py-3 px-4 text-right">Balance Due</th>
+                    <th className="py-3 px-4 text-center">Status</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-xs">
+                  {filteredInvoices.map((inv) => {
+                    const currency = inv.currency || 'GHS'
+                    const symbol = inv.currencySymbol || (currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : 'GH₵')
+                    const total = Number(inv.total) || 0
+                    const paid = Number(inv.amountPaid) || 0
+                    const balance = Number(inv.balanceDue) !== undefined ? Number(inv.balanceDue) : Math.max(0, total - paid)
 
-                  const now = new Date()
-                  const isOverdue = inv.status !== 'Paid' && inv.status !== 'Cancelled' && inv.dueDate && new Date(inv.dueDate as any) < now
+                    const now = new Date()
+                    const isOverdue = inv.status !== 'Paid' && inv.status !== 'Cancelled' && inv.dueDate && new Date(inv.dueDate as any) < now
 
-                  return (
-                    <tr
-                      key={inv.id}
-                      className="hover:bg-gray-50/70 transition-colors group"
-                    >
-                      {/* Invoice # */}
-                      <td className="py-3 px-4 font-mono font-bold text-gray-900">
+                    return (
+                      <tr
+                        key={inv.id}
+                        className="hover:bg-gray-50/70 transition-colors group"
+                      >
+                        {/* Invoice # */}
+                        <td className="py-3 px-4 font-mono font-bold text-gray-900">
+                          <button
+                            type="button"
+                            onClick={() => setViewingInvoice(inv)}
+                            className="hover:text-blue-600 hover:underline flex items-center gap-1.5"
+                          >
+                            <FileText size={13} className="text-gray-400" />
+                            <span>{inv.invoiceNumber}</span>
+                          </button>
+                        </td>
+
+                        {/* Client */}
+                        <td className="py-3 px-4">
+                          <p className="font-semibold text-gray-900">{inv.clientName || 'Valued Client'}</p>
+                          {inv.clientCompany && (
+                            <p className="text-[11px] text-gray-500">{inv.clientCompany}</p>
+                          )}
+                          {inv.clientEmail && (
+                            <p className="text-[10px] text-gray-400 truncate max-w-[160px]">
+                              {inv.clientEmail}
+                            </p>
+                          )}
+                        </td>
+
+                        {/* Invoice Date */}
+                        <td className="py-3 px-4 text-gray-600 whitespace-nowrap">
+                          {formatDate(inv.invoiceDate)}
+                        </td>
+
+                        {/* Due Date */}
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span className={isOverdue ? 'text-rose-600 font-bold' : 'text-gray-600'}>
+                            {formatDate(inv.dueDate)}
+                          </span>
+                        </td>
+
+                        {/* Total */}
+                        <td className="py-3 px-4 text-right font-mono font-bold text-gray-900 whitespace-nowrap">
+                          {formatCurrency(total, currency, symbol)}
+                        </td>
+
+                        {/* Amount Paid */}
+                        <td className="py-3 px-4 text-right font-mono text-emerald-600 whitespace-nowrap">
+                          {paid > 0 ? formatCurrency(paid, currency, symbol) : '—'}
+                        </td>
+
+                        {/* Balance Due */}
+                        <td className="py-3 px-4 text-right font-mono font-black whitespace-nowrap">
+                          <span className={balance > 0 ? 'text-blue-700' : 'text-emerald-600'}>
+                            {formatCurrency(balance, currency, symbol)}
+                          </span>
+                        </td>
+
+                        {/* Status */}
+                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                          {getStatusBadge(inv)}
+                        </td>
+
+                        {/* Actions */}
+                        <td className="py-3 px-4 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              title="View Invoice Document"
+                              onClick={() => setViewingInvoice(inv)}
+                              className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-blue-600 transition-colors"
+                            >
+                              <Eye size={14} />
+                            </button>
+
+                            <button
+                              type="button"
+                              title="Edit Invoice"
+                              onClick={() => handleEdit(inv)}
+                              className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-gray-900 transition-colors"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+
+                            {balance > 0 && inv.status !== 'Cancelled' && (
+                              <button
+                                type="button"
+                                title="Record Payment"
+                                onClick={() => setPaymentRecordingInvoice(inv)}
+                                className="p-1.5 rounded-md hover:bg-emerald-50 text-emerald-600 transition-colors"
+                              >
+                                <CreditCard size={14} />
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              title="Send via Email"
+                              onClick={() => setEmailingInvoice(inv)}
+                              className="p-1.5 rounded-md hover:bg-blue-50 text-blue-600 transition-colors"
+                            >
+                              <Send size={14} />
+                            </button>
+
+                            <button
+                              type="button"
+                              title="Copy Payment Link"
+                              onClick={() => handleCopyPaymentLink(inv)}
+                              className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-blue-600 transition-colors"
+                            >
+                              {copiedLinkId === inv.id ? (
+                                <Check size={14} className="text-emerald-600" />
+                              ) : (
+                                <Link2 size={14} />
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              title="Duplicate Invoice"
+                              onClick={() => handleDuplicate(inv)}
+                              className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-amber-600 transition-colors"
+                            >
+                              <CopyPlus size={14} />
+                            </button>
+
+                            <button
+                              type="button"
+                              title="Delete Invoice"
+                              onClick={() => setDeletingInvoice(inv)}
+                              className="p-1.5 rounded-md hover:bg-rose-50 text-gray-400 hover:text-rose-600 transition-colors"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View */}
+            <div className="lg:hidden divide-y divide-gray-100">
+              {filteredInvoices.map((inv) => {
+                const currency = inv.currency || 'GHS'
+                const symbol = inv.currencySymbol || (currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : 'GH₵')
+                const total = Number(inv.total) || 0
+                const paid = Number(inv.amountPaid) || 0
+                const balance = Number(inv.balanceDue) !== undefined ? Number(inv.balanceDue) : Math.max(0, total - paid)
+
+                return (
+                  <div key={inv.id} className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
                         <button
                           type="button"
                           onClick={() => setViewingInvoice(inv)}
-                          className="hover:text-blue-600 hover:underline flex items-center gap-1.5"
+                          className="font-mono font-bold text-gray-900 text-sm hover:text-blue-600 flex items-center gap-1.5"
                         >
-                          <FileText size={13} className="text-gray-400" />
+                          <FileText size={14} className="text-gray-400" />
                           <span>{inv.invoiceNumber}</span>
                         </button>
-                      </td>
-
-                      {/* Client */}
-                      <td className="py-3 px-4">
-                        <p className="font-semibold text-gray-900">{inv.clientName || 'Valued Client'}</p>
-                        {inv.clientCompany && (
-                          <p className="text-[11px] text-gray-500">{inv.clientCompany}</p>
-                        )}
-                        {inv.clientEmail && (
-                          <p className="text-[10px] text-gray-400 truncate max-w-[160px]">
-                            {inv.clientEmail}
-                          </p>
-                        )}
-                      </td>
-
-                      {/* Invoice Date */}
-                      <td className="py-3 px-4 text-gray-600 whitespace-nowrap">
-                        {formatDate(inv.invoiceDate)}
-                      </td>
-
-                      {/* Due Date */}
-                      <td className="py-3 px-4 whitespace-nowrap">
-                        <span className={isOverdue ? 'text-rose-600 font-bold' : 'text-gray-600'}>
-                          {formatDate(inv.dueDate)}
-                        </span>
-                      </td>
-
-                      {/* Total */}
-                      <td className="py-3 px-4 text-right font-mono font-bold text-gray-900 whitespace-nowrap">
-                        {formatCurrency(total, currency, symbol)}
-                      </td>
-
-                      {/* Amount Paid */}
-                      <td className="py-3 px-4 text-right font-mono text-emerald-600 whitespace-nowrap">
-                        {paid > 0 ? formatCurrency(paid, currency, symbol) : '—'}
-                      </td>
-
-                      {/* Balance Due */}
-                      <td className="py-3 px-4 text-right font-mono font-black whitespace-nowrap">
-                        <span className={balance > 0 ? 'text-blue-700' : 'text-emerald-600'}>
-                          {formatCurrency(balance, currency, symbol)}
-                        </span>
-                      </td>
-
-                      {/* Status */}
-                      <td className="py-3 px-4 text-center whitespace-nowrap">
-                        {getStatusBadge(inv)}
-                      </td>
-
-                      {/* Actions */}
-                      <td className="py-3 px-4 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1">
-                          {/* View Preview */}
-                          <button
-                            type="button"
-                            title="View Invoice Document"
-                            onClick={() => setViewingInvoice(inv)}
-                            className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-blue-600 transition-colors"
-                          >
-                            <Eye size={14} />
-                          </button>
-
-                          {/* Edit */}
-                          <button
-                            type="button"
-                            title="Edit Invoice"
-                            onClick={() => handleEdit(inv)}
-                            className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-gray-900 transition-colors"
-                          >
-                            <Edit2 size={14} />
-                          </button>
-
-                          {/* Record Payment */}
-                          {balance > 0 && inv.status !== 'Cancelled' && (
-                            <button
-                              type="button"
-                              title="Record Payment"
-                              onClick={() => setPaymentRecordingInvoice(inv)}
-                              className="p-1.5 rounded-md hover:bg-emerald-50 text-emerald-600 transition-colors"
-                            >
-                              <CreditCard size={14} />
-                            </button>
-                          )}
-
-                          {/* Send Email */}
-                          <button
-                            type="button"
-                            title="Send via Email"
-                            onClick={() => setEmailingInvoice(inv)}
-                            className="p-1.5 rounded-md hover:bg-blue-50 text-blue-600 transition-colors"
-                          >
-                            <Send size={14} />
-                          </button>
-
-                          {/* Copy Payment Link */}
-                          <button
-                            type="button"
-                            title="Copy Payment Link"
-                            onClick={() => handleCopyPaymentLink(inv)}
-                            className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-blue-600 transition-colors"
-                          >
-                            {copiedLinkId === inv.id ? (
-                              <Check size={14} className="text-emerald-600" />
-                            ) : (
-                              <Link2 size={14} />
-                            )}
-                          </button>
-
-                          {/* Duplicate */}
-                          <button
-                            type="button"
-                            title="Duplicate Invoice"
-                            onClick={() => handleDuplicate(inv)}
-                            className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-amber-600 transition-colors"
-                          >
-                            <CopyPlus size={14} />
-                          </button>
-
-                          {/* Delete */}
-                          <button
-                            type="button"
-                            title="Delete Invoice"
-                            onClick={() => setDeletingInvoice(inv)}
-                            className="p-1.5 rounded-md hover:bg-rose-50 text-gray-400 hover:text-rose-600 transition-colors"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                        <div className="font-semibold text-gray-800 text-xs mt-0.5">
+                          {inv.clientName || 'Valued Client'}
                         </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                      </div>
+                      <div className="shrink-0">
+                        {getStatusBadge(inv)}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 text-xs text-center bg-gray-50 p-2.5 rounded-xl">
+                      <div>
+                        <span className="text-[10px] text-gray-400 block">Total</span>
+                        <span className="font-bold text-gray-900">{formatCurrency(total, currency, symbol)}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-400 block">Paid</span>
+                        <span className="font-bold text-emerald-600">{paid > 0 ? formatCurrency(paid, currency, symbol) : '—'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-400 block">Balance</span>
+                        <span className="font-bold text-blue-700">{formatCurrency(balance, currency, symbol)}</span>
+                      </div>
+                    </div>
+
+                    <div className="pt-1 flex items-center gap-1.5 flex-wrap text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setViewingInvoice(inv)}
+                        className="flex-1 h-9 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold flex items-center justify-center gap-1.5 shadow-xs"
+                      >
+                        <Eye size={14} /> View
+                      </button>
+
+                      {balance > 0 && inv.status !== 'Cancelled' && (
+                        <button
+                          type="button"
+                          onClick={() => setPaymentRecordingInvoice(inv)}
+                          className="h-9 px-3 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 font-medium flex items-center gap-1 hover:bg-emerald-100"
+                        >
+                          <CreditCard size={13} /> Pay
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => setEmailingInvoice(inv)}
+                        className="h-9 px-3 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-medium flex items-center gap-1 hover:bg-blue-100"
+                      >
+                        <Send size={13} /> Email
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleCopyPaymentLink(inv)}
+                        className="h-9 w-9 rounded-lg border border-gray-200 bg-white text-gray-600 flex items-center justify-center hover:bg-gray-50"
+                        title="Copy Payment Link"
+                      >
+                        {copiedLinkId === inv.id ? <Check size={14} className="text-emerald-600" /> : <Link2 size={14} />}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleEdit(inv)}
+                        className="h-9 w-9 rounded-lg border border-gray-200 bg-white text-gray-600 flex items-center justify-center hover:bg-gray-50"
+                        title="Edit Invoice"
+                      >
+                        <Edit2 size={14} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setDeletingInvoice(inv)}
+                        className="h-9 w-9 rounded-lg border border-gray-200 bg-white text-gray-400 hover:text-rose-600 flex items-center justify-center"
+                        title="Delete Invoice"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )}
       </div>

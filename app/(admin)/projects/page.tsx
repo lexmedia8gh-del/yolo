@@ -150,81 +150,154 @@ export default function ProjectsPage() {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50/60 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                  <th className="py-3 px-4">Project</th>
-                  <th className="py-3 px-4">Client</th>
-                  <th className="py-3 px-4">Service / Package</th>
-                  <th className="py-3 px-4">Total</th>
-                  <th className="py-3 px-4">Paid</th>
-                  <th className="py-3 px-4">Balance</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Date</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 text-xs">
-                {filtered.map((project) => (
-                  <tr key={project.id} className="hover:bg-gray-50/60 transition-colors">
-                    <td className="py-3 px-4">
-                      <div className="font-semibold text-gray-900 max-w-[180px] truncate">{project.name}</div>
-                      {project.invoiceNumber && (
-                        <div className="text-[11px] text-gray-400 font-mono mt-0.5">{project.invoiceNumber}</div>
-                      )}
-                    </td>
-                    <td className="py-3 px-4">
-                      <Link
-                        href={`/clients/${project.clientId}`}
-                        className="font-medium text-indigo-600 hover:underline"
-                      >
-                        {project.clientName}
-                      </Link>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="text-gray-900 font-medium">{project.serviceName}</div>
-                      {project.packageTitle && (
-                        <div className="text-[11px] text-gray-500">{project.packageTitle}</div>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 font-semibold text-gray-900">
-                      {formatCurrency(project.price)}
-                    </td>
-                    <td className="py-3 px-4 font-semibold text-emerald-600">
-                      {formatCurrency(project.amountPaid || 0)}
-                    </td>
-                    <td className="py-3 px-4 font-semibold text-rose-600">
-                      {formatCurrency(project.outstandingBalance ?? project.price - (project.amountPaid || 0))}
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${getStatusColor(project.status)}`}>
-                        {project.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-gray-500 text-[11px] whitespace-nowrap">
-                      {formatDate(project.createdAt)}
-                    </td>
-                    <td className="py-3 px-4 text-right">
+          <div>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-gray-200 bg-gray-50/60 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                    <th className="py-3 px-4">Project</th>
+                    <th className="py-3 px-4">Client</th>
+                    <th className="py-3 px-4">Service / Package</th>
+                    <th className="py-3 px-4">Total</th>
+                    <th className="py-3 px-4">Paid</th>
+                    <th className="py-3 px-4">Balance</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">Date</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-xs">
+                  {filtered.map((project) => (
+                    <tr key={project.id} className="hover:bg-gray-50/60 transition-colors">
+                      <td className="py-3 px-4">
+                        <div className="font-semibold text-gray-900 max-w-[180px] truncate">{project.name}</div>
+                        {project.invoiceNumber && (
+                          <div className="text-[11px] text-gray-400 font-mono mt-0.5">{project.invoiceNumber}</div>
+                        )}
+                      </td>
+                      <td className="py-3 px-4">
+                        <Link
+                          href={`/clients/${project.clientId}`}
+                          className="font-medium text-indigo-600 hover:underline"
+                        >
+                          {project.clientName}
+                        </Link>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="text-gray-900 font-medium">{project.serviceName}</div>
+                        {project.packageTitle && (
+                          <div className="text-[11px] text-gray-500">{project.packageTitle}</div>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 font-semibold text-gray-900">
+                        {formatCurrency(project.price)}
+                      </td>
+                      <td className="py-3 px-4 font-semibold text-emerald-600">
+                        {formatCurrency(project.amountPaid || 0)}
+                      </td>
+                      <td className="py-3 px-4 font-semibold text-rose-600">
+                        {formatCurrency(project.outstandingBalance ?? project.price - (project.amountPaid || 0))}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${getStatusColor(project.status)}`}>
+                          {project.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-gray-500 text-[11px] whitespace-nowrap">
+                        {formatDate(project.createdAt)}
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <Link
+                          href={`/projects/${project.id}`}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors inline-flex"
+                          title="View Project"
+                        >
+                          <Eye size={15} />
+                        </Link>
+                        <button
+                          onClick={() => setDeletingProject(project)}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors inline-flex ml-1"
+                          title="Delete Project"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View */}
+            <div className="md:hidden divide-y divide-gray-100">
+              {filtered.map((project) => (
+                <div key={project.id} className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
                       <Link
                         href={`/projects/${project.id}`}
-                        className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors inline-flex"
-                        title="View Project"
+                        className="font-bold text-gray-900 text-base hover:text-indigo-600 transition-colors block truncate"
                       >
-                        <Eye size={15} />
+                        {project.name}
                       </Link>
-                      <button
-                        onClick={() => setDeletingProject(project)}
-                        className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors inline-flex ml-1"
-                        title="Delete Project"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      <div className="text-xs text-indigo-600 font-medium truncate mt-0.5">
+                        Client: {project.clientName}
+                      </div>
+                    </div>
+                    <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border shrink-0 ${getStatusColor(project.status)}`}>
+                      {project.status}
+                    </span>
+                  </div>
+
+                  <div className="text-xs text-gray-600 bg-gray-50/80 p-2.5 rounded-xl space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Service:</span>
+                      <span className="font-medium text-gray-800">{project.serviceName || '—'}</span>
+                    </div>
+                    {project.packageTitle && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Package:</span>
+                        <span className="font-medium text-gray-800">{project.packageTitle}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-xs text-center bg-gray-50/50 p-2.5 rounded-xl">
+                    <div>
+                      <span className="text-[10px] text-gray-400 block">Total</span>
+                      <span className="font-bold text-gray-900">{formatCurrency(project.price)}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-gray-400 block">Paid</span>
+                      <span className="font-bold text-emerald-600">{formatCurrency(project.amountPaid || 0)}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-gray-400 block">Balance</span>
+                      <span className="font-bold text-rose-600">
+                        {formatCurrency(project.outstandingBalance ?? project.price - (project.amountPaid || 0))}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-1 flex items-center gap-2">
+                    <Link
+                      href={`/projects/${project.id}`}
+                      className="flex-1 h-9 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-xs transition-colors"
+                    >
+                      <Eye size={14} /> Open Workspace
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => setDeletingProject(project)}
+                      className="h-9 w-9 rounded-lg border border-gray-200 bg-white text-gray-400 hover:text-rose-600 flex items-center justify-center"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
