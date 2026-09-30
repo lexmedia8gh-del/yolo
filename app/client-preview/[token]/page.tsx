@@ -129,6 +129,12 @@ function ClientPreviewPortalInner() {
   const [isWindowBlurred, setIsWindowBlurred] = useState<boolean>(false)
   const [showInstructions, setShowInstructions] = useState<boolean>(false)
 
+  // Gesture Swipe State
+  const [dragOffset, setDragOffset] = useState<number>(0)
+  const [isDragging, setIsDragging] = useState<boolean>(false)
+  const pointerStartRef = useRef<{ x: number; y: number } | null>(null)
+  const thumbnailContainerRef = useRef<HTMLDivElement>(null)
+
   // Image load & failover state
   const [currentImageSrc, setCurrentImageSrc] = useState<string>('')
   const [imageLoading, setImageLoading] = useState<boolean>(true)
@@ -148,7 +154,81 @@ function ClientPreviewPortalInner() {
 
   const viewerContainerRef = useRef<HTMLDivElement>(null)
 
-  // 1. Send forensic deterrent telemetry beacon to audit log
+  // 1. Navigation Handlers
+  const handlePrevAsset = useCallback(() => {
+    if (!preview?.assets || preview.assets.length <= 1) return
+    if (activeAssetIndex > 0) {
+      setActiveAssetIndex((prev) => prev - 1)
+    }
+  }, [preview?.assets, activeAssetIndex])
+
+  const handleNextAsset = useCallback(() => {
+    if (!preview?.assets || preview.assets.length <= 1) return
+    if (activeAssetIndex < preview.assets.length - 1) {
+      setActiveAssetIndex((prev) => prev + 1)
+    }
+  }, [preview?.assets, activeAssetIndex])
+
+  // 2. Gesture Pointer Events for Touch Swipe
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (zoomLevel > 1) return // Do not swipe when image is zoomed in
+    if (e.button !== 0 && e.pointerType === 'mouse') return
+    pointerStartRef.current = { x: e.clientX, y: e.clientY }
+    setIsDragging(true)
+    setDragOffset(0)
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {}
+  }
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging || !pointerStartRef.current || zoomLevel > 1) return
+    const deltaX = e.clientX - pointerStartRef.current.x
+    const deltaY = e.clientY - pointerStartRef.current.y
+
+    // If vertical movement dominates, cancel drag to let page scroll
+    if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaX) < 15) {
+      return
+    }
+
+    setDragOffset(deltaX)
+  }
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging || !pointerStartRef.current || zoomLevel > 1) {
+      setIsDragging(false)
+      setDragOffset(0)
+      pointerStartRef.current = null
+      return
+    }
+
+    const deltaX = e.clientX - pointerStartRef.current.x
+    const deltaY = e.clientY - pointerStartRef.current.y
+    const swipeThreshold = 55 // px
+
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) >= swipeThreshold) {
+      if (deltaX < 0) {
+        handleNextAsset()
+      } else {
+        handlePrevAsset()
+      }
+    }
+
+    setIsDragging(false)
+    setDragOffset(0)
+    pointerStartRef.current = null
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {}
+  }
+
+  const handlePointerCancel = () => {
+    setIsDragging(false)
+    setDragOffset(0)
+    pointerStartRef.current = null
+  }
+
+  // 3. Send forensic deterrent telemetry beacon to audit log
   const logAuditActivity = useCallback(
     async (event: string, assetName?: string, assetId?: string, metadata?: any) => {
       if (!token) return
@@ -171,7 +251,7 @@ function ClientPreviewPortalInner() {
     [token, sessionId]
   )
 
-  // 2. Fetch Preview Details from API
+  // 4. Fetch Preview Details from API
   const loadPreview = useCallback(async () => {
     if (!token) {
       setState('invalid')
@@ -183,7 +263,6 @@ function ClientPreviewPortalInner() {
     setErrorMessage('')
 
     try {
-      // Ephemeral session identifier for forensic tracking
       const generatedSession = `ses_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36)}`
       setSessionId(generatedSession)
 
@@ -223,7 +302,6 @@ function ClientPreviewPortalInner() {
         return
       }
 
-      // Unexpected error
       setState('error')
       setErrorMessage(data.message || data.error || 'Unable to load preview.')
     } catch (err: any) {
@@ -255,7 +333,39 @@ function ClientPreviewPortalInner() {
     return () => clearInterval(refreshInterval)
   }, [state, token])
 
-  // 3. Periodic subtle shifting of watermark to prevent automated composite removal
+  // Intelligent preloading of adjacent images
+  useEffect(() => {
+    if (!preview?.assets || preview.assets.length <= 1) return
+    const nextIdx = activeAssetIndex + 1
+    const prevIdx = activeAssetIndex - 1
+
+    ;[nextIdx, prevIdx].forEach((idx) => {
+      if (idx >= 0 && idx < preview.assets.length) {
+        const asset = preview.assets[idx]
+        if (asset && isImageAsset(asset)) {
+          const url = asset.previewUrl || asset.streamUrl
+          if (url) {
+            const img = new window.Image()
+            img.src = url
+          }
+        }
+      }
+    })
+  }, [activeAssetIndex, preview?.assets])
+
+  // Auto-scroll selected thumbnail into view
+  useEffect(() => {
+    if (thumbnailContainerRef.current) {
+      const activeBtn = thumbnailContainerRef.current.querySelector<HTMLButtonElement>(
+        `[data-asset-index="${activeAssetIndex}"]`
+      )
+      if (activeBtn) {
+        activeBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+      }
+    }
+  }, [activeAssetIndex])
+
+  // Periodic subtle shifting of watermark to prevent automated composite removal
   useEffect(() => {
     if (state !== 'valid' || !preview?.watermark?.dynamicPosition) return
     const interval = setInterval(() => {
@@ -276,11 +386,28 @@ function ClientPreviewPortalInner() {
   const activeAssetName = activeAsset?.name
   const activeAssetId = activeAsset?.id
 
-  // 4. Forensic anti-theft deterrent keyboard listener
+  // Keyboard navigation & anti-theft shortcut listener
   useEffect(() => {
     if (state !== 'valid') return
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement?.tagName?.toLowerCase()
+      if (activeEl === 'input' || activeEl === 'textarea') return
+
+      // ArrowLeft -> Prev Image
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        handlePrevAsset()
+        return
+      }
+
+      // ArrowRight -> Next Image
+      if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        handleNextAsset()
+        return
+      }
+
       // Deter Save Page (Ctrl+S / Cmd+S)
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
@@ -317,7 +444,6 @@ function ClientPreviewPortalInner() {
     }
 
     const handleBlur = () => {
-      // Optional subtle deterrent: logs window blur event
       logAuditActivity('blur_lock', activeAssetName, activeAssetId)
     }
 
@@ -330,9 +456,9 @@ function ClientPreviewPortalInner() {
       window.removeEventListener('contextmenu', handleContextMenu)
       window.removeEventListener('blur', handleBlur)
     }
-  }, [state, activeAssetName, activeAssetId, logAuditActivity])
+  }, [state, activeAssetName, activeAssetId, handlePrevAsset, handleNextAsset, logAuditActivity])
 
-  // Log asset view whenever active asset switches and sync image state
+  // Sync image state when active asset changes
   useEffect(() => {
     if (activeAsset) {
       const initialSrc = activeAsset.previewUrl || activeAsset.streamUrl || ''
@@ -358,9 +484,8 @@ function ClientPreviewPortalInner() {
   }
 
   const handleImageError = () => {
-    // If primary previewUrl failed and we haven't tried streamUrl yet, attempt failover to secure stream
     if (!hasTriedFailover && activeAsset?.streamUrl && currentImageSrc !== activeAsset.streamUrl) {
-      console.warn('[Client Preview] Image failed to load via primary URL, falling back to secure stream:', activeAsset.streamUrl)
+      console.warn('[Client Preview] Primary URL failed, trying streamUrl:', activeAsset.streamUrl)
       setHasTriedFailover(true)
       setCurrentImageSrc(activeAsset.streamUrl)
       setImageLoading(true)
@@ -372,7 +497,6 @@ function ClientPreviewPortalInner() {
       assetId: activeAssetId,
       name: activeAssetName,
       src: currentImageSrc,
-      fileType: activeAsset?.fileType,
     })
     setImageLoading(false)
     setImageError(true)
@@ -517,7 +641,6 @@ function ClientPreviewPortalInner() {
   if (state === 'loading') {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 relative overflow-hidden select-none">
-        {/* Subtle background glow */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10 flex flex-col items-center text-center max-w-sm space-y-4">
@@ -551,38 +674,27 @@ function ClientPreviewPortalInner() {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6">
         <div className="max-w-md w-full bg-slate-900/90 border border-slate-800 rounded-3xl p-8 text-center shadow-2xl backdrop-blur-xl space-y-5">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
             <ShieldAlert size={32} />
           </div>
 
           <div className="space-y-2">
             <h1 className="text-2xl font-bold text-white tracking-tight">
-              Preview link is invalid.
+              Preview Link Invalid
             </h1>
-            <p className="text-sm text-slate-400 leading-relaxed">
-              The preview link you followed may be incorrect, mistyped, or has been removed.
+            <p className="text-xs text-slate-400 leading-relaxed">
+              {errorMessage || 'This preview link is invalid or has been deactivated by the studio.'}
             </p>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800/80 text-xs text-slate-500 text-left font-mono">
-            Security check: Token verification returned no matching active proof session in studio database.
-          </div>
-
-          <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center">
+          <div className="pt-2">
             <Button
               variant="outline"
               size="md"
+              className="w-full"
               onClick={() => (window.location.href = '/')}
             >
-              Return Home
-            </Button>
-            <Button
-              variant="primary"
-              size="md"
-              onClick={loadPreview}
-              icon={<RefreshCw size={14} />}
-            >
-              Try Again
+              Close Portal
             </Button>
           </div>
         </div>
@@ -591,7 +703,7 @@ function ClientPreviewPortalInner() {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // STATE 3: EXPIRED ("Preview Expired" - STEP 9: Must not 404)
+  // STATE 3: EXPIRED PREVIEW ("This preview is no longer available.")
   // ═══════════════════════════════════════════════════════════════
   if (state === 'expired') {
     return (
@@ -603,41 +715,24 @@ function ClientPreviewPortalInner() {
 
           <div className="space-y-2">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-              <AlertCircle size={13} /> Time Window Concluded
+              <Clock size={13} /> Link Expired
             </div>
             <h1 className="text-2xl font-bold text-white tracking-tight">
-              Preview Expired
+              Preview Link Expired
             </h1>
-            <p className="text-sm text-slate-300 font-medium">
-              This preview is no longer available.
-            </p>
             <p className="text-xs text-slate-400 leading-relaxed">
-              The designated proofing window for this deliverable has elapsed. If you still need to review or request revisions, please contact the studio for a renewed preview link.
+              Access to this proof ended on {formatDate(expiredAt || new Date())}. Please contact {branding?.businessName || 'LEXMEDIA.GH'} for an updated access link.
             </p>
           </div>
 
-          {expiredAt && (
-            <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 text-xs text-slate-400 flex items-center justify-between">
-              <span>Expired on:</span>
-              <span className="font-medium text-slate-200">{new Date(expiredAt).toLocaleString()}</span>
-            </div>
-          )}
-
           <div className="pt-2">
             <Button
-              variant="primary"
+              variant="outline"
               size="md"
               className="w-full"
-              onClick={() => {
-                const phone = (branding as any)?.phone || (branding as any)?.supportPhone || ''
-                if (phone) {
-                  window.open(`https://wa.me/${phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent('Hi LEXMEDIA.GH, my preview link has expired. Could you kindly generate a renewed link for me?')}`, '_blank')
-                } else {
-                  toast('Please reach out directly to your studio contact or LEXMEDIA.GH.', { icon: '✉️' })
-                }
-              }}
+              onClick={() => (window.location.href = '/')}
             >
-              Request New Preview Link
+              Close Portal
             </Button>
           </div>
         </div>
@@ -646,7 +741,7 @@ function ClientPreviewPortalInner() {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // STATE 4: REVOKED ("Preview Access Revoked")
+  // STATE 4: REVOKED PREVIEW ("Access ended by admin.")
   // ═══════════════════════════════════════════════════════════════
   if (state === 'revoked') {
     return (
@@ -730,6 +825,10 @@ function ClientPreviewPortalInner() {
   )
   const watermarkOpacity =
     typeof preview.watermark?.opacity === 'number' ? preview.watermark.opacity : 0.22
+
+  const hasMultipleAssets = Boolean(preview.assets && preview.assets.length > 1)
+  const isFirstAsset = activeAssetIndex === 0
+  const isLastAsset = Boolean(preview.assets && activeAssetIndex === preview.assets.length - 1)
 
   return (
     <div
@@ -817,6 +916,7 @@ function ClientPreviewPortalInner() {
             onClick={toggleFullscreen}
             className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
             title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen Proofing'}
+            aria-label={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen Proofing'}
           >
             {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>
@@ -849,15 +949,63 @@ function ClientPreviewPortalInner() {
       )}
 
       {/* Main Proof Viewer Area */}
-      <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 relative overflow-hidden">
-        {/* Main Asset Canvas with Watermark */}
-        <div className="w-full max-w-5xl h-[65vh] sm:h-[72vh] rounded-3xl bg-slate-900/80 border border-slate-800/80 shadow-2xl relative overflow-hidden flex items-center justify-center backdrop-blur-sm group">
+      <main className="flex-1 flex flex-col items-center justify-center p-3 sm:p-6 relative overflow-hidden">
+        {/* Main Asset Canvas with Swipe Carousel & Watermark */}
+        <div
+          className="w-full max-w-5xl h-[62vh] sm:h-[72vh] rounded-3xl bg-slate-900/80 border border-slate-800/80 shadow-2xl relative overflow-hidden flex items-center justify-center backdrop-blur-sm group touch-pan-y"
+          style={{ touchAction: 'pan-y' }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
+        >
+          {/* Image Position Indicator Badge (Section 6) */}
+          {preview.assets && preview.assets.length > 1 && (
+            <div className="absolute top-4 left-4 z-30 px-3.5 py-1.5 rounded-full bg-slate-950/85 border border-slate-800 backdrop-blur-md text-xs font-mono font-bold text-slate-200 shadow-xl flex items-center gap-1.5 select-none">
+              <ImageIcon size={13} className="text-indigo-400" />
+              <span>
+                {activeAssetIndex + 1} / {preview.assets.length}
+              </span>
+            </div>
+          )}
+
+          {/* Previous / Next Overlay Controls (Section 5) */}
+          {hasMultipleAssets && !isFirstAsset && (
+            <button
+              type="button"
+              onClick={handlePrevAsset}
+              className="absolute left-3 sm:left-5 top-1/2 -translate-y-1/2 z-30 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-slate-950/85 hover:bg-slate-900 border border-slate-800/90 text-white shadow-2xl backdrop-blur-md flex items-center justify-center transition-all cursor-pointer active:scale-95 hover:border-indigo-500/50"
+              title="Previous image"
+              aria-label="Previous image"
+            >
+              <ChevronLeft size={22} className="text-white" />
+            </button>
+          )}
+
+          {hasMultipleAssets && !isLastAsset && (
+            <button
+              type="button"
+              onClick={handleNextAsset}
+              className="absolute right-3 sm:right-5 top-1/2 -translate-y-1/2 z-30 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-slate-950/85 hover:bg-slate-900 border border-slate-800/90 text-white shadow-2xl backdrop-blur-md flex items-center justify-center transition-all cursor-pointer active:scale-95 hover:border-indigo-500/50"
+              title="Next image"
+              aria-label="Next image"
+            >
+              <ChevronRight size={22} className="text-white" />
+            </button>
+          )}
+
           {/* Asset Renderer */}
           {activeAsset ? (
-            <div className="w-full h-full flex items-center justify-center p-2 sm:p-6 relative">
+            <div
+              className="w-full h-full flex items-center justify-center p-2 sm:p-6 relative transition-transform duration-200 ease-out"
+              style={{
+                transform: `translateX(${dragOffset}px)`,
+                transition: isDragging ? 'none' : 'transform 200ms ease-out',
+              }}
+            >
               {isImageAsset(activeAsset) ? (
                 <div className="relative w-full h-full flex items-center justify-center">
-                  {/* Subtle transparency checkered backing for PNGs, transparent cutouts, SVGs, and WEBP */}
+                  {/* Subtle transparency checkered backing */}
                   <div
                     className="relative max-w-full max-h-full flex items-center justify-center rounded-2xl overflow-hidden transition-transform duration-200"
                     style={{
@@ -881,12 +1029,12 @@ function ClientPreviewPortalInner() {
                       <img
                         key={`${activeAsset.id}_${currentImageSrc}`}
                         src={currentImageSrc}
-                        alt={activeAsset.name}
+                        alt={activeAsset.name || activeAsset.originalName || 'Proofing deliverable'}
                         draggable={false}
                         onLoad={handleImageLoad}
                         onError={handleImageError}
                         onContextMenu={(e) => e.preventDefault()}
-                        className={`max-w-full max-h-[60vh] sm:max-h-[66vh] object-contain rounded-xl pointer-events-none select-none shadow-2xl transition-opacity duration-200 ${
+                        className={`max-w-full max-h-[58vh] sm:max-h-[66vh] object-contain rounded-xl pointer-events-none select-none shadow-2xl transition-opacity duration-200 ${
                           imageLoading ? 'opacity-0' : 'opacity-100'
                         }`}
                       />
@@ -913,6 +1061,7 @@ function ClientPreviewPortalInner() {
                           icon={<RefreshCw size={12} />}
                           onClick={handleRetryImage}
                           className="w-full"
+                          aria-label="Refresh preview"
                         >
                           Refresh Preview
                         </Button>
@@ -983,7 +1132,7 @@ function ClientPreviewPortalInner() {
           {/* ═══════════════════════════════════════════════════════════════ */}
           {preview.watermark?.enabled !== false && (
             <div
-              className="absolute inset-0 pointer-events-none select-none z-30 overflow-hidden flex flex-col justify-around"
+              className="absolute inset-0 pointer-events-none select-none z-20 overflow-hidden flex flex-col justify-around"
               style={{ opacity: watermarkOpacity }}
             >
               {/* Tiled diagonal grid pattern */}
@@ -1024,14 +1173,15 @@ function ClientPreviewPortalInner() {
 
           {/* Floating Zoom / Control Bar for Images */}
           {isImageAsset(activeAsset) && !imageError && (
-            <div className="absolute bottom-4 right-4 z-30 flex items-center gap-1.5 p-1 rounded-2xl bg-slate-950/80 border border-slate-800 backdrop-blur-md">
+            <div className="absolute bottom-4 right-4 z-30 flex items-center gap-1.5 p-1 rounded-2xl bg-slate-950/80 border border-slate-800 backdrop-blur-md shadow-2xl">
               <button
                 type="button"
                 onClick={() => setZoomLevel((z) => Math.max(0.5, z - 0.25))}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
                 title="Zoom Out"
+                aria-label="Zoom out"
               >
-                <ZoomOut size={14} />
+                <ZoomOut size={15} />
               </button>
               <span className="text-[11px] font-mono font-medium text-slate-300 px-1">
                 {Math.round(zoomLevel * 100)}%
@@ -1039,54 +1189,62 @@ function ClientPreviewPortalInner() {
               <button
                 type="button"
                 onClick={() => setZoomLevel((z) => Math.min(3, z + 0.25))}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
                 title="Zoom In"
+                aria-label="Zoom in"
               >
-                <ZoomIn size={14} />
+                <ZoomIn size={15} />
               </button>
               <button
                 type="button"
                 onClick={() => setZoomLevel(1)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
                 title="Reset Fit"
+                aria-label="Reset fit"
               >
-                <RotateCw size={14} />
+                <RotateCw size={15} />
               </button>
             </div>
           )}
         </div>
 
-        {/* Multi-Asset Selector Bar */}
+        {/* Multi-Asset Thumbnail Selector Strip (Section 15) */}
         {preview.assets && preview.assets.length > 1 && (
-          <div className="mt-4 flex items-center gap-2 max-w-5xl w-full overflow-x-auto pb-2 scrollbar-thin">
-            <span className="text-xs text-slate-400 font-medium whitespace-nowrap pl-1">
-              Proof Deliverables ({preview.assets.length}):
+          <div
+            ref={thumbnailContainerRef}
+            className="mt-4 flex items-center gap-2.5 max-w-5xl w-full overflow-x-auto pb-2 pt-1 scrollbar-thin scrollbar-thumb-slate-800"
+          >
+            <span className="text-xs text-slate-400 font-medium whitespace-nowrap pl-1 shrink-0">
+              Deliverables ({preview.assets.length}):
             </span>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               {preview.assets.map((asset, idx) => {
                 const isSelected = idx === activeAssetIndex
                 return (
                   <button
                     key={asset.id}
                     type="button"
+                    data-asset-index={idx}
                     onClick={() => setActiveAssetIndex(idx)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium transition ${
+                    className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-medium transition cursor-pointer shrink-0 min-h-[44px] ${
                       isSelected
-                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 border border-indigo-500'
                         : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-850'
                     }`}
                   >
                     {isImageAsset(asset) ? (
-                      <ImageIcon size={13} />
+                      <ImageIcon size={14} className={isSelected ? 'text-white' : 'text-indigo-400'} />
                     ) : asset.fileType.startsWith('video/') ? (
-                      <Video size={13} />
+                      <Video size={14} className={isSelected ? 'text-white' : 'text-purple-400'} />
                     ) : asset.fileType.startsWith('audio/') ? (
-                      <Music size={13} />
+                      <Music size={14} className={isSelected ? 'text-white' : 'text-pink-400'} />
                     ) : (
-                      <FileIcon size={13} />
+                      <FileIcon size={14} className={isSelected ? 'text-white' : 'text-slate-400'} />
                     )}
-                    <span className="truncate max-w-[140px]">{asset.name}</span>
-                    <span className="text-[10px] opacity-75">{idx + 1}</span>
+                    <span className="truncate max-w-[150px]">{asset.name || asset.originalName}</span>
+                    <span className="text-[10px] font-mono opacity-80 bg-slate-950/40 px-1.5 py-0.5 rounded">
+                      {idx + 1}
+                    </span>
                   </button>
                 )
               })}
@@ -1098,21 +1256,21 @@ function ClientPreviewPortalInner() {
         <div className="md:hidden mt-5 w-full max-w-5xl flex items-center justify-between gap-3">
           <Button
             variant="outline"
-            size="sm"
-            className="flex-1"
-            icon={<MessageSquare size={13} />}
+            size="md"
+            className="flex-1 h-12 text-xs font-bold"
+            icon={<MessageSquare size={14} />}
             onClick={() => setIsRevisionModalOpen(true)}
           >
-            Revision
+            Request Revision
           </Button>
           <Button
             variant="primary"
-            size="sm"
-            className="flex-1"
-            icon={<ThumbsUp size={13} />}
+            size="md"
+            className="flex-1 h-12 text-xs font-bold"
+            icon={<ThumbsUp size={14} />}
             onClick={() => setIsApprovalModalOpen(true)}
           >
-            Approve
+            Approve Proof
           </Button>
         </div>
       </main>
