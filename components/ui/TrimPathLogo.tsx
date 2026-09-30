@@ -1,6 +1,8 @@
 'use client'
 
-import React from 'react'
+import React, { useState, useEffect } from 'react'
+import { getDocument, COLLECTIONS } from '@/lib/firebase/firestore'
+import type { BrandingSettings } from '@/lib/types'
 
 interface TrimPathLogoProps {
   size?: 'sm' | 'md' | 'lg' | 'xl'
@@ -20,127 +22,74 @@ export function TrimPathLogo({
   className = '',
   animated = true,
 }: TrimPathLogoProps) {
+  const [branding, setBranding] = useState<BrandingSettings | null>(null)
+
+  useEffect(() => {
+    async function loadBranding() {
+      try {
+        const doc = await getDocument<BrandingSettings>(COLLECTIONS.SETTINGS, 'branding')
+        if (doc) {
+          setBranding(doc)
+        }
+      } catch (err) {
+        console.warn('Failed to load branding in logo loader:', err)
+      }
+    }
+    loadBranding()
+  }, [])
+
+  // Exact fallback logo path found in public uploads
+  const defaultLogo = '/uploads/branding/logo/1788576626544_Untitled-1.png'
+  const finalLogoUrl = branding?.logoLightUrl || branding?.logoUrl || defaultLogo
+
   return (
     <div className={`relative flex flex-col items-center justify-center ${className}`}>
       <style jsx>{`
-        @keyframes drawUpper {
+        @keyframes floatUpDown {
           0% {
-            stroke-dashoffset: 100;
-            opacity: 0;
+            transform: translateY(0px);
           }
-          1% {
-            opacity: 1;
+          22% {
+            transform: translateY(-10px);
+          }
+          28% {
+            transform: translateY(-10px);
+          }
+          50% {
+            transform: translateY(0px);
+          }
+          72% {
+            transform: translateY(10px);
+          }
+          78% {
+            transform: translateY(10px);
           }
           100% {
-            stroke-dashoffset: 0;
-            opacity: 1;
+            transform: translateY(0px);
           }
         }
 
-        @keyframes drawLower {
-          0% {
-            stroke-dashoffset: 100;
-            opacity: 0;
-          }
-          1% {
-            opacity: 1;
-          }
-          100% {
-            stroke-dashoffset: 0;
-            opacity: 1;
-          }
-        }
-
-        @keyframes containerReveal {
-          0% {
-            opacity: 0;
-          }
-          100% {
-            opacity: 1;
-          }
-        }
-
-        .trim-path-upper {
-          stroke-dasharray: 100;
-          stroke-dashoffset: 100;
-          opacity: 0;
-          animation: drawUpper 0.5s cubic-bezier(0.25, 1, 0.5, 1) forwards;
-          animation-delay: 0.2s;
-        }
-
-        .trim-path-lower {
-          stroke-dasharray: 100;
-          stroke-dashoffset: 100;
-          opacity: 0;
-          animation: drawLower 0.7s cubic-bezier(0.25, 1, 0.5, 1) forwards;
-          animation-delay: 0.8s;
-        }
-
-        .brand-logo-container {
-          opacity: 0;
-          animation: containerReveal 0.1s ease-out forwards;
-          animation-delay: 0.15s;
+        .brand-logo-img {
+          animation: ${animated ? 'floatUpDown 3s cubic-bezier(0.445, 0.05, 0.55, 0.95) infinite' : 'none'};
+          user-select: none;
+          pointer-events: none;
+          display: block;
         }
 
         @media (prefers-reduced-motion: reduce) {
-          .trim-path-upper,
-          .trim-path-lower {
-            stroke-dashoffset: 0 !important;
-            opacity: 1 !important;
+          .brand-logo-img {
             animation: none !important;
-          }
-          .brand-logo-container {
-            animation: none !important;
-            opacity: 1 !important;
           }
         }
       `}</style>
 
-      {/* SVG Trim-Path Logo Emblem */}
-      <div className={`brand-logo-container ${sizeDimensions[size]}`}>
-        <svg
-          viewBox="0 0 500 500"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-          className="w-full h-full animate-none"
-        >
-          {/* Upper-Right Light Blue Hook Shape */}
-          <path
-            d="M 250 130 L 330 210 L 380 160"
-            fill="none"
-            stroke="#7BC4F4"
-            strokeWidth="46"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            pathLength="100"
-            className={animated ? 'trim-path-upper' : ''}
-          />
-
-          {/* Upper-Left Light Blue Short Pill Shape */}
-          <path
-            d="M 180 220 L 230 270"
-            fill="none"
-            stroke="#7BC4F4"
-            strokeWidth="46"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            pathLength="100"
-            className={animated ? 'trim-path-upper' : ''}
-          />
-
-          {/* Bottom Dark Blue "W" Shape */}
-          <path
-            d="M 110 290 L 190 370 L 250 310 L 310 370 L 390 290"
-            fill="none"
-            stroke="#3B62E3"
-            strokeWidth="46"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            pathLength="100"
-            className={animated ? 'trim-path-lower' : ''}
-          />
-        </svg>
-      </div>
+      {/* PIXEL-IDENTICAL LOGO ASSET */}
+      <img
+        src={finalLogoUrl}
+        alt="LexMedia Logo"
+        className={`${sizeDimensions[size]} object-contain brand-logo-img`}
+        referrerPolicy="no-referrer"
+      />
     </div>
   )
 }
