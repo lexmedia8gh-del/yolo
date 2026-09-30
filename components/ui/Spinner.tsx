@@ -33,21 +33,8 @@ export function Spinner({ size = 'md', className, color }: SpinnerProps) {
 // ─── Full-page loader ────────────────────────────────────────
 export function PageLoader() {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0B0F19] text-white p-4 font-sans select-none animate-fade-in transition-opacity duration-300">
-      <div className="flex flex-col items-center gap-6 text-center max-w-xs mx-auto">
-        {/* SVG Trim-Path Logo Animation */}
-        <TrimPathLogo size="lg" animated={true} />
-
-        {/* Brand Label & Loading State */}
-        <div className="space-y-1.5 pt-1">
-          <h1 className="text-base sm:text-lg font-extrabold tracking-tight text-white font-mono">
-            LEXMEDIA<span className="text-indigo-400">.GH</span>
-          </h1>
-          <p className="text-xs font-semibold tracking-widest text-indigo-200/80 uppercase animate-pulse">
-            Loading LEXMEDIA.GH...
-          </p>
-        </div>
-      </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0B0F19] select-none animate-fade-in transition-opacity duration-300">
+      <TrimPathLogo size="lg" animated={true} />
     </div>
   )
 }
