@@ -51,23 +51,11 @@ export function TrimPathLogo({
           }
         }
 
-        @keyframes scaleSettle {
+        @keyframes containerReveal {
           0% {
-            transform: scale(0.98);
             opacity: 0;
           }
-          11.1% { /* 0.2s - upper shape begins revealing */
-            opacity: 1;
-            transform: scale(0.98);
-          }
-          88.8% { /* 1.6s - both shapes complete and lock */
-            transform: scale(0.98);
-          }
-          94.4% { /* 1.7s - subtle 2% scale settle to 1.0 */
-            transform: scale(1);
-          }
-          100% { /* 1.8s+ */
-            transform: scale(1);
+          100% {
             opacity: 1;
           }
         }
@@ -89,8 +77,9 @@ export function TrimPathLogo({
         }
 
         .brand-logo-container {
-          transform-origin: center;
-          animation: scaleSettle 1.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          opacity: 0;
+          animation: containerReveal 0.1s ease-out forwards;
+          animation-delay: 0.15s;
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -103,7 +92,6 @@ export function TrimPathLogo({
           .brand-logo-container {
             animation: none !important;
             opacity: 1 !important;
-            transform: scale(1) !important;
           }
         }
       `}</style>
