@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
-import Image from 'next/image'
 import {
   Download,
   FileText,
@@ -24,6 +23,13 @@ import {
   ArrowDownToLine,
   RefreshCw,
   CreditCard,
+  ChevronLeft,
+  ChevronRight,
+  Maximize2,
+  X,
+  ArrowRight,
+  Eye,
+  MessageSquare,
 } from 'lucide-react'
 import { formatCurrency, formatFileSize, formatDate, getFileCategory } from '@/lib/utils'
 import { Spinner } from '@/components/ui/Spinner'
@@ -107,6 +113,13 @@ function ClientDeliveryPageInner() {
   const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null)
   const [downloadingConfirmFileId, setDownloadingConfirmFileId] = useState<string | null>(null)
   const [downloadingAll, setDownloadingAll] = useState(false)
+
+  // Carousel & Lightbox states
+  const [currentImageIndex, setCurrentImageIndex] = useState(0)
+  const [touchStartX, setTouchStartX] = useState<number | null>(null)
+  const [touchEndX, setTouchEndX] = useState<number | null>(null)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
+  const [lightboxIndex, setLightboxIndex] = useState(0)
 
   useEffect(() => {
     if (!token) return
@@ -295,6 +308,50 @@ function ClientDeliveryPageInner() {
     }
 
     setDownloadingAll(false)
+  }
+
+  // File categorization helper
+  const isImageFile = (file: DeliveryFileDTO) => {
+    const cat = getFileCategory(file.fileName, file.fileType)
+    if (cat === 'image') return true
+    const ext = file.fileName.split('.').pop()?.toLowerCase() || ''
+    return ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg', 'avif', 'bmp'].includes(ext)
+  }
+
+  const imageFiles = files.filter(isImageFile)
+
+  // Touch Swipe Handlers
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchEndX(null)
+    setTouchStartX(e.targetTouches[0].clientX)
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    setTouchEndX(e.targetTouches[0].clientX)
+  }
+
+  const handleTouchEnd = (isLightbox = false) => {
+    if (!touchStartX || !touchEndX) return
+    const distance = touchStartX - touchEndX
+    const minSwipeDistance = 40
+    const count = imageFiles.length
+    if (count <= 1) return
+
+    if (distance > minSwipeDistance) {
+      // Swipe Left -> Next
+      if (isLightbox) {
+        setLightboxIndex((prev) => (prev + 1) % count)
+      } else {
+        setCurrentImageIndex((prev) => (prev + 1) % count)
+      }
+    } else if (distance < -minSwipeDistance) {
+      // Swipe Right -> Prev
+      if (isLightbox) {
+        setLightboxIndex((prev) => (prev - 1 + count) % count)
+      } else {
+        setCurrentImageIndex((prev) => (prev - 1 + count) % count)
+      }
+    }
   }
 
   const renderFileIcon = (fileName: string, mimeType?: string) => {
@@ -503,11 +560,9 @@ function ClientDeliveryPageInner() {
     )
   }
 
-  // ── Payment Complete / Fully Paid Screen (Before Opening Portal) ───────────
+  // ── FIRST VIEW: CLIENT WELCOME MESSAGE OVERLAY / SECTION ───────────
   if (!showFilesPortal) {
-    const currency = financials?.currency || 'GHS'
-    const totalPaid = financials?.totalPaid || 0
-    const invoiceTotal = financials?.invoiceTotal || 0
+    const customMessage = delivery.notes?.trim() || 'Your deliverables are ready. Thank you for choosing LEXMEDIA.GH.'
 
     return (
       <PageEnter>
@@ -528,77 +583,80 @@ function ClientDeliveryPageInner() {
                 )}
                 <div>
                   <span className="font-bold tracking-tight text-white text-base">
-                    {branding.businessName || 'LexMedia'}
+                    {branding.businessName || 'LEXMEDIA.GH'}
                   </span>
                   <span className="hidden sm:inline-block text-[11px] text-slate-400 font-mono ml-2 px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700">
-                    Payment & Delivery Portal
+                    Delivery Portal
                   </span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   <ShieldCheck size={13} />
-                  Fully Paid
+                  Deliverables Ready
                 </span>
               </div>
             </div>
           </header>
 
-          {/* Main Success Content */}
-          <main className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-16 w-full flex-1 flex flex-col items-center justify-center space-y-8">
+          {/* Main Welcome Message View */}
+          <main className="max-w-2xl mx-auto px-4 sm:px-6 py-10 sm:py-16 w-full flex-1 flex flex-col items-center justify-center space-y-8">
             <CardReveal className="w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-10 shadow-2xl space-y-8 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute top-0 right-0 w-56 h-56 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
 
+              {/* Icon & Greeting Header */}
               <div className="text-center space-y-3 relative z-10">
-                <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400">
-                  <CheckCircle2 size={32} />
+                <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center mx-auto text-indigo-400 shadow-md">
+                  <Sparkles size={32} />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-                    Payment Complete! 🎉
+                    Your Deliverables Are Ready
                   </h1>
-                  <p className="text-sm sm:text-base text-slate-300 max-w-lg mx-auto leading-relaxed">
-                    Thank you! Your payment has been successfully received and your delivery files are now available.
+                  <p className="text-sm font-medium text-indigo-400">
+                    Hello <strong className="text-white font-semibold">{delivery.clientName}</strong> 👋
                   </p>
                 </div>
               </div>
 
-              {/* Success Info Box */}
-              <div className="bg-slate-950/80 rounded-2xl p-5 sm:p-6 border border-slate-800/80 space-y-4 relative z-10">
-                <p className="text-sm font-semibold text-emerald-400 text-center">
-                  Your payment is complete! Your delivery files are now ready for you.
+              {/* Polished Custom Client Message Box */}
+              <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-3 relative z-10 shadow-inner">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-indigo-400 border-b border-slate-800/80 pb-3">
+                  <MessageSquare size={15} />
+                  <span>Message from {branding.businessName || 'LEXMEDIA.GH'}</span>
+                </div>
+                <p className="text-base sm:text-lg text-slate-200 leading-relaxed font-sans whitespace-pre-wrap pt-1">
+                  &ldquo;{customMessage}&rdquo;
                 </p>
-                <div className="space-y-2.5 text-xs sm:text-sm pt-2 border-t border-slate-800/60">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Client</span>
-                    <span className="font-medium text-white">{delivery.clientName}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Project</span>
-                    <span className="font-medium text-white">{delivery.projectName || delivery.title}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Total Paid</span>
-                    <span className="font-semibold text-emerald-400">
-                      {formatCurrency(financials?.totalPaid || invoiceTotal, currency)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Remaining Balance</span>
-                    <span className="font-semibold text-emerald-400 font-mono">GH₵0.00</span>
-                  </div>
+              </div>
+
+              {/* Project & Assets Meta Info */}
+              <div className="bg-slate-900/60 rounded-2xl p-4 border border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300 relative z-10">
+                <div className="flex items-center gap-2">
+                  <Layers size={16} className="text-indigo-400" />
+                  <span>
+                    Project: <strong className="text-white font-semibold">{delivery.projectName || delivery.title}</strong>
+                  </span>
+                </div>
+                <div className="font-mono bg-slate-800 px-3 py-1 rounded-full text-slate-200 border border-slate-700">
+                  {files.length} asset{files.length === 1 ? '' : 's'} ({formatFileSize(delivery.totalSize)})
                 </div>
               </div>
 
-              {/* View Files Button */}
-              <div className="space-y-3 relative z-10">
+              {/* Primary View Deliverables Button */}
+              <div className="space-y-3 relative z-10 pt-2">
                 <button
                   onClick={() => setShowFilesPortal(true)}
-                  className="w-full py-4 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-base transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2.5 cursor-pointer active:scale-[0.99]"
+                  className="w-full py-4 px-8 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-base sm:text-lg transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-3 cursor-pointer active:scale-[0.99]"
                 >
-                  <Layers size={18} />
-                  <span>View My Delivery Files</span>
+                  <Layers size={20} />
+                  <span>View Deliverables</span>
+                  <ArrowRight size={20} />
                 </button>
+                <p className="text-center text-xs text-slate-400 flex items-center justify-center gap-1.5">
+                  <ShieldCheck size={14} className="text-emerald-400" />
+                  Verified Transfer · High-Resolution Delivery
+                </p>
               </div>
             </CardReveal>
           </main>
@@ -613,7 +671,10 @@ function ClientDeliveryPageInner() {
     )
   }
 
-  // ── Active Delivery Files Portal View (Unlocked) ───────────────────────────
+  // ── ACTIVE DELIVERABLES PORTAL VIEW (UNLOCKED & VISIBLE) ───────────────
+  const currentImg = imageFiles[currentImageIndex]
+  const currentLightboxImg = imageFiles[lightboxIndex]
+
   return (
     <PageEnter>
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
@@ -635,7 +696,7 @@ function ClientDeliveryPageInner() {
                 )}
                 <div>
                   <span className="font-bold tracking-tight text-white text-base">
-                    {branding.businessName || 'LexMedia'}
+                    {branding.businessName || 'LEXMEDIA.GH'}
                   </span>
                   <span className="hidden sm:inline-block text-[11px] text-slate-400 font-mono ml-2 px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700">
                     Delivery Portal
@@ -643,17 +704,20 @@ function ClientDeliveryPageInner() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  <ShieldCheck size={13} />
-                  Secure Transfer · Paid
-                </span>
+                <button
+                  onClick={() => setShowFilesPortal(false)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors flex items-center gap-1.5"
+                >
+                  <MessageSquare size={13} />
+                  <span>View Message</span>
+                </button>
               </div>
             </div>
           </header>
         </FadeIn>
 
         {/* Main Content */}
-        <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12 w-full flex-1 space-y-8">
+        <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-10 w-full flex-1 space-y-8">
 
           {/* Welcome / Project Header Card */}
           <CardReveal delay={0.05}>
@@ -664,14 +728,14 @@ function ClientDeliveryPageInner() {
                 <SlideUp delay={0.1} className="space-y-2.5">
                   <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
                     <Sparkles size={12} />
-                    Project Complete & Paid
+                    Project Complete & Released
                   </div>
                   <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-                    {delivery.title || 'Your Project Is Ready'}
+                    {delivery.title || 'Your Project Deliverables'}
                   </h1>
                   <p className="text-slate-300 text-sm sm:text-base leading-relaxed max-w-2xl">
                     Hello <strong className="text-white font-semibold">{delivery.clientName}</strong>, your final files for{' '}
-                    <strong className="text-white font-semibold">{delivery.projectName}</strong> have been finalized and are ready for download below.
+                    <strong className="text-white font-semibold">{delivery.projectName}</strong> are ready for preview and download below.
                   </p>
                 </SlideUp>
 
@@ -681,7 +745,7 @@ function ClientDeliveryPageInner() {
                     <button
                       onClick={handleDownloadAll}
                       disabled={downloadingAll}
-                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all shadow-lg shadow-indigo-600/25 active:scale-[0.98] disabled:opacity-60 cursor-pointer"
+                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all shadow-lg shadow-indigo-600/25 active:scale-[0.98] disabled:opacity-60 cursor-pointer"
                     >
                       {downloadingAll ? (
                         <>
@@ -717,29 +781,207 @@ function ClientDeliveryPageInner() {
                 )}
                 <div>
                   <p className="text-slate-400">Status</p>
-                  <p className="font-semibold text-emerald-400 mt-0.5">Ready for Download</p>
+                  <p className="font-semibold text-emerald-400 mt-0.5">Unlocked & Ready</p>
                 </div>
               </SlideUp>
             </div>
           </CardReveal>
 
-          {/* Note from Studio (if provided) */}
-          {delivery.notes && (
-            <SlideUp delay={0.15}>
-              <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 text-sm text-slate-300">
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Studio Note</p>
-                <p className="whitespace-pre-wrap">{delivery.notes}</p>
+          {/* ─── 2. MULTIPLE-IMAGE SWIPE PREVIEW GALLERY / CAROUSEL ─── */}
+          {imageFiles.length > 0 && (
+            <SlideUp delay={0.12} className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  <ImageIcon size={18} className="text-indigo-400" />
+                  Image Deliverables ({imageFiles.length})
+                </h2>
+                <span className="text-xs text-slate-400 hidden sm:inline-block">
+                  Swipe left/right or use arrows to view images
+                </span>
+              </div>
+
+              {/* Main Carousel Display Box */}
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl relative flex flex-col">
+                {/* Image Container with Touch Swipe */}
+                <div
+                  className="relative w-full h-[360px] sm:h-[480px] md:h-[540px] bg-slate-950 flex items-center justify-center p-2 sm:p-4 touch-pan-y select-none overflow-hidden"
+                  onTouchStart={handleTouchStart}
+                  onTouchMove={handleTouchMove}
+                  onTouchEnd={() => handleTouchEnd(false)}
+                >
+                  <img
+                    src={currentImg.downloadUrl || `/api/files?id=${currentImg.id}`}
+                    alt={currentImg.fileName}
+                    className="w-full h-full object-contain pointer-events-none transition-all duration-300"
+                  />
+
+                  {/* Top Bar Overlay Controls */}
+                  <div className="absolute top-4 left-4 right-4 flex items-center justify-between gap-2 pointer-events-auto z-10">
+                    <span className="px-3.5 py-1.5 rounded-full bg-slate-900/85 backdrop-blur-md border border-slate-700/80 text-xs font-bold font-mono text-slate-200 shadow-md">
+                      {currentImageIndex + 1} of {imageFiles.length}
+                    </span>
+
+                    <button
+                      onClick={() => {
+                        setLightboxIndex(currentImageIndex)
+                        setLightboxOpen(true)
+                      }}
+                      className="px-3.5 py-1.5 rounded-full bg-slate-900/85 hover:bg-slate-800 backdrop-blur-md border border-slate-700/80 text-xs font-semibold text-white flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer"
+                    >
+                      <Maximize2 size={14} />
+                      <span className="hidden sm:inline">Fullscreen</span>
+                    </button>
+                  </div>
+
+                  {/* Desktop Prev / Next Buttons */}
+                  {imageFiles.length > 1 && (
+                    <>
+                      <button
+                        onClick={() =>
+                          setCurrentImageIndex((prev) => (prev - 1 + imageFiles.length) % imageFiles.length)
+                        }
+                        className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-900/80 hover:bg-slate-800 backdrop-blur-md border border-slate-700/80 text-white flex items-center justify-center transition-all cursor-pointer shadow-lg active:scale-95"
+                        aria-label="Previous Image"
+                      >
+                        <ChevronLeft size={22} />
+                      </button>
+                      <button
+                        onClick={() => setCurrentImageIndex((prev) => (prev + 1) % imageFiles.length)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-900/80 hover:bg-slate-800 backdrop-blur-md border border-slate-700/80 text-white flex items-center justify-center transition-all cursor-pointer shadow-lg active:scale-95"
+                        aria-label="Next Image"
+                      >
+                        <ChevronRight size={22} />
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {/* Thumbnail Strip (if multiple images) */}
+                {imageFiles.length > 1 && (
+                  <div className="bg-slate-900/90 border-t border-slate-800 p-3 flex items-center gap-2 overflow-x-auto scrollbar-none">
+                    {imageFiles.map((img, idx) => (
+                      <button
+                        key={img.id}
+                        onClick={() => setCurrentImageIndex(idx)}
+                        className={`w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden shrink-0 border-2 transition-all cursor-pointer ${
+                          idx === currentImageIndex
+                            ? 'border-indigo-500 scale-105 shadow-lg shadow-indigo-500/20'
+                            : 'border-slate-800 opacity-60 hover:opacity-100'
+                        }`}
+                      >
+                        <img
+                          src={img.downloadUrl || `/api/files?id=${img.id}`}
+                          alt={img.fileName}
+                          className="w-full h-full object-cover"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Active Image Caption & Download */}
+                <div className="bg-slate-900 border-t border-slate-800/80 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-white truncate">{currentImg.fileName}</p>
+                    <p className="text-xs text-slate-400 font-mono mt-0.5">
+                      {formatFileSize(currentImg.fileSize)}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleDownloadSingle(currentImg)}
+                    disabled={downloadingFileId === currentImg.id}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
+                  >
+                    {downloadingFileId === currentImg.id ? (
+                      <>
+                        <Spinner size="sm" />
+                        <span>Downloading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download size={14} />
+                        <span>Download Image</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </SlideUp>
           )}
 
-          {/* File List Section */}
+          {/* ─── FULLSCREEN LIGHTBOX MODAL ─── */}
+          {lightboxOpen && currentLightboxImg && (
+            <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-xl flex flex-col justify-between p-4 sm:p-6 animate-fade-in">
+              {/* Lightbox Top Control Bar */}
+              <div className="flex items-center justify-between text-white border-b border-slate-800/80 pb-3">
+                <span className="text-xs sm:text-sm font-mono font-bold text-slate-300">
+                  Image {lightboxIndex + 1} of {imageFiles.length}
+                </span>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => handleDownloadSingle(currentLightboxImg)}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all"
+                  >
+                    <Download size={14} />
+                    <span className="hidden sm:inline">Download</span>
+                  </button>
+                  <button
+                    onClick={() => setLightboxOpen(false)}
+                    className="w-10 h-10 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Lightbox Image Stage */}
+              <div
+                className="relative flex-1 flex items-center justify-center my-4 overflow-hidden touch-pan-y"
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={() => handleTouchEnd(true)}
+              >
+                <img
+                  src={currentLightboxImg.downloadUrl || `/api/files?id=${currentLightboxImg.id}`}
+                  alt={currentLightboxImg.fileName}
+                  className="max-h-[80vh] max-w-full object-contain mx-auto select-none"
+                />
+
+                {/* Prev / Next Lightbox Controls */}
+                {imageFiles.length > 1 && (
+                  <>
+                    <button
+                      onClick={() =>
+                        setLightboxIndex((prev) => (prev - 1 + imageFiles.length) % imageFiles.length)
+                      }
+                      className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-white flex items-center justify-center transition-all cursor-pointer shadow-xl"
+                    >
+                      <ChevronLeft size={24} />
+                    </button>
+                    <button
+                      onClick={() => setLightboxIndex((prev) => (prev + 1) % imageFiles.length)}
+                      className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-white flex items-center justify-center transition-all cursor-pointer shadow-xl"
+                    >
+                      <ChevronRight size={24} />
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {/* Lightbox Footer Caption */}
+              <div className="text-center text-xs text-slate-400 font-mono border-t border-slate-800/80 pt-3">
+                {currentLightboxImg.fileName} · {formatFileSize(currentLightboxImg.fileSize)}
+              </div>
+            </div>
+          )}
+
+          {/* ─── ALL DELIVERABLES / MIXED FILES LIST ─── */}
           <div className="space-y-4">
             <FadeIn delay={0.2}>
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
                   <Layers size={18} className="text-indigo-400" />
-                  Delivery Files ({files.length})
+                  All Delivery Files ({files.length})
                 </h2>
               </div>
             </FadeIn>
