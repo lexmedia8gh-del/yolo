@@ -9,10 +9,10 @@ interface TrimPathLogoProps {
 }
 
 const sizeDimensions = {
-  sm: 'w-16 h-16 sm:w-20 sm:h-20',
-  md: 'w-20 h-20 sm:w-28 sm:h-28',
-  lg: 'w-24 h-24 sm:w-32 sm:h-32',
-  xl: 'w-32 h-32 sm:w-40 sm:h-40',
+  sm: 'w-20 h-20 sm:w-24 sm:h-24',
+  md: 'w-24 h-24 sm:w-28 sm:h-28',
+  lg: 'w-28 h-28 sm:w-36 sm:h-36', // ~112px mobile, ~144px desktop
+  xl: 'w-36 h-36 sm:w-44 sm:h-44',
 }
 
 export function TrimPathLogo({
@@ -26,39 +26,29 @@ export function TrimPathLogo({
         @keyframes strokeDraw {
           0% {
             stroke-dashoffset: 100;
-            fill-opacity: 0;
-          }
-          65% {
-            stroke-dashoffset: 0;
-            fill-opacity: 0;
           }
           100% {
             stroke-dashoffset: 0;
-            fill-opacity: 1;
-          }
-        }
-
-        @keyframes fillFadeIn {
-          0% {
-            fill-opacity: 0;
-          }
-          100% {
-            fill-opacity: 1;
           }
         }
 
         @keyframes brandGlowSettle {
           0% {
-            transform: scale(0.96);
-            filter: drop-shadow(0 0 10px rgba(99, 102, 241, 0.2));
+            transform: scale(0.95);
+            opacity: 0;
+            filter: drop-shadow(0 0 0px rgba(59, 98, 227, 0));
           }
-          60% {
-            transform: scale(1.03);
-            filter: drop-shadow(0 0 25px rgba(99, 102, 241, 0.6));
+          20% {
+            opacity: 1;
+          }
+          70% {
+            transform: scale(1.02);
+            filter: drop-shadow(0 0 20px rgba(59, 98, 227, 0.45));
           }
           100% {
             transform: scale(1);
-            filter: drop-shadow(0 0 16px rgba(99, 102, 241, 0.4));
+            opacity: 1;
+            filter: drop-shadow(0 0 12px rgba(59, 98, 227, 0.25));
           }
         }
 
@@ -69,15 +59,11 @@ export function TrimPathLogo({
         }
 
         .trim-path-delay-1 {
-          animation-delay: 0.1s;
+          animation-delay: 0.2s;
         }
 
         .trim-path-delay-2 {
-          animation-delay: 0.25s;
-        }
-
-        .trim-path-delay-3 {
-          animation-delay: 0.4s;
+          animation-delay: 0.35s;
         }
 
         .brand-logo-container {
@@ -87,12 +73,13 @@ export function TrimPathLogo({
         @media (prefers-reduced-motion: reduce) {
           .trim-path-element {
             stroke-dashoffset: 0 !important;
-            fill-opacity: 1 !important;
-            animation: fillFadeIn 0.3s ease-out forwards !important;
+            animation: none !important;
           }
           .brand-logo-container {
             animation: none !important;
-            filter: drop-shadow(0 0 12px rgba(99, 102, 241, 0.3)) !important;
+            opacity: 1 !important;
+            transform: scale(1) !important;
+            filter: drop-shadow(0 0 8px rgba(59, 98, 227, 0.2)) !important;
           }
         }
       `}</style>
@@ -100,80 +87,45 @@ export function TrimPathLogo({
       {/* SVG Trim-Path Logo Emblem */}
       <div className={`brand-logo-container ${sizeDimensions[size]}`}>
         <svg
-          viewBox="0 0 200 200"
+          viewBox="0 0 500 500"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
           className="w-full h-full"
         >
-          <defs>
-            {/* Brand Linear Gradient */}
-            <linearGradient id="lexBrandGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#818CF8" />
-              <stop offset="50%" stopColor="#6366F1" />
-              <stop offset="100%" stopColor="#4338CA" />
-            </linearGradient>
-
-            <linearGradient id="lexStrokeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#A5B4FC" />
-              <stop offset="100%" stopColor="#6366F1" />
-            </linearGradient>
-
-            <linearGradient id="lexAccentGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#38BDF8" />
-              <stop offset="100%" stopColor="#818CF8" />
-            </linearGradient>
-          </defs>
-
-          {/* Path 1: Outer Squircle Frame */}
-          <rect
-            x="15"
-            y="15"
-            width="170"
-            height="170"
-            rx="42"
-            ry="42"
-            fill="url(#lexBrandGradient)"
-            stroke="url(#lexStrokeGradient)"
-            strokeWidth="5"
+          {/* Path 1: Bottom Dark Blue "W" Shape */}
+          <path
+            d="M 110 290 L 190 370 L 250 310 L 310 370 L 390 290"
+            fill="none"
+            stroke="#3B62E3"
+            strokeWidth="46"
             strokeLinecap="round"
             strokeLinejoin="round"
             pathLength="100"
             className={animated ? 'trim-path-element' : ''}
           />
 
-          {/* Path 2: Monogram "L" Base & Vertical */}
+          {/* Path 2: Top-Right Light Blue Hook Shape */}
           <path
-            d="M 60 52 V 148 H 115"
+            d="M 250 130 L 330 210 L 380 160"
             fill="none"
-            stroke="#FFFFFF"
-            strokeWidth="14"
+            stroke="#7BC4F4"
+            strokeWidth="46"
             strokeLinecap="round"
             strokeLinejoin="round"
             pathLength="100"
             className={animated ? 'trim-path-element trim-path-delay-1' : ''}
           />
 
-          {/* Path 3: Monogram "M" Slash / Camera Crest Accent */}
+          {/* Path 3: Top-Left Light Blue Short Pill Shape */}
           <path
-            d="M 110 148 L 132 80 L 152 118 L 170 58 V 148"
+            d="M 180 220 L 230 270"
             fill="none"
-            stroke="url(#lexAccentGradient)"
-            strokeWidth="10"
+            stroke="#7BC4F4"
+            strokeWidth="46"
             strokeLinecap="round"
             strokeLinejoin="round"
             pathLength="100"
             className={animated ? 'trim-path-element trim-path-delay-2' : ''}
-          />
-
-          {/* Path 4: High-Tech Spark Aperture Diamond */}
-          <path
-            d="M 148 38 L 156 48 L 148 58 L 140 48 Z"
-            fill="#38BDF8"
-            stroke="#A5B4FC"
-            strokeWidth="3"
-            strokeLinejoin="round"
-            pathLength="100"
-            className={animated ? 'trim-path-element trim-path-delay-3' : ''}
           />
         </svg>
       </div>
