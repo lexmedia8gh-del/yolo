@@ -531,6 +531,8 @@ export default function QuickJobsPage() {
   // Save Quick Job
   const handleSaveJob = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
+
     if (!formData.clientId) {
       toast.error('Please select a client for this quick job')
       return
@@ -633,8 +635,15 @@ export default function QuickJobsPage() {
 
       setIsFormModalOpen(false)
       resetForm()
-    } catch (err) {
-      console.error('Error saving quick job:', err)
+    } catch (err: any) {
+      console.error('[Quick Job Save Error] Operation failed:', {
+        message: err?.message || String(err),
+        collection: COLLECTIONS.QUICK_JOBS,
+        operation: editingJob ? 'update' : 'create',
+        clientId: formData.clientId,
+        originalAgreedPrice: price,
+        depositPaid: formData.depositPaid,
+      })
       toast.error('Failed to save quick job.')
     } finally {
       setIsSubmitting(false)
@@ -643,7 +652,7 @@ export default function QuickJobsPage() {
 
   // Delete Quick Job
   const handleDeleteJob = async () => {
-    if (!deletingJob) return
+    if (!deletingJob || isSubmitting) return
     setIsSubmitting(true)
     try {
       await deleteDocument(COLLECTIONS.QUICK_JOBS, deletingJob.id)

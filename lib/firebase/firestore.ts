@@ -22,7 +22,7 @@ import {
   increment,
   writeBatch,
 } from 'firebase/firestore'
-import { db } from './config'
+import { db, auth } from './config'
 
 // ─── Collection Names (centralized) ──────────────────────────
 export const COLLECTIONS = {
@@ -105,25 +105,77 @@ export async function getDocuments<T>(
   }
 }
 
+// ─── Firestore Error Helper ──────────────────────────────────
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
 // ─── Generic Add Document ────────────────────────────────────
 export async function addDocument(
   collectionName: string,
   data: DocumentData
 ): Promise<string> {
-  const colRef = collection(db, collectionName)
-  const docRef = await addDoc(colRef, {
-    ...data,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  })
-  console.log(`[Cloud Firestore] Successfully created document in '${collectionName}':`, docRef.id)
-  
-  // Cache to local storage as mirror
-  const local = getLocalCollection<any>(collectionName)
-  local.unshift({ id: docRef.id, ...data, createdAt: new Date().toISOString() })
-  setLocalCollection(collectionName, local)
+  try {
+    const colRef = collection(db, collectionName)
+    const docRef = await addDoc(colRef, {
+      ...data,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+    console.log(`[Cloud Firestore] Successfully created document in '${collectionName}':`, docRef.id)
+    
+    // Cache to local storage as mirror
+    const local = getLocalCollection<any>(collectionName)
+    local.unshift({ id: docRef.id, ...data, createdAt: new Date().toISOString() })
+    setLocalCollection(collectionName, local)
 
-  return docRef.id
+    return docRef.id
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, collectionName);
+  }
 }
 
 // ─── Generic Set Document (custom ID) ───────────────────────
@@ -133,23 +185,27 @@ export async function setDocument(
   data: DocumentData,
   merge = false
 ): Promise<void> {
-  const docRef = doc(db, collectionName, docId)
-  await setDoc(docRef, { ...data, updatedAt: serverTimestamp() }, { merge })
-  console.log(`[Cloud Firestore] Successfully set document '${collectionName}/${docId}'`)
+  try {
+    const docRef = doc(db, collectionName, docId)
+    await setDoc(docRef, { ...data, updatedAt: serverTimestamp() }, { merge })
+    console.log(`[Cloud Firestore] Successfully set document '${collectionName}/${docId}'`)
 
-  const local = getLocalCollection<any>(collectionName)
-  const existingIdx = local.findIndex((i) => i.id === docId)
-  const updatedItem = {
-    ...(existingIdx >= 0 ? local[existingIdx] : { id: docId }),
-    ...data,
-    updatedAt: new Date().toISOString(),
+    const local = getLocalCollection<any>(collectionName)
+    const existingIdx = local.findIndex((i) => i.id === docId)
+    const updatedItem = {
+      ...(existingIdx >= 0 ? local[existingIdx] : { id: docId }),
+      ...data,
+      updatedAt: new Date().toISOString(),
+    }
+    if (existingIdx >= 0) {
+      local[existingIdx] = updatedItem
+    } else {
+      local.push(updatedItem)
+    }
+    setLocalCollection(collectionName, local)
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `${collectionName}/${docId}`);
   }
-  if (existingIdx >= 0) {
-    local[existingIdx] = updatedItem
-  } else {
-    local.push(updatedItem)
-  }
-  setLocalCollection(collectionName, local)
 }
 
 // ─── Generic Update Document ─────────────────────────────────
@@ -158,15 +214,19 @@ export async function updateDocument(
   docId: string,
   data: Partial<DocumentData>
 ): Promise<void> {
-  const docRef = doc(db, collectionName, docId)
-  await updateDoc(docRef, { ...data, updatedAt: serverTimestamp() })
-  console.log(`[Cloud Firestore] Successfully updated document '${collectionName}/${docId}'`)
+  try {
+    const docRef = doc(db, collectionName, docId)
+    await updateDoc(docRef, { ...data, updatedAt: serverTimestamp() })
+    console.log(`[Cloud Firestore] Successfully updated document '${collectionName}/${docId}'`)
 
-  const local = getLocalCollection<any>(collectionName)
-  const idx = local.findIndex((i) => i.id === docId)
-  if (idx >= 0) {
-    local[idx] = { ...local[idx], ...data, updatedAt: new Date().toISOString() }
-    setLocalCollection(collectionName, local)
+    const local = getLocalCollection<any>(collectionName)
+    const idx = local.findIndex((i) => i.id === docId)
+    if (idx >= 0) {
+      local[idx] = { ...local[idx], ...data, updatedAt: new Date().toISOString() }
+      setLocalCollection(collectionName, local)
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${collectionName}/${docId}`);
   }
 }
 
@@ -175,13 +235,17 @@ export async function deleteDocument(
   collectionName: string,
   docId: string
 ): Promise<void> {
-  const docRef = doc(db, collectionName, docId)
-  await deleteDoc(docRef)
-  console.log(`[Cloud Firestore] Successfully deleted document '${collectionName}/${docId}'`)
+  try {
+    const docRef = doc(db, collectionName, docId)
+    await deleteDoc(docRef)
+    console.log(`[Cloud Firestore] Successfully deleted document '${collectionName}/${docId}'`)
 
-  const local = getLocalCollection<any>(collectionName)
-  const filtered = local.filter((i) => i.id !== docId)
-  setLocalCollection(collectionName, filtered)
+    const local = getLocalCollection<any>(collectionName)
+    const filtered = local.filter((i) => i.id !== docId)
+    setLocalCollection(collectionName, filtered)
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `${collectionName}/${docId}`);
+  }
 }
 
 // ─── Real-time Listener ──────────────────────────────────────
