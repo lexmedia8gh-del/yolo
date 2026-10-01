@@ -47,6 +47,7 @@ import {
   deleteDocument,
   subscribeToCollection,
 } from '@/lib/firebase/firestore'
+import { auth } from '@/lib/firebase/config'
 import type {
   QuickJob,
   QuickJobStatus,
@@ -58,6 +59,21 @@ import type {
   QuickJobAddOnSnapshot,
 } from '@/lib/types'
 import { OFFICIAL_CATEGORIES } from '@/lib/services/catalogueData'
+
+const cleanUndefined = (obj: any): any => {
+  if (obj === null || typeof obj !== 'object') return obj
+  if (obj instanceof Date) return obj
+  if (Array.isArray(obj)) return obj.map(cleanUndefined)
+
+  const cleaned: any = {}
+  Object.keys(obj).forEach((key) => {
+    const val = obj[key]
+    if (val !== undefined) {
+      cleaned[key] = cleanUndefined(val)
+    }
+  })
+  return cleaned
+}
 import { QuickJobPaymentDelivery } from '@/components/quick-jobs/QuickJobPaymentDelivery'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
@@ -533,6 +549,14 @@ export default function QuickJobsPage() {
     e.preventDefault()
     if (isSubmitting) return
 
+    // Verify authentication
+    const currentUser = auth.currentUser
+    console.log('[Quick Job Auth Verification]:', {
+      authenticated: !!currentUser,
+      uid: currentUser?.uid || null,
+      email: currentUser?.email || null,
+    })
+
     if (!formData.clientId) {
       toast.error('Please select a client for this quick job')
       return
@@ -595,7 +619,7 @@ export default function QuickJobsPage() {
     setIsSubmitting(true)
     try {
       const now = new Date().toISOString()
-      const payload: Partial<QuickJob> = {
+      const rawPayload: Partial<QuickJob> = {
         clientId: formData.clientId,
         clientName: selectedClient?.fullName || 'Walk-in Client',
         clientEmail: selectedClient?.email || '',
@@ -620,15 +644,28 @@ export default function QuickJobsPage() {
         updatedAt: now,
       }
 
+      // ─── REMOVE UNDEFINED PROPERTIES PREVENTING FIRESTORE WRITE ───
+      const payload = cleanUndefined(rawPayload)
+
+      console.log('[Quick Job Save Payload]:', {
+        clientId: payload.clientId,
+        clientName: payload.clientName,
+        jobDescription: payload.jobDescription,
+        originalAgreedPrice: payload.originalAgreedPrice,
+        depositPaid: payload.depositPaid,
+        hasPackageSnapshot: !!payload.packageSnapshot,
+        hasServiceSnapshot: !!payload.serviceSnapshot,
+      })
+
       if (editingJob) {
         await updateDocument(COLLECTIONS.QUICK_JOBS, editingJob.id, payload)
         toast.success('Quick Job updated successfully!')
       } else {
-        const createPayload = {
+        const createPayload = cleanUndefined({
           ...payload,
           deliveryStatus: 'Not Ready' as const,
           createdAt: now,
-        }
+        })
         await addDocument(COLLECTIONS.QUICK_JOBS, createPayload)
         toast.success('Quick Job created successfully!')
       }
@@ -636,15 +673,13 @@ export default function QuickJobsPage() {
       setIsFormModalOpen(false)
       resetForm()
     } catch (err: any) {
-      console.error('[Quick Job Save Error] Operation failed:', {
-        message: err?.message || String(err),
-        collection: COLLECTIONS.QUICK_JOBS,
-        operation: editingJob ? 'update' : 'create',
-        clientId: formData.clientId,
-        originalAgreedPrice: price,
-        depositPaid: formData.depositPaid,
+      console.error('QUICK JOB SAVE FAILED', {
+        code: err?.code,
+        message: err?.message,
+        name: err?.name,
+        error: err,
       })
-      toast.error('Failed to save quick job.')
+      toast.error(`Failed to save quick job: ${err?.message || String(err)}`)
     } finally {
       setIsSubmitting(false)
     }
