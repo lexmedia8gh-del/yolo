@@ -57,6 +57,13 @@ export function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
+  // Handle root path / cleanly at middleware level
+  if (pathname === '/') {
+    const sessionCookie = request.cookies.get('__session')
+    const isAuthenticated = !!sessionCookie?.value
+    return NextResponse.redirect(new URL(isAuthenticated ? '/dashboard' : '/login', request.url))
+  }
+
   // 2. Check for Firebase auth session cookie
   const sessionCookie = request.cookies.get('__session')
   const isAuthenticated = !!sessionCookie?.value
