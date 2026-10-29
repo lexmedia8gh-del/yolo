@@ -50,7 +50,7 @@ interface LocalAdminAuthRecord {
 
 const DEFAULT_ADMIN_USER: User = {
   uid: 'admin-staff-user',
-  email: 'natlexmediah@gmail.com',
+  email: 'lexmedia8gh@gmail.com',
   displayName: 'Lexmedia Admin',
   emailVerified: true,
   providerIds: ['password'],

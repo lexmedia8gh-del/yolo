@@ -48,15 +48,15 @@ function darkenHex(hex: string, factor = 0.88): string {
 
 function LoginPageSkeleton() {
   return (
-    <div className="login-light-surface font-sans min-h-[100dvh] w-full bg-[#F8FAFC] flex items-center justify-center p-5">
-      <div className="w-full max-w-[440px] rounded-2xl bg-white border border-[#E2E8F0] p-8 shadow-sm space-y-6">
-        <div className="h-9 w-36 bg-[#F1F5F9] rounded-lg mx-auto animate-pulse" />
-        <div className="flex justify-center gap-2 py-3">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="w-11 h-13 rounded-xl bg-[#F1F5F9] animate-pulse" />
-          ))}
+    <div className="login-light-surface font-sans min-h-[100dvh] w-full bg-[#F8FAFC] flex flex-col items-center justify-center p-5">
+      <div className="w-full max-w-[440px] rounded-2xl bg-white border border-[#E2E8F0] p-8 sm:p-10 shadow-sm flex flex-col items-center justify-center text-center space-y-5 animate-fade-in">
+        <div className="animate-pulse">
+          <BrandLogoLockup subtitle="Ctrl Room" variant="light" size="lg" />
         </div>
-        <div className="h-12 w-full bg-[#E2E8F0] rounded-xl animate-pulse" />
+        <div className="pt-2 flex items-center gap-2.5 text-xs font-semibold text-slate-500">
+          <span className="w-4 h-4 border-2 border-slate-200 border-t-[#1D63ED] rounded-full animate-spin shrink-0" />
+          <span>Loading workspace...</span>
+        </div>
       </div>
     </div>
   )

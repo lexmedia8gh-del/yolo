@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
 
       let isValidPin = false
       let targetUid = 'admin-staff-user'
-      let targetEmail = getAuthorizedAdminEmails()[0] || 'natlexmediah@gmail.com'
+      let targetEmail = getAuthorizedAdminEmails()[0] || 'lexmedia8gh@gmail.com'
 
       // Case A: Security record contains enrolled PIN hash
       if (secData?.pinHash && secData?.pinSalt) {

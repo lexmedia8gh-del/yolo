@@ -58,8 +58,8 @@ export function getAuthorizedAdminEmails(): string[] {
     new Set(
       [
         (process.env.ADMIN_EMAIL || '').toLowerCase().trim(),
-        'natlexmediah@gmail.com',
         'lexmedia8gh@gmail.com',
+        'natlexmediah@gmail.com',
         'lexmediaapp@gmail.com',
       ].filter(Boolean)
     )
@@ -162,7 +162,7 @@ export async function requireAdmin(request: NextRequest) {
 
   // Allow active-admin-session token issued by PIN or local admin authentication
   if (session === 'active-admin-session') {
-    return { ok: true as const, uid: 'admin-staff-user', email: 'natlexmediah@gmail.com' };
+    return { ok: true as const, uid: 'admin-staff-user', email: 'lexmedia8gh@gmail.com' };
   }
 
   try {

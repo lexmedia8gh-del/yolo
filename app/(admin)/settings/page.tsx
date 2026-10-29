@@ -535,8 +535,14 @@ export default function SettingsPage() {
         firestoreUpdate.pendingEmailRequestedAt = null
       }
 
-      await setDocument(COLLECTIONS.USERS, user.uid, firestoreUpdate, true)
-      await refreshUser()
+      try {
+        await setDocument(COLLECTIONS.USERS, user.uid, firestoreUpdate, true)
+      } catch (clientFsErr) {
+        console.warn('[Account Save] Client Firestore update fallback:', clientFsErr)
+      }
+      try {
+        await refreshUser()
+      } catch {}
 
       // 5. Update clean form state and report accurate confirmation
       setAccountName(normalizedInputName)
@@ -1500,17 +1506,6 @@ export default function SettingsPage() {
                         </Button>
                       </div>
                     </form>
-                  </Card>
-
-                  <Card>
-                    <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">Change Password</h3>
-                    <p className="text-sm text-muted dark:text-gray-400 mb-6">You must know your current password to set a new one.</p>
-                    <div className="space-y-4 max-w-sm">
-                      <Input label="Current Password" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} leftIcon={<Lock size={15} />} required />
-                      <Input label="New Password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} leftIcon={<Lock size={15} />} required />
-                      <Input label="Confirm New Password" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} leftIcon={<Lock size={15} />} required />
-                      <Button variant="primary" onClick={handlePasswordChange} loading={passwordLoading} disabled={!currentPassword || !newPassword || !confirmPassword}>Update Password</Button>
-                    </div>
                   </Card>
                 </div>
               )}
