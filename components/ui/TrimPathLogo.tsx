@@ -1,8 +1,9 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import { getDocument, COLLECTIONS } from '@/lib/firebase/firestore'
-import type { BrandingSettings } from '@/lib/types'
+import React, { useState } from 'react'
+import { Layers } from 'lucide-react'
+import { useBranding } from '@/lib/contexts/BrandingContext'
+import { sanitizeBrandingLogoUrl } from '@/lib/hooks/useInvoiceBranding'
 
 interface TrimPathLogoProps {
   size?: 'sm' | 'md' | 'lg' | 'xl'
@@ -13,7 +14,7 @@ interface TrimPathLogoProps {
 const sizeDimensions = {
   sm: 'w-[70px] h-[70px] sm:w-[90px] sm:h-[90px]',
   md: 'w-[80px] h-[80px] sm:w-[110px] sm:h-[110px]',
-  lg: 'w-[90px] h-[90px] sm:w-[120px] sm:h-[120px]', // Exact match: 90px mobile, 120px desktop
+  lg: 'w-[90px] h-[90px] sm:w-[120px] sm:h-[120px]',
   xl: 'w-[110px] h-[110px] sm:w-[140px] sm:h-[140px]',
 }
 
@@ -22,74 +23,32 @@ export function TrimPathLogo({
   className = '',
   animated = true,
 }: TrimPathLogoProps) {
-  const [branding, setBranding] = useState<BrandingSettings | null>(null)
+  const { branding } = useBranding()
+  const [failedUrl, setFailedUrl] = useState<string | null>(null)
 
-  useEffect(() => {
-    async function loadBranding() {
-      try {
-        const doc = await getDocument<BrandingSettings>(COLLECTIONS.SETTINGS, 'branding')
-        if (doc) {
-          setBranding(doc)
-        }
-      } catch (err) {
-        console.warn('Failed to load branding in logo loader:', err)
-      }
-    }
-    loadBranding()
-  }, [])
-
-  // Exact fallback logo path found in public uploads
-  const defaultLogo = '/uploads/branding/logo/1788576626544_Untitled-1.png'
-  const finalLogoUrl = branding?.logoLightUrl || branding?.logoUrl || defaultLogo
+  const lightLogo = sanitizeBrandingLogoUrl(branding.logoLightUrl, branding.logoLightStoragePath)
+  const mainLogo = sanitizeBrandingLogoUrl(branding.logoUrl, branding.logoStoragePath)
+  const activeLogoUrl = lightLogo || mainLogo
+  const showImage = Boolean(activeLogoUrl && failedUrl !== activeLogoUrl)
 
   return (
-    <div className={`relative flex flex-col items-center justify-center ${className}`}>
-      <style jsx>{`
-        @keyframes floatUpDown {
-          0% {
-            transform: translateY(0px);
-          }
-          22% {
-            transform: translateY(-10px);
-          }
-          28% {
-            transform: translateY(-10px);
-          }
-          50% {
-            transform: translateY(0px);
-          }
-          72% {
-            transform: translateY(10px);
-          }
-          78% {
-            transform: translateY(10px);
-          }
-          100% {
-            transform: translateY(0px);
-          }
-        }
-
-        .brand-logo-img {
-          animation: ${animated ? 'floatUpDown 3s cubic-bezier(0.445, 0.05, 0.55, 0.95) infinite' : 'none'};
-          user-select: none;
-          pointer-events: none;
-          display: block;
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-          .brand-logo-img {
-            animation: none !important;
-          }
-        }
-      `}</style>
-
-      {/* PIXEL-IDENTICAL LOGO ASSET */}
-      <img
-        src={finalLogoUrl}
-        alt="LexMedia Logo"
-        className={`${sizeDimensions[size]} object-contain brand-logo-img`}
-        referrerPolicy="no-referrer"
-      />
+    <div className={`relative flex flex-col items-center justify-center gap-3 ${className}`}>
+      <div className={animated ? 'animate-bounce motion-reduce:animate-none' : ''}>
+        {showImage ? (
+          <img
+            src={activeLogoUrl}
+            alt="lexmedia.gh logo"
+            referrerPolicy="no-referrer"
+            onError={() => setFailedUrl(activeLogoUrl)}
+            className={`${sizeDimensions[size]} object-contain select-none pointer-events-none`}
+          />
+        ) : (
+          <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 text-blue-400 flex items-center justify-center shadow-lg">
+            <Layers size={30} strokeWidth={2.2} />
+          </div>
+        )}
+      </div>
+      <span className="text-sm font-bold tracking-tight text-slate-300">lexmedia.gh</span>
     </div>
   )
 }

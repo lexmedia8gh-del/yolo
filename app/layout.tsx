@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { AuthProvider } from '@/lib/contexts/AuthContext'
+import { BrandingProvider } from '@/lib/contexts/BrandingContext'
 import { ThemeProvider } from '@/lib/contexts/ThemeContext'
 import { ToasterWrapper } from '@/components/ui/ToasterWrapper'
 import '@/app/globals.css'
@@ -70,10 +71,12 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <ThemeProvider>
-          <AuthProvider>
-            {children}
-            <ToasterWrapper />
-          </AuthProvider>
+          <BrandingProvider>
+            <AuthProvider>
+              {children}
+              <ToasterWrapper />
+            </AuthProvider>
+          </BrandingProvider>
         </ThemeProvider>
       </body>
     </html>

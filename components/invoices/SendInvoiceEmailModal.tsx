@@ -30,12 +30,13 @@ export function SendInvoiceEmailModal({
 
   useEffect(() => {
     if (invoice) {
+      const senderBrand = invoice.businessInfo?.name || businessDefaults.name || 'lexmedia.gh'
       setRecipientEmail(invoice.clientEmail || '')
       setPersonalMessage(
-        `Thank you for partnering with LEXMEDIA.GH. Please find your invoice ${invoice.invoiceNumber} attached with convenient online payment options.`
+        `Thank you for partnering with ${senderBrand}. Please find your invoice ${invoice.invoiceNumber} attached with convenient online payment options.`
       )
     }
-  }, [invoice])
+  }, [invoice, businessDefaults.name])
 
   if (!invoice) return null
 
@@ -77,7 +78,7 @@ export function SendInvoiceEmailModal({
             quantity: it.quantity || 1,
             total: it.total || 0,
           })),
-          businessName: invoice.businessInfo?.name || businessDefaults.name || 'LEXMEDIA.GH',
+          businessName: invoice.businessInfo?.name || businessDefaults.name || 'lexmedia.gh',
           businessLogoUrl:
             sanitizeBrandingLogoUrl(invoice.businessInfo?.logo) || resolvedLogoUrl || undefined,
         }),
@@ -126,7 +127,10 @@ export function SendInvoiceEmailModal({
           </div>
           <div className="flex items-center gap-1.5 pt-1 text-[11px] text-gray-500 border-t border-slate-200">
             <ShieldCheck size={13} className="text-emerald-600" />
-            <span>Sender display name: <strong>LEXMEDIA.GH</strong></span>
+            <span>
+              Sender display name:{' '}
+              <strong>{invoice.businessInfo?.name || businessDefaults.name || 'lexmedia.gh'}</strong>
+            </span>
           </div>
         </div>
 

@@ -109,7 +109,7 @@ export function InvoicePreviewModal({
     const link = resolvedPaymentUrl
 
     const msg = `Hello ${clientName}, here is your invoice ${invNumber} from ${
-      invoice.businessInfo?.name || 'LEXMEDIA.GH'
+      invoice.businessInfo?.name || 'lexmedia.gh'
     }.\n\nBalance Due: ${currency} ${Number(balance || 0).toLocaleString('en-US', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,

@@ -3,11 +3,10 @@
 import { useState, useEffect, useMemo } from 'react'
 import { COLLECTIONS, subscribeToDocument } from '@/lib/firebase/firestore'
 import type { BrandingSettings, BusinessSettings } from '@/lib/types'
-import { getCustomerUrl } from '@/lib/utils'
 
 export const DEFAULT_INVOICE_BRANDING: BrandingSettings = {
-  businessName: 'LEXMEDIA.GH',
-  shortName: 'LM',
+  businessName: 'lexmedia.gh',
+  shortName: 'lex',
   tagline: 'Professional Digital Services',
   logoUrl: '',
   logoStoragePath: '',
@@ -163,15 +162,15 @@ export function useInvoiceBranding() {
         businessDoc?.businessName ||
         brandingDoc?.businessName ||
         DEFAULT_INVOICE_BRANDING.businessName,
-      shortName: mergedBranding.shortName || 'LM',
+      shortName: mergedBranding.shortName || 'lex',
       tagline: businessDoc?.tagline || brandingDoc?.tagline || '',
       logo: resolvedLogoUrl,
       logoStoragePath: resolvedLogoStoragePath,
-      email: businessDoc?.email || 'contact@lexmedia.com',
+      email: businessDoc?.email || '',
       phone: businessDoc?.phone || '',
       whatsapp: businessDoc?.whatsapp || '',
-      address: businessDoc?.address || 'Accra, Ghana',
-      website: businessDoc?.website || getCustomerUrl(),
+      address: businessDoc?.address || '',
+      website: businessDoc?.website || '',
       currency: businessDoc?.currency || 'GHS',
       currencySymbol: businessDoc?.currencySymbol || 'GH₵',
       invoicePrefix: businessDoc?.invoicePrefix || 'LXM-INV',

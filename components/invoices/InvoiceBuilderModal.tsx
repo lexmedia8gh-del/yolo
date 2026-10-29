@@ -9,7 +9,6 @@ import { InvoiceDocument } from './InvoiceDocument'
 import { InvoiceStage } from './InvoiceStage'
 import { sanitizeBrandingLogoUrl } from '@/lib/hooks/useInvoiceBranding'
 import { useAuth } from '@/lib/hooks/useAuth'
-import { getCustomerUrl } from '@/lib/utils'
 import {
   COLLECTIONS,
   getDocuments,
@@ -38,24 +37,16 @@ import {
 import {
   Plus,
   Trash2,
-  Upload,
-  Image as ImageIcon,
-  X,
   Eye,
   Edit3,
   Save,
   Send,
-  Sparkles,
   Building2,
   User,
   Calendar,
   DollarSign,
   FileText,
   CreditCard,
-  CheckCircle2,
-  AlertCircle,
-  HelpCircle,
-  Link2,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -109,14 +100,14 @@ export function InvoiceBuilderModal({
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // ─── Business Info State ───
-  const [businessName, setBusinessName] = useState('LEXMEDIA.GH')
+  const [businessName, setBusinessName] = useState('lexmedia.gh')
   const [businessLogo, setBusinessLogo] = useState('')
   const [businessLogoStoragePath, setBusinessLogoStoragePath] = useState('')
-  const [businessAddress, setBusinessAddress] = useState('East Legon, Accra, Ghana')
-  const [businessPhone, setBusinessPhone] = useState('+233 24 123 4567')
-  const [businessWhatsapp, setBusinessWhatsapp] = useState('+233 24 123 4567')
-  const [businessEmail, setBusinessEmail] = useState('contact@lexmedia.com')
-  const [businessWebsite, setBusinessWebsite] = useState(getCustomerUrl())
+  const [businessAddress, setBusinessAddress] = useState('')
+  const [businessPhone, setBusinessPhone] = useState('')
+  const [businessWhatsapp, setBusinessWhatsapp] = useState('')
+  const [businessEmail, setBusinessEmail] = useState('')
+  const [businessWebsite, setBusinessWebsite] = useState('')
   const [saveAsDefaultBrand, setSaveAsDefaultBrand] = useState(true)
 
   // ─── Client Info State ───
@@ -166,12 +157,8 @@ export function InvoiceBuilderModal({
   const [terms, setTerms] = useState(
     'Payment is due according to selected payment terms. Production deliverables will be released upon full invoice settlement.'
   )
-  const [paymentInstructions, setPaymentInstructions] = useState(
-    'Mobile Money: 024 123 4567 (LEXMEDIA.GH)\nBank Transfer: Standard Chartered Bank, Acc: 010023456789'
-  )
-  const [thankYouMessage, setThankYouMessage] = useState(
-    'Thank you for partnering with LEXMEDIA.GH! We appreciate your business.'
-  )
+  const [paymentInstructions, setPaymentInstructions] = useState('')
+  const [thankYouMessage, setThankYouMessage] = useState('')
 
   // Load defaults from Brand Profile / Settings or populate from invoiceToEdit / initialDraft
   useEffect(() => {
@@ -265,7 +252,7 @@ export function InvoiceBuilderModal({
 
       const existingInvoiceLogo = sanitizeBrandingLogoUrl(invoiceToEdit.businessInfo?.logo)
       if (invoiceToEdit.businessInfo) {
-        setBusinessName(invoiceToEdit.businessInfo.name || 'LEXMEDIA.GH')
+        setBusinessName(invoiceToEdit.businessInfo.name || 'lexmedia.gh')
         setBusinessLogo(existingInvoiceLogo)
         setBusinessLogoStoragePath(invoiceToEdit.businessInfo.logoStoragePath || '')
         setBusinessAddress(invoiceToEdit.businessInfo.address || '')
@@ -1140,6 +1127,7 @@ export function InvoiceBuilderModal({
                     <option value="Partially Paid">Partially Paid</option>
                     <option value="Paid">Paid</option>
                     <option value="Overdue">Overdue</option>
+                    <option value="Refunded">Refunded</option>
                     <option value="Cancelled">Cancelled</option>
                   </select>
                 </div>

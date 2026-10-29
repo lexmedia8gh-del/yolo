@@ -2,15 +2,19 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { subscribeToDocument, COLLECTIONS } from '@/lib/firebase/firestore'
-import type { BrandingSettings } from '@/lib/types'
+import { sanitizeBrandingLogoUrl } from '@/lib/hooks/useInvoiceBranding'
+import type { BrandingSettings, BusinessSettings } from '@/lib/types'
 
 export const DEFAULT_BRANDING: BrandingSettings = {
-  businessName: 'LEXMEDIA.GH',
-  shortName: 'Lex',
+  businessName: 'lexmedia.gh',
+  shortName: 'lex',
   tagline: 'Professional Digital Services',
   logoUrl: '',
+  logoStoragePath: '',
   logoLightUrl: '',
+  logoLightStoragePath: '',
   faviconUrl: '',
+  faviconStoragePath: '',
   primaryColor: '#0A0A0A',
   secondaryColor: '#6366F1',
   accentColor: '#4F46E5',
@@ -34,20 +38,24 @@ const BrandingContext = createContext<BrandingContextValue>({
 
 function sanitizeBrandingFields(
   raw: Partial<BrandingSettings>,
-  fallbackLogoUrl?: string
+  fallbackLogoUrl?: string,
+  fallbackLogoStoragePath?: string
 ): Partial<BrandingSettings> {
-  const cleanUrl = (val?: string) =>
-    val && typeof val === 'string' && !val.trim().startsWith('/uploads/') ? val.trim() : ''
-
   const cleaned: Partial<BrandingSettings> = { ...raw }
-  if ('logoUrl' in raw || fallbackLogoUrl) {
-    cleaned.logoUrl = cleanUrl(raw.logoUrl) || cleanUrl(fallbackLogoUrl)
+  const primaryLogo = sanitizeBrandingLogoUrl(raw.logoUrl, raw.logoStoragePath)
+  const secondaryLogo = sanitizeBrandingLogoUrl(fallbackLogoUrl, fallbackLogoStoragePath)
+
+  if ('logoUrl' in raw || 'logoStoragePath' in raw || fallbackLogoUrl || fallbackLogoStoragePath) {
+    cleaned.logoUrl = primaryLogo || secondaryLogo
+    cleaned.logoStoragePath = primaryLogo
+      ? raw.logoStoragePath || ''
+      : fallbackLogoStoragePath || raw.logoStoragePath || ''
   }
-  if ('logoLightUrl' in raw) {
-    cleaned.logoLightUrl = cleanUrl(raw.logoLightUrl)
+  if ('logoLightUrl' in raw || 'logoLightStoragePath' in raw) {
+    cleaned.logoLightUrl = sanitizeBrandingLogoUrl(raw.logoLightUrl, raw.logoLightStoragePath)
   }
-  if ('faviconUrl' in raw) {
-    cleaned.faviconUrl = cleanUrl(raw.faviconUrl)
+  if ('faviconUrl' in raw || 'faviconStoragePath' in raw) {
+    cleaned.faviconUrl = sanitizeBrandingLogoUrl(raw.faviconUrl, raw.faviconStoragePath)
   }
   return cleaned
 }
@@ -61,11 +69,17 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
 
     // 1. Fetch from server API immediately for fast, reliable initialization
     fetch('/api/branding', { cache: 'no-store' })
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (mounted && data?.success && data?.branding) {
-          const sanitized = sanitizeBrandingFields(data.branding, data?.business?.logoURL)
+          const sanitized = sanitizeBrandingFields(
+            data.branding,
+            data?.business?.logoURL,
+            data?.business?.logoStoragePath
+          )
           setBranding((prev) => ({ ...prev, ...sanitized }))
+          setLoading(false)
+        } else if (mounted) {
           setLoading(false)
         }
       })
@@ -74,14 +88,14 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
         if (mounted) setLoading(false)
       })
 
-    // 2. Real-time subscription to Firestore as dynamic enhancement
-    const unsubscribe = subscribeToDocument<BrandingSettings>(
+    // 2. Real-time subscription to Firestore settings/branding and settings/business
+    const unsubBranding = subscribeToDocument<BrandingSettings>(
       COLLECTIONS.SETTINGS,
       'branding',
       (data) => {
         if (mounted && data) {
           setBranding((prev) => {
-            const sanitized = sanitizeBrandingFields(data, prev.logoUrl)
+            const sanitized = sanitizeBrandingFields(data, prev.logoUrl, prev.logoStoragePath)
             return { ...prev, ...sanitized }
           })
           setLoading(false)
@@ -89,9 +103,31 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
       }
     )
 
+    const unsubBusiness = subscribeToDocument<BusinessSettings>(
+      COLLECTIONS.SETTINGS,
+      'business',
+      (bizData) => {
+        if (mounted && bizData) {
+          const bizLogo = sanitizeBrandingLogoUrl(bizData.logoURL, bizData.logoStoragePath)
+          if (bizLogo) {
+            setBranding((prev) => {
+              if (prev.logoUrl) return prev
+              return {
+                ...prev,
+                logoUrl: bizLogo,
+                logoStoragePath: bizData.logoStoragePath || prev.logoStoragePath || '',
+              }
+            })
+          }
+          setLoading(false)
+        }
+      }
+    )
+
     return () => {
       mounted = false
-      unsubscribe()
+      unsubBranding()
+      unsubBusiness()
     }
   }, [])
 

@@ -138,6 +138,10 @@ export async function downloadInvoicePdf(
     }
 
     const { hydrated, broken } = await prefetchImagesAsDataUrls(element)
+    const sourceImgDims = Array.from(element.querySelectorAll('img')).map((img) => {
+      const r = img.getBoundingClientRect()
+      return { width: r.width, height: r.height }
+    })
 
     let atomicBlocks: AtomicBlock[] = []
     let tableMeasure: TableMeasure | null = null
@@ -180,12 +184,19 @@ export async function downloadInvoicePdf(
         clonedEl.style.boxShadow = 'none'
         clonedEl.style.border = 'none'
 
-        // Inject pre-hydrated inline data URLs for Firebase Storage / remote logos
+        // Inject pre-hydrated inline data URLs for cloud storage / SVG / remote logos
         const clonedImgs = Array.from(clonedEl.querySelectorAll('img'))
         clonedImgs.forEach((cImg, idx) => {
           const dataUrl = hydrated.get(idx)
           if (dataUrl) {
             cImg.removeAttribute('crossorigin')
+            if (dataUrl.startsWith('data:image/svg+xml')) {
+              const dims = sourceImgDims[idx]
+              if (dims && dims.width > 0 && dims.height > 0) {
+                cImg.setAttribute('width', String(Math.round(dims.width)))
+                cImg.setAttribute('height', String(Math.round(dims.height)))
+              }
+            }
             cImg.src = dataUrl
           } else if (broken.has(idx)) {
             cImg.style.display = 'none'
@@ -450,14 +461,16 @@ export function printInvoiceDocument(
         size: A4 portrait;
         margin: 10mm;
       }
+      html, body, .invoice-paper-sheet, .invoice-paper-sheet * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
       html, body {
         background: #ffffff !important;
-        color: #0F172A !important;
+        color: #1E1F1D !important;
         color-scheme: light !important;
         margin: 0 !important;
         padding: 0 !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
       }
       .no-print, [data-html2canvas-ignore="true"] {
         display: none !important;

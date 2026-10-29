@@ -189,6 +189,7 @@ export type InvoiceStatus =
   | 'Paid'
   | 'Overdue'
   | 'Cancelled'
+  | 'Refunded'
 
 export interface InvoiceBusinessInfo {
   name: string

@@ -16,7 +16,12 @@ export interface UploadProgressCallback {
 
 export type BrandingFieldKey = 'logo' | 'logoLight' | 'favicon'
 
-export const ALLOWED_BRANDING_LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const
+export const ALLOWED_BRANDING_LOGO_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/svg+xml',
+] as const
 export const ALLOWED_FAVICON_TYPES = [
   ...ALLOWED_BRANDING_LOGO_TYPES,
   'image/x-icon',
@@ -57,8 +62,8 @@ export function validateBrandingImageFile(
 
   if (!allowedList.includes(normalizedType)) {
     return fieldKey === 'favicon'
-      ? 'Unsupported file type. Please upload a PNG, JPEG, WebP, or ICO image.'
-      : 'Unsupported file type. Please upload a PNG, JPEG, or WebP image.'
+      ? 'Unsupported file type. Please upload a PNG, JPEG, WebP, SVG, or ICO image.'
+      : 'Unsupported file type. Please upload a PNG, JPEG, WebP, or SVG image.'
   }
 
   if (file.size <= 0) {
@@ -127,6 +132,7 @@ export function startBrandingLogoUpload(options: StartBrandingUploadOptions): {
       'image/png': 'png',
       'image/jpeg': 'jpg',
       'image/webp': 'webp',
+      'image/svg+xml': 'svg',
       'image/x-icon': 'ico',
       'image/vnd.microsoft.icon': 'ico',
     }

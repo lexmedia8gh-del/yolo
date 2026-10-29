@@ -307,10 +307,15 @@
 .invoice-paper-sheet {
   font-family: var(--font-invoice-sans);
   background-color: #FFFFFF !important;
-  color: #0F172A !important;
+  color: #1E1F1D !important;
   color-scheme: light;
-  -webkit-print-color-adjust: exact;
-  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
+}
+
+.invoice-paper-sheet * {
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
 }
 
 .invoice-mono {
@@ -327,69 +332,78 @@
   background-color: #FFFFFF !important;
 }
 
-.dark .invoice-paper-sheet .bg-slate-50,
-.dark .invoice-paper-sheet .bg-gray-50 {
-  background-color: #F8FAFC !important;
-}
-
-.dark .invoice-paper-sheet .bg-slate-50\/80 {
-  background-color: rgba(248, 250, 252, 0.85) !important;
-}
-
-.dark .invoice-paper-sheet .bg-slate-100,
-.dark .invoice-paper-sheet .bg-gray-100 {
-  background-color: #F1F5F9 !important;
-}
-
 .dark .invoice-paper-sheet h1,
 .dark .invoice-paper-sheet h2,
 .dark .invoice-paper-sheet h3,
 .dark .invoice-paper-sheet h4,
 .dark .invoice-paper-sheet .text-slate-900,
 .dark .invoice-paper-sheet .text-gray-900 {
-  color: #0F172A !important;
+  color: #1E1F1D !important;
 }
 
-.dark .invoice-paper-sheet .text-slate-800,
-.dark .invoice-paper-sheet .text-gray-800 {
-  color: #1E293B !important;
+.invoice-paper-sheet [data-invoice-table="true"],
+.invoice-paper-sheet [data-invoice-table="true"] th,
+.invoice-paper-sheet [data-invoice-table="true"] td,
+.dark .invoice-paper-sheet [data-invoice-table="true"] th,
+.dark .invoice-paper-sheet [data-invoice-table="true"] td {
+  border: none !important;
+  background-color: transparent !important;
 }
 
-.dark .invoice-paper-sheet .text-slate-700,
-.dark .invoice-paper-sheet .text-gray-700 {
-  color: #334155 !important;
+.invoice-paper-sheet .invoice-terms-panel,
+.dark .invoice-paper-sheet .invoice-terms-panel {
+  background-color: var(--inv-brand-blue) !important;
+  color: var(--inv-brand-blue-fg) !important;
 }
 
-.dark .invoice-paper-sheet .text-slate-600,
-.dark .invoice-paper-sheet .text-gray-600 {
-  color: #475569 !important;
+.invoice-paper-sheet .invoice-terms-panel *,
+.dark .invoice-paper-sheet .invoice-terms-panel * {
+  color: var(--inv-brand-blue-fg) !important;
 }
 
-.dark .invoice-paper-sheet .text-slate-500,
-.dark .invoice-paper-sheet .text-gray-500 {
-  color: #64748B !important;
+.invoice-paper-sheet .invoice-row-dark,
+.dark .invoice-paper-sheet .invoice-row-dark {
+  background-color: var(--inv-dark) !important;
+  color: var(--inv-dark-fg) !important;
 }
 
-.dark .invoice-paper-sheet .text-slate-400,
-.dark .invoice-paper-sheet .text-gray-400 {
-  color: #94A3B8 !important;
+.invoice-paper-sheet .invoice-row-dark *,
+.dark .invoice-paper-sheet .invoice-row-dark * {
+  color: var(--inv-dark-fg) !important;
 }
 
-.dark .invoice-paper-sheet th {
-  background-color: transparent;
-  color: #475569;
+.invoice-paper-sheet .invoice-row-light,
+.dark .invoice-paper-sheet .invoice-row-light {
+  background-color: #FFFFFF !important;
+  color: #1E1F1D !important;
 }
 
-.dark .invoice-paper-sheet td,
-.dark .invoice-paper-sheet th,
-.dark .invoice-paper-sheet .border-slate-200,
-.dark .invoice-paper-sheet .border-gray-200 {
-  border-color: #E2E8F0 !important;
+.invoice-paper-sheet .invoice-summary-wing,
+.dark .invoice-paper-sheet .invoice-summary-wing {
+  background-color: var(--inv-brand-blue) !important;
+  color: var(--inv-brand-blue-fg) !important;
 }
 
-.dark .invoice-paper-sheet .border-slate-100,
-.dark .invoice-paper-sheet .border-gray-100 {
-  border-color: #F1F5F9 !important;
+.invoice-paper-sheet .invoice-summary-wing *,
+.dark .invoice-paper-sheet .invoice-summary-wing * {
+  color: var(--inv-brand-blue-fg) !important;
+}
+
+.invoice-paper-sheet .invoice-summary-total,
+.dark .invoice-paper-sheet .invoice-summary-total {
+  background-color: var(--inv-highlight) !important;
+  color: var(--inv-highlight-fg) !important;
+}
+
+.invoice-paper-sheet .invoice-summary-total *,
+.dark .invoice-paper-sheet .invoice-summary-total * {
+  color: var(--inv-highlight-fg) !important;
+}
+
+.invoice-paper-sheet .invoice-dark-badge,
+.dark .invoice-paper-sheet .invoice-dark-badge {
+  background-color: var(--inv-dark) !important;
+  color: var(--inv-dark-fg) !important;
 }
 
 /* ─── Print ──────────────────────────────────────────────────── */
@@ -406,7 +420,7 @@
   html,
   body {
     background: #FFFFFF !important;
-    color: #0F172A !important;
+    color: #1E1F1D !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
@@ -419,6 +433,8 @@
     border: none !important;
     border-radius: 0 !important;
     margin: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   .invoice-paper-sheet thead {

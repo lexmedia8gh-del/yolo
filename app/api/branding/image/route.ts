@@ -62,6 +62,18 @@ function isAllowedLegacyFirebaseBrandingUrl(rawUrl: string, allowedBuckets: stri
   }
 }
 
+function buildImageResponseHeaders(contentType: string, immutable = false): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': contentType,
+    'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
+    'X-Content-Type-Options': 'nosniff',
+  }
+  if (contentType.toLowerCase().includes('svg')) {
+    headers['Content-Security-Policy'] = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+  }
+  return headers
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const targetUrl = searchParams.get('url') || ''
@@ -74,11 +86,7 @@ export async function GET(req: NextRequest) {
       if (asset) {
         return new NextResponse(new Uint8Array(asset.buffer), {
           status: 200,
-          headers: {
-            'Content-Type': asset.contentType,
-            'Cache-Control': 'public, max-age=31536000, immutable',
-            'X-Content-Type-Options': 'nosniff',
-          },
+          headers: buildImageResponseHeaders(asset.contentType, true),
         })
       }
     }
@@ -91,11 +99,7 @@ export async function GET(req: NextRequest) {
         if (asset) {
           return new NextResponse(new Uint8Array(asset.buffer), {
             status: 200,
-            headers: {
-              'Content-Type': asset.contentType,
-              'Cache-Control': 'public, max-age=31536000, immutable',
-              'X-Content-Type-Options': 'nosniff',
-            },
+            headers: buildImageResponseHeaders(asset.contentType, true),
           })
         }
 
@@ -106,11 +110,7 @@ export async function GET(req: NextRequest) {
           const bytes = Buffer.from(await upstream.arrayBuffer())
           return new NextResponse(new Uint8Array(bytes), {
             status: 200,
-            headers: {
-              'Content-Type': contentType,
-              'Cache-Control': 'public, max-age=3600',
-              'X-Content-Type-Options': 'nosniff',
-            },
+            headers: buildImageResponseHeaders(contentType, false),
           })
         }
       }
@@ -124,11 +124,7 @@ export async function GET(req: NextRequest) {
           const bytes = Buffer.from(await upstream.arrayBuffer())
           return new NextResponse(new Uint8Array(bytes), {
             status: 200,
-            headers: {
-              'Content-Type': contentType,
-              'Cache-Control': 'public, max-age=3600',
-              'X-Content-Type-Options': 'nosniff',
-            },
+            headers: buildImageResponseHeaders(contentType, false),
           })
         }
       }

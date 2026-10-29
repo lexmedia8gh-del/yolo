@@ -5,8 +5,8 @@ import { COLLECTIONS } from '@/lib/firebase/firestore'
 export const dynamic = 'force-dynamic'
 
 const DEFAULT_BRANDING = {
-  businessName: 'LEXMEDIA.GH',
-  shortName: 'LM',
+  businessName: 'lexmedia.gh',
+  shortName: 'lex',
   tagline: 'Professional Digital Services',
   logoUrl: '',
   logoStoragePath: '',

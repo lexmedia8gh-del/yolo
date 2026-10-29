@@ -11,6 +11,7 @@ import {
   Lock,
   Palette,
   RotateCcw,
+  Layers,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card } from '@/components/ui/Card'
@@ -40,21 +41,21 @@ const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
 ]
 
 const DEFAULT_SETTINGS: Partial<BusinessSettings> = {
-  businessName: 'LEXMEDIA.GH',
+  businessName: 'lexmedia.gh',
   currency: 'GHS',
   currencySymbol: 'GH₵',
   invoicePrefix: 'LM-INV',
   invoiceStartNumber: 1,
   defaultTaxRate: 0,
   defaultWhatsAppMessage:
-    'Hello {{clientName}}, your LEXMEDIA.GH package is ready. Please review the details and complete your payment here: {{link}}',
+    'Hello {{clientName}}, your lexmedia.gh package is ready. Please review the details and complete your payment here: {{link}}',
   defaultWelcomeSmsTemplate:
-    'Hello {clientName}, welcome to LEXMEDIA.GH. We are happy to have you as our client.',
+    'Hello {clientName}, welcome to lexmedia.gh. We are happy to have you as our client.',
 }
 
 const DEFAULT_BRANDING: BrandingSettings = {
-  businessName: 'LEXMEDIA.GH',
-  shortName: 'LM',
+  businessName: 'lexmedia.gh',
+  shortName: 'lex',
   tagline: 'Professional Digital Services',
   logoUrl: '',
   logoStoragePath: '',
@@ -397,7 +398,7 @@ export default function SettingsPage() {
                       <div>
                         <h3 className="text-base font-semibold text-gray-900">Invoice Brand Logo</h3>
                         <p className="text-xs text-gray-500 mt-0.5">
-                          Displayed in the invoice header, print preview, and downloaded PDFs. Stored persistently in Firebase Storage.
+                          Displayed in the invoice header, print preview, and downloaded PDFs. Stored persistently in cloud storage.
                         </p>
                       </div>
                       <button
@@ -502,7 +503,7 @@ export default function SettingsPage() {
 
                   <Card>
                     <h3 className="text-base font-semibold text-gray-900 mb-1">Logo & Favicon</h3>
-                    <p className="text-sm text-muted mb-5">Upload your brand logos to Firebase Storage. Saved immediately and applied across invoices and client portals.</p>
+                    <p className="text-sm text-muted mb-5">Upload your brand logos to cloud storage. Saved immediately and applied across homepage, invoices, and client portals.</p>
                     <div className="space-y-6">
                       <LogoUploadField
                         label="Main Brand & Invoice Logo (light backgrounds)"
@@ -590,10 +591,10 @@ export default function SettingsPage() {
                     <div className="rounded-2xl p-6 space-y-4 border" style={{ backgroundColor: branding.backgroundColor, borderColor: branding.primaryColor + '20' }}>
                       <div className="flex items-center gap-3">
                         {branding.logoUrl ? (
-                          <img src={branding.logoUrl} alt="Logo" referrerPolicy="no-referrer" style={{ height: 40, objectFit: 'contain' }} />
+                          <img src={branding.logoUrl} alt="Logo" referrerPolicy="no-referrer" className="h-10 w-auto max-w-[120px] object-contain" />
                         ) : (
-                          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold" style={{ backgroundColor: branding.buttonColor, color: branding.buttonTextColor }}>
-                            {(branding.shortName || 'LM').slice(0, 2).toUpperCase()}
+                          <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-900 text-white">
+                            <Layers size={18} />
                           </div>
                         )}
                         <div>

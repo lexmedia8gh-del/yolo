@@ -1,7 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, Suspense } from 'react'
-import Image from 'next/image'
+import React, { useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -21,8 +20,7 @@ import {
 import { signInWithEmail, signInWithGoogle, sendPasswordReset, setSessionCookie } from '@/lib/firebase/auth'
 import { getFirebaseErrorMessage } from '@/lib/utils'
 import { PageLoader } from '@/components/ui/Spinner'
-import { getDocument, COLLECTIONS } from '@/lib/firebase/firestore'
-import type { BrandingSettings } from '@/lib/types'
+import { BrandLogoLockup } from '@/components/branding/BrandLogoLockup'
 import toast from 'react-hot-toast'
 
 // Form validation schema
@@ -34,23 +32,6 @@ const loginSchema = z.object({
 
 type LoginFormData = z.infer<typeof loginSchema>
 
-/**
- * Geometric LexMedia Folded Cube / Emblem
- */
-function LexMediaEmblem({ className = 'w-6 h-6' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
-      <path d="M18 4L30 11V25L18 32L6 25V11L18 4Z" fill="#1D4ED8" fillOpacity="0.4" />
-      <path d="M18 4L30 11L18 18L6 11L18 4Z" fill="#60A5FA" />
-      <path d="M6 11L18 18V32L6 25V11Z" fill="#2563EB" />
-      <path d="M30 11L18 18V32L30 25V11Z" fill="#1D4ED8" />
-      <path d="M18 11L24 14.5L18 18L12 14.5L18 11Z" fill="#FFFFFF" fillOpacity="0.9" />
-      <path d="M12 17.5L18 21V27L12 23.5V17.5Z" fill="#FFFFFF" fillOpacity="0.85" />
-      <path d="M24 17.5L18 21V27L24 23.5V17.5Z" fill="#93C5FD" />
-    </svg>
-  )
-}
-
 function LoginFormContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -59,28 +40,12 @@ function LoginFormContent() {
   const [showPassword, setShowPassword] = useState(false)
   const [authError, setAuthError] = useState('')
   const [isGoogleLoading, setIsGoogleLoading] = useState(false)
-  const [branding, setBranding] = useState<BrandingSettings | null>(null)
 
   // Forgot Password States
   const [isResetMode, setIsResetMode] = useState(false)
   const [resetEmail, setResetEmail] = useState('')
   const [resetSuccess, setResetSuccess] = useState(false)
   const [isResetLoading, setIsResetLoading] = useState(false)
-
-  // Fetch Central Branding Settings
-  useEffect(() => {
-    async function loadBranding() {
-      try {
-        const doc = await getDocument<BrandingSettings>(COLLECTIONS.SETTINGS, 'branding')
-        if (doc) {
-          setBranding(doc)
-        }
-      } catch (err) {
-        console.warn('Failed to load dynamic branding:', err)
-      }
-    }
-    loadBranding()
-  }, [])
 
   const {
     register,
@@ -155,50 +120,21 @@ function LoginFormContent() {
     }
   }
 
-  const businessName = branding?.businessName || 'LEXMEDIA.GH'
-  const logoImage = branding?.logoLightUrl || branding?.logoUrl
-
   return (
     <main className="min-h-screen w-full bg-[#06080E] text-slate-100 flex flex-col justify-between items-center p-4 sm:p-6 lg:p-8 relative overflow-hidden selection:bg-blue-600 selection:text-white">
       {/* Subtle Background Lighting & Radial Glows */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
         <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full bg-blue-600/15 blur-[140px]" />
         <div className="absolute -bottom-40 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full bg-indigo-600/10 blur-[130px]" />
-        <div
-          className="absolute inset-0 opacity-[0.025]"
-          style={{
-            backgroundImage: 'radial-gradient(circle at 1px 1px, #ffffff 1px, transparent 0)',
-            backgroundSize: '24px 24px',
-          }}
-        />
+        <div className="absolute inset-0 opacity-[0.025] bg-[radial-gradient(circle_at_1px_1px,#ffffff_1px,transparent_0)] [background-size:24px_24px]" />
       </div>
 
       {/* Top Header Bar */}
       <header className="w-full max-w-md pt-2 pb-4 flex items-center justify-between z-10">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-slate-900/90 border border-slate-800 flex items-center justify-center p-1.5 shadow-sm">
-            {logoImage ? (
-              <Image
-                src={logoImage}
-                alt={businessName}
-                width={20}
-                height={20}
-                unoptimized
-                className="h-5 w-auto object-contain"
-              />
-            ) : (
-              <LexMediaEmblem className="w-5 h-5" />
-            )}
-          </div>
-          <span className="font-semibold text-xs tracking-wider uppercase text-slate-400">
-            {businessName}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2 text-[11px] font-medium text-slate-500">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-          <span>System Online</span>
-        </div>
+        <BrandLogoLockup subtitle="Ctrl Room" variant="dark" />
+        <span className="text-[11px] font-medium text-slate-500 whitespace-nowrap shrink-0">
+          Operations Portal
+        </span>
       </header>
 
       {/* Main Centered Login Card */}
@@ -218,10 +154,9 @@ function LoginFormContent() {
 
             {/* Branding Header Inside Card */}
             <div className="text-center space-y-1.5 mb-6">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-950/50 border border-blue-800/30 text-blue-400 text-[11px] font-semibold tracking-wider uppercase mb-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-                <span>CTRL ROOM</span>
-              </div>
+              <p className="text-[11px] font-semibold tracking-wider uppercase text-blue-400 mb-1">
+                Ctrl Room
+              </p>
 
               <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
                 {isResetMode ? 'Reset Password' : 'Welcome back'}
@@ -515,7 +450,7 @@ function LoginFormContent() {
             {/* Private Security Footnote inside card */}
             <div className="mt-6 pt-4 border-t border-slate-800/60 flex items-center justify-center gap-1.5 text-center text-[11px] text-slate-500 font-normal">
               <ShieldCheck size={14} className="text-blue-500/80 shrink-0" />
-              <span>Authorized LEXMEDIA.GH access only</span>
+              <span>Authorized lexmedia.gh access only</span>
             </div>
           </div>
         </motion.div>
@@ -523,7 +458,7 @@ function LoginFormContent() {
 
       {/* Footer Security Message */}
       <footer className="w-full max-w-md pb-3 pt-2 text-center z-10 flex flex-col items-center gap-1 text-[11px] text-slate-500 font-normal">
-        <span>LEXMEDIA.GH • Ctrl Room</span>
+        <span>lexmedia.gh • Ctrl Room</span>
         <span className="text-slate-600">© {new Date().getFullYear()} All rights reserved.</span>
       </footer>
     </main>

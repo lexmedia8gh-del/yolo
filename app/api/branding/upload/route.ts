@@ -19,6 +19,7 @@ const ALLOWED_LOGO_TYPES: Record<string, string> = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
+  'image/svg+xml': 'svg',
 }
 
 const ALLOWED_FAVICON_TYPES: Record<string, string> = {
@@ -75,6 +76,17 @@ function verifyMagicBytes(buffer: Buffer, mimeType: string): boolean {
     )
   }
 
+  if (mimeType === 'image/svg+xml') {
+    const sample = buffer.subarray(0, Math.min(buffer.length, 65536)).toString('utf8')
+    const hasSvgRoot = /<svg[\s>]/i.test(sample)
+    const hasUnsafeMarkup =
+      /<script[\s>]/i.test(sample) ||
+      /<foreignobject[\s>]/i.test(sample) ||
+      /javascript:/i.test(sample) ||
+      /\son[a-z]+\s*=/i.test(sample)
+    return hasSvgRoot && !hasUnsafeMarkup
+  }
+
   if (mimeType === 'image/x-icon' || mimeType === 'image/vnd.microsoft.icon') {
     return (
       buffer[0] === 0x00 &&
@@ -116,8 +128,8 @@ export async function POST(req: NextRequest) {
         {
           error:
             fieldKey === 'favicon'
-              ? 'Unsupported file type. Please upload a PNG, JPEG, WebP, or ICO image.'
-              : 'Unsupported file type. Please upload a PNG, JPEG, or WebP image.',
+              ? 'Unsupported file type. Please upload a PNG, JPEG, WebP, SVG, or ICO image.'
+              : 'Unsupported file type. Please upload a PNG, JPEG, WebP, or SVG image.',
         },
         { status: 400 }
       )
@@ -140,7 +152,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'Invalid or corrupted image file. Please upload a valid PNG, JPEG, or WebP image.',
+            'Invalid or unsafe image file. Please upload a valid PNG, JPEG, WebP, or SVG image.',
         },
         { status: 400 }
       )

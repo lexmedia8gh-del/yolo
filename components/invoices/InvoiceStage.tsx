@@ -86,10 +86,10 @@ export function InvoiceStage({
   return (
     <div
       ref={viewportRef}
-      className={`bg-slate-200/70 dark:bg-slate-900/90 border border-slate-200/90 dark:border-slate-800 rounded-xl p-3 sm:p-6 md:p-8 max-h-[76vh] overflow-y-auto overflow-x-hidden flex justify-center ${className}`}
+      className={`bg-[#141518] border border-[#26282E] rounded-2xl p-3 sm:p-6 md:p-9 max-h-[78vh] overflow-y-auto overflow-x-hidden flex justify-center ${className}`}
     >
       {mode === 'mobile' ? (
-        <div className="w-full max-w-[400px] rounded-2xl overflow-hidden border-[6px] border-slate-900 shadow-xl bg-white self-start">
+        <div className="w-full max-w-[400px] rounded-[32px] overflow-hidden border-[5px] border-[#26282E] shadow-2xl bg-white self-start">
           {children}
         </div>
       ) : (

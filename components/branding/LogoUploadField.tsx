@@ -63,13 +63,13 @@ export function LogoUploadField({
 
   const acceptAttr =
     fieldKey === 'favicon'
-      ? 'image/png,image/jpeg,image/webp,image/x-icon,image/vnd.microsoft.icon'
-      : 'image/png,image/jpeg,image/webp'
+      ? 'image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon,image/vnd.microsoft.icon'
+      : 'image/png,image/jpeg,image/webp,image/svg+xml'
 
   const formatHint =
     fieldKey === 'favicon'
-      ? `PNG, JPEG, WebP, or ICO · Max ${maxMB}MB`
-      : `PNG, JPEG, or WebP · Max ${maxMB}MB`
+      ? `PNG, JPEG, WebP, SVG, or ICO · Max ${maxMB}MB`
+      : `PNG, JPEG, WebP, or SVG · Max ${maxMB}MB`
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
