@@ -1,3 +1,0 @@
-[install]
-backend = "copyfile"
-network-concurrency = 1

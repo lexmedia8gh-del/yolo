@@ -130,6 +130,7 @@ export async function GET(
         token,
         deliveryAccessToken: jobData.deliveryAccessToken || jobId,
         paymentToken: jobData.paymentToken || (resolved as any).clientLink?.token || token,
+        paymentRequestAmount: (resolved as any).clientLink?.amount !== undefined ? Number((resolved as any).clientLink.amount) : undefined,
       },
       files,
     })

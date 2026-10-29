@@ -19,6 +19,7 @@ export async function GET(
     let linkData: any = null
     let linkDocId = ''
     let invoiceData: any = null
+    let quickJobData: any = null
 
     // 1. Try querying clientLinks via Admin DB if available
     try {
@@ -121,6 +122,13 @@ export async function GET(
           invoiceData = { id: invSnap.id, ...invSnap.data() }
         }
       }
+
+      if (linkData?.quickJobId) {
+        const qjSnap = await adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(linkData.quickJobId).get()
+        if (qjSnap.exists) {
+          quickJobData = { id: qjSnap.id, ...qjSnap.data() }
+        }
+      }
     } catch {
       // Admin DB not configured; will fallback to client SDK
     }
@@ -154,6 +162,17 @@ export async function GET(
           const invSnap = await getDoc(invRef)
           if (invSnap.exists()) {
             invoiceData = { id: invSnap.id, ...invSnap.data() }
+          }
+        } catch {}
+      }
+
+      // Check quickJob if available
+      if (linkData?.quickJobId) {
+        try {
+          const qjRef = doc(db, COLLECTIONS.QUICK_JOBS, linkData.quickJobId)
+          const qjSnap = await getDoc(qjRef)
+          if (qjSnap.exists()) {
+            quickJobData = { id: qjSnap.id, ...qjSnap.data() }
           }
         } catch {}
       }
@@ -239,15 +258,17 @@ export async function GET(
       link: {
         id: linkDocId,
         token: linkData.token || linkDocId,
-        amount: Number(linkData.amount || invoiceData?.balanceDue || invoiceData?.total || 0),
-        currency: linkData.currency || invoiceData?.currency || 'GHS',
+        amount: Number(linkData.amount || (quickJobData ? quickJobData.outstandingBalance : (invoiceData?.balanceDue || invoiceData?.total || 0))),
+        currency: linkData.currency || quickJobData?.currency || invoiceData?.currency || 'GHS',
         title:
           linkData.title ||
-          (invoiceData?.invoiceNumber
+          (quickJobData?.jobDescription
+            ? `Payment for Quick Job: ${quickJobData.jobDescription}`
+            : invoiceData?.invoiceNumber
             ? `Invoice ${invoiceData.invoiceNumber} Payment`
             : `Payment from ${linkData.clientName || 'Client'}`),
-        clientName: linkData.clientName || invoiceData?.clientName || 'Client',
-        projectName: linkData.projectName || invoiceData?.projectName || '',
+        clientName: linkData.clientName || quickJobData?.clientName || invoiceData?.clientName || 'Client',
+        projectName: linkData.projectName || quickJobData?.jobDescription || invoiceData?.projectName || '',
         invoiceNumber: linkData.invoiceNumber || invoiceData?.invoiceNumber || '',
         status: isAlreadyPaid ? 'Paid' : (linkData.status || 'Pending Payment'),
         paymentStatus: isAlreadyPaid ? 'Paid' : (linkData.paymentStatus || 'Pending Payment'),
@@ -262,6 +283,18 @@ export async function GET(
             status: invoiceData.status,
             total: invoiceData.total,
             balanceDue: invoiceData.balanceDue,
+          }
+        : null,
+      quickJob: quickJobData
+        ? {
+            id: quickJobData.id,
+            jobDescription: quickJobData.jobDescription,
+            originalAgreedPrice: Number(quickJobData.originalAgreedPrice) || 0,
+            amountPaid: Number(quickJobData.amountPaid) || 0,
+            outstandingBalance: Number(quickJobData.outstandingBalance) || 0,
+            currency: quickJobData.currency || 'GHS',
+            status: quickJobData.status,
+            paymentStatus: quickJobData.paymentStatus,
           }
         : null,
       isAlreadyPaid,

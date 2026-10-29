@@ -40,6 +40,7 @@ interface QuickJobDTO {
   token: string
   deliveryAccessToken?: string
   paymentToken?: string
+  paymentRequestAmount?: number
 }
 
 interface FileDTO {
@@ -139,7 +140,10 @@ function QuickJobPortalContent() {
 
     try {
       const payToken = job.paymentToken || job.token || token
-      const amountToPay = job.outstandingBalance > 0 ? job.outstandingBalance : job.originalAgreedPrice
+      const amountToPay =
+        job.paymentRequestAmount && job.paymentRequestAmount > 0 && job.paymentRequestAmount <= job.outstandingBalance
+          ? job.paymentRequestAmount
+          : (job.outstandingBalance > 0 ? job.outstandingBalance : job.originalAgreedPrice)
 
       const res = await fetch('/api/paystack/initialize', {
         method: 'POST',
@@ -396,43 +400,77 @@ function QuickJobPortalContent() {
           </div>
 
           {/* Payment CTA if Unpaid */}
-          {!job.isPaid && (
-            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-3">
-              <div className="flex items-start gap-3">
-                <Lock size={18} className="text-amber-400 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wide">
-                    Payment Required to Unlock Deliverables & Uploads
-                  </h4>
-                  <p className="text-xs text-amber-200/80 leading-relaxed">
-                    Please complete the outstanding balance of{' '}
-                    <strong className="font-mono font-bold text-white">
-                      {formatCurrency(job.outstandingBalance, job.currency)}
-                    </strong>{' '}
-                    via Paystack to unlock the file upload and delivery section.
-                  </p>
-                </div>
-              </div>
+          {!job.isPaid && (() => {
+            const amountToCollectNow =
+              job.paymentRequestAmount && job.paymentRequestAmount > 0 && job.paymentRequestAmount <= job.outstandingBalance
+                ? job.paymentRequestAmount
+                : (job.outstandingBalance > 0 ? job.outstandingBalance : job.originalAgreedPrice)
+            const remainingAfterPayment = Math.max(0, job.outstandingBalance - amountToCollectNow)
 
-              <button
-                onClick={handlePayNow}
-                disabled={isProcessingPayment}
-                className="w-full py-3.5 px-5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                {isProcessingPayment ? (
-                  <>
-                    <RefreshCw size={16} className="animate-spin" />
-                    <span>Connecting to Paystack...</span>
-                  </>
-                ) : (
-                  <>
-                    <CreditCard size={18} />
-                    <span>Pay {formatCurrency(job.outstandingBalance, job.currency)} with Paystack</span>
-                  </>
-                )}
-              </button>
-            </div>
-          )}
+            return (
+              <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-4">
+                <div className="flex items-start gap-3">
+                  <Lock size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wide">
+                      Payment Required to Unlock Deliverables & Uploads
+                    </h4>
+                    <p className="text-xs text-amber-200/80 leading-relaxed">
+                      Review the payment details below and proceed with Paystack. Deliverable files will be immediately unlocked once verified.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Financial Breakdown Table */}
+                <div className="bg-slate-950/80 rounded-xl p-4 border border-slate-800 text-xs space-y-2.5">
+                  <div className="flex items-center justify-between text-slate-400">
+                    <span>Original Job Total:</span>
+                    <span className="font-mono font-bold text-white">
+                      {formatCurrency(job.originalAgreedPrice, job.currency)}
+                    </span>
+                  </div>
+                  {job.amountPaid > 0 && (
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span>Previously Paid:</span>
+                      <span className="font-mono font-semibold text-emerald-400">
+                        {formatCurrency(job.amountPaid, job.currency)}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between text-amber-400 font-bold border-t border-slate-800 pt-2 text-sm">
+                    <span>Amount Due for This Payment:</span>
+                    <span className="font-mono text-base">
+                      {formatCurrency(amountToCollectNow, job.currency)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-400 pt-1 border-t border-slate-800">
+                    <span>Remaining Balance After Successful Payment:</span>
+                    <span className="font-mono font-bold text-slate-200">
+                      {formatCurrency(remainingAfterPayment, job.currency)}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handlePayNow}
+                  disabled={isProcessingPayment}
+                  className="w-full py-3.5 px-5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isProcessingPayment ? (
+                    <>
+                      <RefreshCw size={16} className="animate-spin" />
+                      <span>Connecting to Paystack...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard size={18} />
+                      <span>Proceed to Pay {formatCurrency(amountToCollectNow, job.currency)}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )
+          })()}
         </div>
 
         {/* ── Section 2: Deliverables Upload Section (Locked if Unpaid) ── */}

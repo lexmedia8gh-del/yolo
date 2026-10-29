@@ -8,6 +8,9 @@ import {
   ExternalLink,
   DollarSign,
   Check,
+  Share2,
+  AlertCircle,
+  Plus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -42,10 +45,15 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
   const [currentJob, setCurrentJob] = useState<QuickJob>(initialJob)
   const [isLoadingDetails, setIsLoadingDetails] = useState(true)
 
-  // Payment Link State
+  // Payment Links State
+  const [paymentLinks, setPaymentLinks] = useState<ClientLink[]>([])
   const [isGeneratingLink, setIsGeneratingLink] = useState(false)
-  const [paymentLink, setPaymentLink] = useState<string | null>(null)
-  const [copiedPayLink, setCopiedPayLink] = useState(false)
+  const [copiedToken, setCopiedToken] = useState<string | null>(null)
+
+  // Editable Amount to Collect State
+  const [presetOption, setPresetOption] = useState<'full' | 'half' | 'custom'>('full')
+  const [amountToCollect, setAmountToCollect] = useState<string>('')
+  const [showNewLinkForm, setShowNewLinkForm] = useState(false)
 
   // Manual Offline Payment Modal
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
@@ -79,42 +87,85 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
   }, [initialJob.id])
 
   // 2. Fetch linked ClientLink records
-  useEffect(() => {
-    let isMounted = true
-    setIsLoadingDetails(true)
-
-    const fetchAssociatedRecords = async () => {
-      try {
-        // Fetch Payment Link
-        const links = await getDocuments<ClientLink>(COLLECTIONS.CLIENT_LINKS, [
-          where('quickJobId', '==', initialJob.id),
-        ])
-        if (isMounted && links && links.length > 0) {
-          setPaymentLink(getPaymentLink(links[0].token))
-        }
-      } catch (err) {
-        console.error('Error fetching quick job payment link record:', err)
-      } finally {
-        if (isMounted) {
-          setIsLoadingDetails(false)
-        }
+  const fetchAssociatedRecords = async () => {
+    try {
+      const links = await getDocuments<ClientLink>(COLLECTIONS.CLIENT_LINKS, [
+        where('quickJobId', '==', initialJob.id),
+      ])
+      if (links) {
+        const sorted = (links || []).sort((a: any, b: any) => {
+          const tA = new Date(a.createdAt || 0).getTime()
+          const tB = new Date(b.createdAt || 0).getTime()
+          return tB - tA
+        })
+        setPaymentLinks(sorted)
       }
+    } catch (err) {
+      console.error('Error fetching quick job payment link record:', err)
+    } finally {
+      setIsLoadingDetails(false)
     }
+  }
 
+  useEffect(() => {
     fetchAssociatedRecords()
-
-    return () => {
-      isMounted = false
-    }
   }, [initialJob.id])
 
-  // Calculate payment state
+  // Outstanding Balance and Payment State
+  const originalTotal = Number(currentJob.originalAgreedPrice || 0)
+  const amountAlreadyPaid = Number(currentJob.amountPaid || 0)
+  const outstandingBalance = currentJob.outstandingBalance !== undefined
+    ? Number(currentJob.outstandingBalance)
+    : Math.max(0, originalTotal - amountAlreadyPaid)
+
   const isPaid =
     currentJob.paymentStatus === 'Paid' ||
-    (Number(currentJob.outstandingBalance) <= 0 && Number(currentJob.amountPaid) >= Number(currentJob.originalAgreedPrice))
+    (outstandingBalance <= 0 && amountAlreadyPaid >= originalTotal)
 
-  // Generate Payment Link
+  // Live amount calculations
+  const parsedAmount = parseFloat(amountToCollect) || 0
+  const remainingBalanceAfterThisPayment = Math.max(0, outstandingBalance - parsedAmount)
+  const isAmountOverBalance = parsedAmount > outstandingBalance
+  const isAmountZeroOrNegative = parsedAmount <= 0
+  const isAmountValid = !isAmountOverBalance && !isAmountZeroOrNegative && !isNaN(parsedAmount)
+
+  // Sync initial and updated amounts with presets
+  useEffect(() => {
+    if (presetOption === 'full') {
+      setAmountToCollect(outstandingBalance > 0 ? outstandingBalance.toString() : '0')
+    } else if (presetOption === 'half') {
+      const half = Math.round((outstandingBalance * 0.5) * 100) / 100
+      setAmountToCollect(half > 0 ? half.toString() : '0')
+    }
+  }, [outstandingBalance, presetOption])
+
+  // Preset button selection
+  const handleSelectPreset = (option: 'full' | 'half' | 'custom') => {
+    setPresetOption(option)
+    if (option === 'full') {
+      setAmountToCollect(outstandingBalance > 0 ? outstandingBalance.toString() : '0')
+    } else if (option === 'half') {
+      const half = Math.round((outstandingBalance * 0.5) * 100) / 100
+      setAmountToCollect(half > 0 ? half.toString() : '0')
+    }
+  }
+
+  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPresetOption('custom')
+    setAmountToCollect(e.target.value)
+  }
+
+  // Generate Payment Link with editable amount
   const handleGenerateLink = async () => {
+    if (!isAmountValid) {
+      if (parsedAmount <= 0) {
+        toast.error('Amount to collect must be greater than GH₵0.00')
+      } else if (parsedAmount > outstandingBalance) {
+        toast.error(`Amount cannot exceed the outstanding balance of ${formatCurrency(outstandingBalance, currentJob.currency || 'GHS')}`)
+      }
+      return
+    }
+
     setIsGeneratingLink(true)
     try {
       const token = generateSecureToken('qj_')
@@ -123,22 +174,24 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
         clientId: currentJob.clientId,
         clientName: currentJob.clientName,
         quickJobId: currentJob.id,
-        amount: currentJob.outstandingBalance || currentJob.originalAgreedPrice,
+        amount: parsedAmount,
         currency: currentJob.currency || 'GHS',
         title: `Payment for Quick Job: ${currentJob.jobDescription}`,
+        status: 'Pending Payment',
         createdAt: new Date().toISOString() as any,
       }
 
-      await addDocument(COLLECTIONS.CLIENT_LINKS, newLink)
-      const generatedUrl = getPaymentLink(token)
-      setPaymentLink(generatedUrl)
-      
+      const docId = await addDocument(COLLECTIONS.CLIENT_LINKS, newLink)
+      const fullLink = { id: docId, ...newLink } as ClientLink
+      setPaymentLinks((prev) => [fullLink, ...prev])
+
       const updatePayload: Partial<QuickJob> = { paymentStatus: 'Payment Link Generated' }
       await updateDocument(COLLECTIONS.QUICK_JOBS, currentJob.id, updatePayload)
       onUpdate(updatePayload)
       setCurrentJob((prev) => ({ ...prev, ...updatePayload }))
 
-      toast.success('Payment link generated!')
+      setShowNewLinkForm(false)
+      toast.success(`Payment link generated for ${formatCurrency(parsedAmount, currentJob.currency || 'GHS')}!`)
     } catch (err) {
       console.error(err)
       toast.error('Failed to generate payment link')
@@ -148,12 +201,20 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
   }
 
   // Copy Payment Link
-  const handleCopyPaymentLink = () => {
-    if (!paymentLink) return
-    copyToClipboard(paymentLink)
-    setCopiedPayLink(true)
-    setTimeout(() => setCopiedPayLink(false), 2000)
+  const handleCopyPaymentLink = (token: string) => {
+    const linkUrl = getPaymentLink(token)
+    copyToClipboard(linkUrl)
+    setCopiedToken(token)
+    setTimeout(() => setCopiedToken(null), 2000)
     toast.success('Payment link copied to clipboard')
+  }
+
+  // Share via WhatsApp
+  const handleShareWhatsApp = (link: ClientLink) => {
+    const linkUrl = getPaymentLink(link.token)
+    const clientName = link.clientName || currentJob.clientName || 'Valued Client'
+    const message = `Hello ${clientName}, please find the secure payment link for ${currentJob.jobDescription} (${formatCurrency(Number(link.amount) || 0, link.currency || 'GHS')}): ${linkUrl}`
+    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank')
   }
 
   // Record Offline Payment (Admin Manual Confirmation)
@@ -162,11 +223,11 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
     setIsRecordingPayment(true)
 
     try {
-      const amountToRecord = Number(payFormData.amount) || currentJob.outstandingBalance || currentJob.originalAgreedPrice
+      const amountToRecord = Number(payFormData.amount) || outstandingBalance || originalTotal
       const prevPaid = Number(currentJob.amountPaid) || 0
       const totalPaid = prevPaid + amountToRecord
-      const remainingBalance = Math.max(0, currentJob.originalAgreedPrice - totalPaid)
-      const newStatus = totalPaid >= currentJob.originalAgreedPrice ? 'Paid' : 'Partially Paid'
+      const remainingBalance = Math.max(0, originalTotal - totalPaid)
+      const newStatus = totalPaid >= originalTotal ? 'Paid' : 'Partially Paid'
       const now = new Date().toISOString()
 
       // 1. Create Payment record in Firestore
@@ -180,6 +241,7 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
         paymentMethod: payFormData.paymentMethod,
         paidAt: now,
         status: 'success',
+        verificationStatus: 'verified',
         source: 'admin_manual',
         reference: payFormData.reference || `MAN-${Date.now().toString(36).toUpperCase()}`,
         notes: payFormData.notes,
@@ -250,7 +312,7 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
 
   return (
     <div className="space-y-6 mt-6 pt-5 border-t border-gray-100 dark:border-gray-800 animate-fade-in">
-      {/* ─── 1. PAYMENT STATUS & LINK SECTION ─── */}
+      {/* ─── 1. PAYMENT STATUS & FINANCIAL OVERVIEW SECTION ─── */}
       <div>
         <div className="flex items-center justify-between mb-2.5">
           <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
@@ -262,92 +324,255 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
           </Badge>
         </div>
 
-        <div className="bg-gray-50 dark:bg-gray-800/60 p-3.5 rounded-xl border border-gray-200/70 dark:border-gray-700/60 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div>
-              <span className="text-gray-400 block text-[10px]">Agreed Price</span>
-              <span className="font-bold text-gray-900 dark:text-gray-100 font-mono">
-                {formatCurrency(currentJob.originalAgreedPrice, currentJob.currency || 'GHS')}
+        <div className="bg-gray-50 dark:bg-gray-800/60 p-4 rounded-xl border border-gray-200/70 dark:border-gray-700/60 space-y-4">
+          {/* Financial Summary Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+            <div className="bg-white dark:bg-gray-900 p-2.5 rounded-lg border border-gray-200/60 dark:border-gray-800">
+              <span className="text-gray-400 block text-[10px] uppercase font-semibold">Original Job Total</span>
+              <span className="font-bold text-gray-900 dark:text-gray-100 font-mono text-sm">
+                {formatCurrency(originalTotal, currentJob.currency || 'GHS')}
               </span>
             </div>
-            <div>
-              <span className="text-gray-400 block text-[10px]">Amount Paid</span>
-              <span className="font-bold text-emerald-600 dark:text-emerald-400 font-mono">
-                {formatCurrency(currentJob.amountPaid || 0, currentJob.currency || 'GHS')}
+            <div className="bg-white dark:bg-gray-900 p-2.5 rounded-lg border border-gray-200/60 dark:border-gray-800">
+              <span className="text-gray-400 block text-[10px] uppercase font-semibold">Amount Already Paid</span>
+              <span className="font-bold text-emerald-600 dark:text-emerald-400 font-mono text-sm">
+                {formatCurrency(amountAlreadyPaid, currentJob.currency || 'GHS')}
               </span>
             </div>
-            <div>
-              <span className="text-gray-400 block text-[10px]">Outstanding Balance</span>
-              <span className={`font-bold font-mono ${isPaid ? 'text-gray-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                {formatCurrency(currentJob.outstandingBalance || 0, currentJob.currency || 'GHS')}
+            <div className="bg-white dark:bg-gray-900 p-2.5 rounded-lg border border-gray-200/60 dark:border-gray-800">
+              <span className="text-gray-400 block text-[10px] uppercase font-semibold">Outstanding Balance</span>
+              <span className={`font-bold font-mono text-sm ${isPaid ? 'text-gray-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                {formatCurrency(outstandingBalance, currentJob.currency || 'GHS')}
               </span>
+            </div>
+            <div className="bg-white dark:bg-gray-900 p-2.5 rounded-lg border border-gray-200/60 dark:border-gray-800">
+              <span className="text-gray-400 block text-[10px] uppercase font-semibold">Payment Status</span>
+              <div className="pt-0.5">
+                <Badge variant={isPaid ? 'success' : currentJob.amountPaid > 0 ? 'warning' : 'danger'}>
+                  {isPaid ? 'Paid' : currentJob.paymentStatus || 'Unpaid'}
+                </Badge>
+              </div>
             </div>
           </div>
 
-          {/* Payment Link Controls */}
+          {/* ─── Link Generator Form (Specification Section 2) ─── */}
           {!isPaid && (
-            <div className="pt-2 border-t border-gray-200/60 dark:border-gray-700/60 flex flex-col gap-2">
-              {!paymentLink ? (
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    onClick={handleGenerateLink}
-                    loading={isGeneratingLink}
-                    className="flex-1 text-xs"
-                    icon={<LinkIcon className="w-3.5 h-3.5" />}
-                  >
-                    Generate Client Payment Link
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setIsPaymentModalOpen(true)}
-                    className="text-xs"
-                    icon={<DollarSign className="w-3.5 h-3.5 text-emerald-600" />}
-                  >
-                    Record Payment
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-1.5">
-                    <Input
-                      value={paymentLink}
-                      readOnly
-                      className="text-xs font-mono bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleCopyPaymentLink}
-                      title="Copy Payment Link"
-                      className="shrink-0 px-2.5"
-                    >
-                      {copiedPayLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => window.open(paymentLink, '_blank')}
-                      title="Open Payment Portal"
-                      className="shrink-0 px-2.5"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                  <div className="flex items-center justify-between text-[11px] text-gray-500">
-                    <span>Share this secure link with the client for instant online card/MoMo payment.</span>
+            <div className="pt-3 border-t border-gray-200/70 dark:border-gray-700/60 space-y-3.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                  <LinkIcon className="w-3.5 h-3.5 text-indigo-500" />
+                  Generate Payment Link
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setIsPaymentModalOpen(true)}
+                  className="text-xs h-7 px-2.5"
+                  icon={<DollarSign className="w-3 h-3 text-emerald-600" />}
+                >
+                  Record Offline Payment
+                </Button>
+              </div>
+
+              {/* Presets and Editable Amount to Collect */}
+              <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 space-y-3">
+                {/* Convenient Preset Options */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                    Quick Preset Amounts
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
                     <button
                       type="button"
-                      onClick={() => setIsPaymentModalOpen(true)}
-                      className="text-indigo-600 dark:text-indigo-400 hover:underline font-medium shrink-0 ml-2"
+                      onClick={() => handleSelectPreset('full')}
+                      className={`py-1.5 px-2 text-xs font-bold rounded-lg border transition-all text-center ${
+                        presetOption === 'full'
+                          ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-500 text-indigo-700 dark:text-indigo-300 shadow-sm'
+                          : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100'
+                      }`}
                     >
-                      Record Offline Payment
+                      Full Balance ({formatCurrency(outstandingBalance, currentJob.currency || 'GHS')})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectPreset('half')}
+                      className={`py-1.5 px-2 text-xs font-bold rounded-lg border transition-all text-center ${
+                        presetOption === 'half'
+                          ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-500 text-indigo-700 dark:text-indigo-300 shadow-sm'
+                          : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100'
+                      }`}
+                    >
+                      50% Balance ({formatCurrency(Math.round(outstandingBalance * 0.5 * 100) / 100, currentJob.currency || 'GHS')})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectPreset('custom')}
+                      className={`py-1.5 px-2 text-xs font-bold rounded-lg border transition-all text-center ${
+                        presetOption === 'custom'
+                          ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-500 text-indigo-700 dark:text-indigo-300 shadow-sm'
+                          : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100'
+                      }`}
+                    >
+                      Custom Amount
                     </button>
                   </div>
                 </div>
-              )}
+
+                {/* Editable Field: Amount to Collect (GH₵) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-gray-800 dark:text-gray-200">
+                      Amount to Collect ({currentJob.currency || 'GH₵'})
+                    </label>
+                    <span className="text-[11px] text-gray-400 font-medium">
+                      Max: {formatCurrency(outstandingBalance, currentJob.currency || 'GHS')}
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      max={outstandingBalance}
+                      value={amountToCollect}
+                      onChange={handleAmountChange}
+                      placeholder="Enter amount to collect..."
+                      className={`text-sm font-mono font-bold pr-16 ${
+                        isAmountOverBalance ? 'border-rose-500 text-rose-600 focus:border-rose-500' : ''
+                      }`}
+                    />
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400 pointer-events-none">
+                      {currentJob.currency || 'GHS'}
+                    </div>
+                  </div>
+
+                  {/* Validation Alerts */}
+                  {isAmountOverBalance && (
+                    <p className="text-[11px] text-rose-500 font-medium mt-1.5 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      Amount cannot exceed outstanding balance of {formatCurrency(outstandingBalance, currentJob.currency || 'GHS')}
+                    </p>
+                  )}
+                  {isAmountZeroOrNegative && amountToCollect !== '' && (
+                    <p className="text-[11px] text-rose-500 font-medium mt-1.5 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      Amount to collect must be greater than zero
+                    </p>
+                  )}
+                </div>
+
+                {/* Remaining Balance After Payment Live Calculation */}
+                <div className="p-3 bg-gray-50 dark:bg-gray-800/70 rounded-lg border border-gray-200/70 dark:border-gray-700 flex items-center justify-between text-xs">
+                  <span className="text-gray-600 dark:text-gray-400 font-medium">
+                    Remaining balance after this payment:
+                  </span>
+                  <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 text-sm">
+                    {formatCurrency(remainingBalanceAfterThisPayment, currentJob.currency || 'GHS')}
+                  </span>
+                </div>
+
+                {/* Generate Link Button */}
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={handleGenerateLink}
+                  loading={isGeneratingLink}
+                  disabled={!isAmountValid}
+                  className="w-full text-xs py-2.5 font-bold"
+                  icon={<LinkIcon className="w-3.5 h-3.5" />}
+                >
+                  Generate Client Payment Link ({formatCurrency(parsedAmount, currentJob.currency || 'GHS')})
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* ─── Multiple Generated Payment Links Display (Section 5) ─── */}
+          {paymentLinks.length > 0 && (
+            <div className="pt-3 border-t border-gray-200/70 dark:border-gray-700/60 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
+                  Active Payment Links ({paymentLinks.length})
+                </span>
+                {!isPaid && !showNewLinkForm && (
+                  <span className="text-[11px] text-gray-400">
+                    Multiple payment links supported
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                {paymentLinks.map((link) => {
+                  const linkUrl = getPaymentLink(link.token)
+                  const isLinkPaid = link.status === 'Paid'
+                  const isCopied = copiedToken === link.token
+
+                  return (
+                    <div
+                      key={link.id || link.token}
+                      className="p-3 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 space-y-2 shadow-sm"
+                    >
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-gray-900 dark:text-gray-100">
+                            {formatCurrency(Number(link.amount) || 0, link.currency || 'GHS')}
+                          </span>
+                          <Badge variant={isLinkPaid ? 'success' : 'warning'}>
+                            {isLinkPaid ? 'Paid' : 'Pending Payment'}
+                          </Badge>
+                        </div>
+                        {link.createdAt && (
+                          <span className="text-[10px] text-gray-400">
+                            {(() => {
+                              try {
+                                const d = (link.createdAt as any)?.toDate ? (link.createdAt as any).toDate() : new Date(link.createdAt as any)
+                                return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                              } catch {
+                                return ''
+                              }
+                            })()}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          value={linkUrl}
+                          readOnly
+                          className="text-xs font-mono bg-gray-50 dark:bg-gray-800/80 text-gray-600 dark:text-gray-300 h-8"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleCopyPaymentLink(link.token)}
+                          title="Copy Payment Link"
+                          className="shrink-0 h-8 px-2.5"
+                        >
+                          {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => window.open(linkUrl, '_blank')}
+                          title="Open Payment Portal"
+                          className="shrink-0 h-8 px-2.5"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleShareWhatsApp(link)}
+                          title="Share to WhatsApp"
+                          className="shrink-0 h-8 px-2.5 text-emerald-600 hover:text-emerald-700"
+                        >
+                          <Share2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )}
         </div>

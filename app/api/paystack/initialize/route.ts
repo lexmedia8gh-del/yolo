@@ -27,7 +27,31 @@ export async function POST(req: NextRequest) {
       // 1. Try finding in client links
       const linkSnap = await adminDb.collection(COLLECTIONS.CLIENT_LINKS).where('token', '==', token).limit(1).get()
       if (!linkSnap.empty) {
-        const linkData = linkSnap.docs[0].data()
+        const linkDoc = linkSnap.docs[0]
+        const linkData = linkDoc.data()
+
+        // Check if payment link is already paid
+        if (linkData.status === 'Paid' || linkData.paymentStatus === 'Paid') {
+          return NextResponse.json(
+            { error: 'This payment request has already been paid and verified.', isAlreadyPaid: true },
+            { status: 400 }
+          )
+        }
+        if (linkData.status === 'Cancelled' || linkData.status === 'disabled') {
+          return NextResponse.json(
+            { error: 'This payment request has been cancelled or disabled.' },
+            { status: 400 }
+          )
+        }
+        if (linkData.expiresAt) {
+          const expTime = typeof linkData.expiresAt.toDate === 'function'
+            ? linkData.expiresAt.toDate().getTime()
+            : new Date(linkData.expiresAt).getTime()
+          if (expTime > 0 && expTime < Date.now()) {
+            return NextResponse.json({ error: 'This payment request link has expired.' }, { status: 400 })
+          }
+        }
+
         serverClientId = linkData.clientId || ''
         serverClientName = linkData.clientName || serverClientName
         serverEmail = linkData.clientEmail || serverEmail
@@ -36,37 +60,118 @@ export async function POST(req: NextRequest) {
         serverProjectId = linkData.projectId || ''
         serverDeliveryId = linkData.deliveryId || ''
         serverDeliveryAccessToken = linkData.deliveryAccessToken || ''
-        serverAmount = Number(linkData.amount || 0)
+        const savedRequestAmount = Number(linkData.amount || 0)
 
-        // Verify balance against actual invoice
-        if (serverInvoiceId) {
+        // Verify balance against actual Quick Job
+        if (serverQuickJobId) {
+          const qjDoc = await adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(serverQuickJobId).get()
+          if (!qjDoc.exists) {
+            return NextResponse.json({ error: 'Associated Quick Job not found.' }, { status: 404 })
+          }
+          const qjData = qjDoc.data()!
+          const jobTotal = Number(qjData.originalAgreedPrice || qjData.amount || 0)
+
+          // Calculate trusted verified payments from payments collection (including offline/manual payments)
+          const paymentsSnap = await adminDb
+            .collection(COLLECTIONS.PAYMENTS)
+            .where('quickJobId', '==', serverQuickJobId)
+            .where('status', '==', 'success')
+            .get()
+          const verifiedPaymentsSum = paymentsSnap.docs.reduce((sum, doc) => sum + (Number(doc.data().amount) || 0), 0)
+          const trustedPaid = Math.max(verifiedPaymentsSum, Number(qjData.amountPaid || 0))
+          const trustedOutstanding = Math.max(0, jobTotal - trustedPaid)
+
+          if (trustedOutstanding <= 0) {
+            return NextResponse.json({
+              error: 'This Quick Job has already been fully paid.',
+              isAlreadyPaid: true,
+              deliveryAccessToken: qjData.deliveryAccessToken || null,
+            }, { status: 400 })
+          }
+
+          // Use the saved payment-request amount
+          const targetAmount = savedRequestAmount > 0 ? savedRequestAmount : trustedOutstanding
+
+          if (targetAmount <= 0) {
+            return NextResponse.json({ error: 'Payment amount must be greater than zero.' }, { status: 400 })
+          }
+
+          if (targetAmount > trustedOutstanding) {
+            return NextResponse.json({
+              error: `Payment amount (GH₵${targetAmount.toFixed(2)}) exceeds current outstanding balance (GH₵${trustedOutstanding.toFixed(2)}).`,
+            }, { status: 400 })
+          }
+
+          serverAmount = targetAmount
+          serverInvoiceNumber = qjData.jobCode || qjData.title || `QJ-${serverQuickJobId.slice(0, 8).toUpperCase()}`
+          serverDeliveryAccessToken = qjData.deliveryAccessToken || ''
+        } else if (serverInvoiceId) {
+          // Verify balance against actual invoice
           const invDoc = await adminDb.collection(COLLECTIONS.INVOICES).doc(serverInvoiceId).get()
           if (invDoc.exists) {
             const invData = invDoc.data()!
             const total = Number(invData.total || invData.totalAmount || 0)
-            const paid = Number(invData.amountPaid || 0)
-            const balance = Number(invData.balanceDue !== undefined ? invData.balanceDue : (total - paid))
-            serverAmount = Math.max(0, balance)
+
+            const paymentsSnap = await adminDb
+              .collection(COLLECTIONS.PAYMENTS)
+              .where('invoiceId', '==', serverInvoiceId)
+              .where('status', '==', 'success')
+              .get()
+            const verifiedPaymentsSum = paymentsSnap.docs.reduce((sum, doc) => sum + (Number(doc.data().amount) || 0), 0)
+            const trustedPaid = Math.max(verifiedPaymentsSum, Number(invData.amountPaid || 0))
+            const balance = Math.max(0, total - trustedPaid)
+
+            if (balance <= 0) {
+              return NextResponse.json({
+                error: 'This invoice is already fully paid.',
+                isAlreadyPaid: true,
+              }, { status: 400 })
+            }
+
+            const targetAmount = savedRequestAmount > 0 ? Math.min(savedRequestAmount, balance) : balance
+            if (targetAmount <= 0) {
+              return NextResponse.json({ error: 'Payment amount must be greater than zero.' }, { status: 400 })
+            }
+            if (savedRequestAmount > balance) {
+              return NextResponse.json({
+                error: `Payment amount exceeds current invoice balance of GH₵${balance.toFixed(2)}.`,
+              }, { status: 400 })
+            }
+            serverAmount = targetAmount
             serverInvoiceNumber = invData.invoiceNumber || serverInvoiceNumber
-          }
-        } else if (serverQuickJobId) {
-          const qjDoc = await adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(serverQuickJobId).get()
-          if (qjDoc.exists) {
-            const qjData = qjDoc.data()!
-            const total = Number(qjData.originalAgreedPrice || qjData.amount || 0)
-            const paid = Number(qjData.amountPaid || 0)
-            const balance = Number(qjData.outstandingBalance !== undefined ? qjData.outstandingBalance : (total - paid))
-            serverAmount = Math.max(0, balance)
-            serverInvoiceNumber = qjData.jobCode || qjData.title || serverInvoiceNumber
           }
         } else if (serverProjectId) {
           const projDoc = await adminDb.collection(COLLECTIONS.PROJECTS).doc(serverProjectId).get()
           if (projDoc.exists) {
             const projData = projDoc.data()!
             const total = Number(projData.price || projData.totalAmount || 0)
-            const paid = Number(projData.amountPaid || 0)
-            const balance = Number(projData.outstandingBalance !== undefined ? projData.outstandingBalance : (total - paid))
-            serverAmount = Math.max(0, balance)
+
+            const paymentsSnap = await adminDb
+              .collection(COLLECTIONS.PAYMENTS)
+              .where('projectId', '==', serverProjectId)
+              .where('status', '==', 'success')
+              .get()
+            const verifiedPaymentsSum = paymentsSnap.docs.reduce((sum, doc) => sum + (Number(doc.data().amount) || 0), 0)
+            const trustedPaid = Math.max(verifiedPaymentsSum, Number(projData.amountPaid || 0))
+            const balance = Math.max(0, total - trustedPaid)
+
+            if (balance <= 0) {
+              return NextResponse.json({
+                error: 'This project is already fully paid.',
+                isAlreadyPaid: true,
+              }, { status: 400 })
+            }
+
+            const targetAmount = savedRequestAmount > 0 ? Math.min(savedRequestAmount, balance) : balance
+            if (targetAmount <= 0) {
+              return NextResponse.json({ error: 'Payment amount must be greater than zero.' }, { status: 400 })
+            }
+            if (savedRequestAmount > balance) {
+              return NextResponse.json({
+                error: `Payment amount exceeds current project balance of GH₵${balance.toFixed(2)}.`,
+              }, { status: 400 })
+            }
+            serverAmount = targetAmount
           }
         }
       } else {
@@ -83,40 +188,100 @@ export async function POST(req: NextRequest) {
           serverClientName = dData.clientName || serverClientName
           serverEmail = dData.clientEmail || serverEmail
 
-          if (serverInvoiceId) {
-            const invDoc = await adminDb.collection(COLLECTIONS.INVOICES).doc(serverInvoiceId).get()
-            if (invDoc.exists) {
-              const invData = invDoc.data()!
-              const total = Number(invData.total || invData.totalAmount || 0)
-              const paid = Number(invData.amountPaid || 0)
-              const balance = Number(invData.balanceDue !== undefined ? invData.balanceDue : (total - paid))
-              serverAmount = Math.max(0, balance)
-              serverInvoiceNumber = invData.invoiceNumber || serverInvoiceNumber
-            }
-          } else if (serverQuickJobId) {
+          if (serverQuickJobId) {
             const qjDoc = await adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(serverQuickJobId).get()
             if (qjDoc.exists) {
               const qjData = qjDoc.data()!
               const total = Number(qjData.originalAgreedPrice || qjData.amount || 0)
-              const paid = Number(qjData.amountPaid || 0)
-              const balance = Number(qjData.outstandingBalance !== undefined ? qjData.outstandingBalance : (total - paid))
-              serverAmount = Math.max(0, balance)
+              const paymentsSnap = await adminDb
+                .collection(COLLECTIONS.PAYMENTS)
+                .where('quickJobId', '==', serverQuickJobId)
+                .where('status', '==', 'success')
+                .get()
+              const verifiedPaymentsSum = paymentsSnap.docs.reduce((sum, doc) => sum + (Number(doc.data().amount) || 0), 0)
+              const trustedPaid = Math.max(verifiedPaymentsSum, Number(qjData.amountPaid || 0))
+              const balance = Math.max(0, total - trustedPaid)
+              serverAmount = balance
               serverInvoiceNumber = qjData.jobCode || qjData.title || serverInvoiceNumber
+            }
+          } else if (serverInvoiceId) {
+            const invDoc = await adminDb.collection(COLLECTIONS.INVOICES).doc(serverInvoiceId).get()
+            if (invDoc.exists) {
+              const invData = invDoc.data()!
+              const total = Number(invData.total || invData.totalAmount || 0)
+              const paymentsSnap = await adminDb
+                .collection(COLLECTIONS.PAYMENTS)
+                .where('invoiceId', '==', serverInvoiceId)
+                .where('status', '==', 'success')
+                .get()
+              const verifiedPaymentsSum = paymentsSnap.docs.reduce((sum, doc) => sum + (Number(doc.data().amount) || 0), 0)
+              const trustedPaid = Math.max(verifiedPaymentsSum, Number(invData.amountPaid || 0))
+              const balance = Math.max(0, total - trustedPaid)
+              serverAmount = balance
+              serverInvoiceNumber = invData.invoiceNumber || serverInvoiceNumber
             }
           }
         } else {
           // 3. Try checking quickJobs directly by paymentToken or doc id
           const qjByToken = await adminDb.collection(COLLECTIONS.QUICK_JOBS).where('paymentToken', '==', token).limit(1).get()
+          let matchedQjDoc: any = null
           if (!qjByToken.empty) {
-            const qjData = qjByToken.docs[0].data()
-            serverQuickJobId = qjByToken.docs[0].id
+            matchedQjDoc = qjByToken.docs[0]
+          } else {
+            const docById = await adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(token).get()
+            if (docById.exists) matchedQjDoc = docById
+          }
+
+          if (matchedQjDoc) {
+            const qjData = matchedQjDoc.data()
+            serverQuickJobId = matchedQjDoc.id
             serverClientId = qjData.clientId || ''
             serverClientName = qjData.clientName || serverClientName
             serverEmail = qjData.clientEmail || serverEmail
             const total = Number(qjData.originalAgreedPrice || qjData.amount || 0)
-            const paid = Number(qjData.amountPaid || 0)
-            serverAmount = Math.max(0, Number(qjData.outstandingBalance !== undefined ? qjData.outstandingBalance : (total - paid)))
+            const paymentsSnap = await adminDb
+              .collection(COLLECTIONS.PAYMENTS)
+              .where('quickJobId', '==', serverQuickJobId)
+              .where('status', '==', 'success')
+              .get()
+            const verifiedPaymentsSum = paymentsSnap.docs.reduce((sum, doc) => sum + (Number(doc.data().amount) || 0), 0)
+            const trustedPaid = Math.max(verifiedPaymentsSum, Number(qjData.amountPaid || 0))
+            const balance = Math.max(0, total - trustedPaid)
+
+            if (balance <= 0) {
+              return NextResponse.json({
+                error: 'This Quick Job has already been fully paid.',
+                isAlreadyPaid: true,
+                deliveryAccessToken: qjData.deliveryAccessToken || null,
+              }, { status: 400 })
+            }
+
+            // Check if there is an associated ClientLink for this token
+            const matchedLink = await adminDb.collection(COLLECTIONS.CLIENT_LINKS)
+              .where('token', '==', token)
+              .limit(1)
+              .get()
+            let reqAmount = balance
+            if (!matchedLink.empty) {
+              const mlData = matchedLink.docs[0].data()
+              if (mlData.status === 'Paid') {
+                return NextResponse.json({ error: 'This payment request has already been paid.', isAlreadyPaid: true }, { status: 400 })
+              }
+              if (mlData.amount && Number(mlData.amount) > 0) {
+                reqAmount = Number(mlData.amount)
+              }
+            }
+
+            if (reqAmount <= 0) {
+              return NextResponse.json({ error: 'Payment amount must be greater than zero.' }, { status: 400 })
+            }
+            if (reqAmount > balance) {
+              return NextResponse.json({ error: `Payment amount exceeds outstanding balance of GH₵${balance.toFixed(2)}` }, { status: 400 })
+            }
+
+            serverAmount = reqAmount
             serverDeliveryAccessToken = qjData.deliveryAccessToken || ''
+            serverInvoiceNumber = qjData.jobCode || qjData.title || `QJ-${serverQuickJobId.slice(0, 8).toUpperCase()}`
           } else {
             // 4. Try checking invoices directly by paymentLinkToken or invoiceNumber
             const invByToken = await adminDb.collection(COLLECTIONS.INVOICES).where('paymentLinkToken', '==', token).limit(1).get()
@@ -128,16 +293,22 @@ export async function POST(req: NextRequest) {
               serverEmail = invData.clientEmail || serverEmail
               serverInvoiceNumber = invData.invoiceNumber || serverInvoiceNumber
               const total = Number(invData.total || invData.totalAmount || 0)
-              const paid = Number(invData.amountPaid || 0)
-              serverAmount = Math.max(0, Number(invData.balanceDue !== undefined ? invData.balanceDue : (total - paid)))
+              const paymentsSnap = await adminDb
+                .collection(COLLECTIONS.PAYMENTS)
+                .where('invoiceId', '==', serverInvoiceId)
+                .where('status', '==', 'success')
+                .get()
+              const verifiedPaymentsSum = paymentsSnap.docs.reduce((sum, doc) => sum + (Number(doc.data().amount) || 0), 0)
+              const trustedPaid = Math.max(verifiedPaymentsSum, Number(invData.amountPaid || 0))
+              serverAmount = Math.max(0, total - trustedPaid)
             }
           }
         }
       }
     }
 
-    // Fall back to frontendAmount only if server calculation was unable to find records, but ensure > 0
-    const finalAmount = serverAmount > 0 ? serverAmount : Number(frontendAmount || 0)
+    // Server-calculated trusted amount (do not trust user-modified frontend body)
+    const finalAmount = serverAmount
 
     if (finalAmount <= 0) {
       return NextResponse.json({

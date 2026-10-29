@@ -266,12 +266,14 @@ export interface Invoice {
 // ─── Payment ─────────────────────────────────────────────────
 export interface Payment {
   id: string
-  invoiceId: string
-  invoiceNumber: string
+  invoiceId?: string
+  invoiceNumber?: string
   clientId: string
   clientName: string
   projectId?: string
   projectName?: string
+  quickJobId?: string
+  paymentRequestId?: string
   paystackReference: string
   reference?: string
   amount: number
@@ -280,11 +282,12 @@ export interface Payment {
   isDeposit?: boolean
   paymentMethod?: string
   channel?: string // card, bank, momo, cash, ussd, etc.
-  paidAt: Timestamp
+  paidAt: Timestamp | string
   status: 'success' | 'failed' | 'abandoned' | 'pending'
+  verificationStatus?: string
   notes?: string
   recordedBy?: string
-  source?: 'manual' | 'paystack' | 'link' | 'verify'
+  source?: 'manual' | 'paystack' | 'link' | 'verify' | 'webhook' | 'admin_manual'
   metadata?: Record<string, unknown>
   createdAt: Timestamp
 }

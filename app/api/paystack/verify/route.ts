@@ -267,11 +267,23 @@ export async function GET(req: NextRequest) {
       const qjSnap = await quickJobRef.get()
       if (qjSnap.exists) {
         const qj = qjSnap.data()!
-        const qjTotal = qj.originalAgreedPrice ?? 0
-        const prevQjPaid = qj.amountPaid ?? 0
+        const qjTotal = Number(qj.originalAgreedPrice ?? 0)
+
+        // Calculate verified payments sum
+        const existingPmtsSnap = await adminDb
+          .collection('payments')
+          .where('quickJobId', '==', linkData.quickJobId)
+          .where('status', '==', 'success')
+          .get()
+        const existingPaidFromPmts = existingPmtsSnap.docs.reduce(
+          (sum, doc) => sum + (Number(doc.data().amount) || 0),
+          0
+        )
+        const prevQjPaid = Math.max(existingPaidFromPmts, Number(qj.amountPaid || 0))
         const newQjPaid = prevQjPaid + amountPaid
         const newQjBalance = Math.max(0, qjTotal - newQjPaid)
         const newQjPayStatus = newQjPaid >= qjTotal ? 'Paid' : 'Partially Paid'
+
         batch.update(quickJobRef, {
           amountPaid: newQjPaid,
           outstandingBalance: newQjBalance,
@@ -374,15 +386,18 @@ export async function GET(req: NextRequest) {
       clientName: linkData.clientName || '',
       projectId: linkData.projectId || '',
       quickJobId: linkData.quickJobId || '',
+      paymentRequestId: linkDoc?.id || linkData?.id || token || '',
       deliveryId: deliveryDocToUnlock?.id || linkData.deliveryId || '',
       deliveryAccessToken: resolvedDeliveryAccessToken,
       paystackReference: reference,
+      reference,
       amount: amountPaid,
       currency: currency || linkData.currency || 'GHS',
       channel,
       paymentMethod: channel,
       paidAt: paidAt || new Date().toISOString(),
       status: 'success',
+      verificationStatus: 'verified',
       source: 'verify',
       createdAt: FieldValue.serverTimestamp(),
     })
