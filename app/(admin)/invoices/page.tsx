@@ -427,7 +427,7 @@ export default function InvoicesPage() {
       />
 
       {/* ─── Metric KPI Cards ─── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
         <div className="bg-white border border-gray-200 rounded-xl p-3.5 space-y-1">
           <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">
             Total Invoices
