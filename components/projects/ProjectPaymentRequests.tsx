@@ -78,7 +78,7 @@ export function ProjectPaymentRequests({
     if (!isExpired && link.expiresAt && link.status !== 'Paid') {
       const expTime = typeof (link.expiresAt as any)?.toDate === 'function'
         ? (link.expiresAt as any).toDate().getTime()
-        : new Date(link.expiresAt).getTime()
+        : new Date(link.expiresAt as any).getTime()
       if (expTime > 0 && expTime < Date.now()) {
         isExpired = true
       }

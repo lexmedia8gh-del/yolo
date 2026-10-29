@@ -626,7 +626,6 @@ function PublicPaymentPageInner() {
 
                 {/* Summary Metadata */}
                 <StaggerContainer delayStart={0.18} className="space-y-3 pt-1">
-                  <StaggerItem>
                   {(linkData.clientName || projectData?.clientName || quickJobData?.clientName || invoiceData?.clientName) && (
                     <StaggerItem>
                       <div className="flex items-center justify-between text-sm py-2.5 border-b border-gray-100">
