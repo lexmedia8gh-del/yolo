@@ -1,5 +1,7 @@
 'use client'
 
+export const dynamic = 'force-dynamic'
+
 import React, { useState, useEffect } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import {
@@ -746,7 +748,9 @@ function PublicPaymentPageInner() {
 export default function PublicPaymentPage() {
   return (
     <BrandingProvider>
-      <PublicPaymentPageInner />
+      <React.Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-white"><Spinner size="lg" /></div>}>
+        <PublicPaymentPageInner />
+      </React.Suspense>
     </BrandingProvider>
   )
 }

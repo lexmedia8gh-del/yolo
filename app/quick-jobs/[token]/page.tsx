@@ -1,5 +1,7 @@
 'use client'
 
+export const dynamic = 'force-dynamic'
+
 import React, { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import {
@@ -659,7 +661,9 @@ function QuickJobPortalContent() {
 export default function QuickJobPortalPage() {
   return (
     <BrandingProvider>
-      <QuickJobPortalContent />
+      <React.Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-white"><Spinner size="lg" /></div>}>
+        <QuickJobPortalContent />
+      </React.Suspense>
     </BrandingProvider>
   )
 }

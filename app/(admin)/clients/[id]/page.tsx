@@ -1,5 +1,7 @@
 'use client'
 
+export const dynamic = 'force-dynamic'
+
 import React, { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
@@ -52,7 +54,7 @@ import toast from 'react-hot-toast'
 
 type TabId = 'projects' | 'invoices' | 'payments' | 'links' | 'notes' | 'communication'
 
-export default function ClientProfilePage() {
+function ClientProfilePageContent() {
   const params = useParams()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -1107,5 +1109,13 @@ export default function ClientProfilePage() {
         />
       )}
     </div>
+  )
+}
+
+export default function ClientProfilePage() {
+  return (
+    <React.Suspense fallback={<div className="p-8 flex items-center justify-center"><Spinner size="lg" /></div>}>
+      <ClientProfilePageContent />
+    </React.Suspense>
   )
 }
