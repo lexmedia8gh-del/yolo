@@ -17,12 +17,14 @@ import {
   browserSessionPersistence,
   type User as FirebaseUser,
 } from 'firebase/auth'
-import { getAuthInstance, isFirebaseAuthConfigured } from './config'
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
+import { db, getAuthInstance, isFirebaseAuthConfigured, isFirebaseConfigured } from './config'
 
 export type User = {
   uid: string
   email: string | null
   displayName: string | null
+  photoURL?: string | null
   emailVerified?: boolean
   providerIds?: string[]
 }
@@ -48,11 +50,19 @@ interface LocalAdminAuthRecord {
 
 const DEFAULT_ADMIN_USER: User = {
   uid: 'admin-staff-user',
-  email: 'admin@lexmedia.com',
+  email: 'natlexmediah@gmail.com',
   displayName: 'Lexmedia Admin',
   emailVerified: true,
   providerIds: ['password'],
 }
+
+const LOCAL_ALLOWED_ADMIN_EMAILS = new Set([
+  'natlexmediah@gmail.com',
+  'lexmedia8gh@gmail.com',
+  'lexmediaapp@gmail.com',
+  'admin@lexmedia.com',
+  'admin@lexmedia.gh',
+])
 
 const SESSION_STORAGE_KEY = 'lexmedia_admin_session_email'
 const LOCAL_AUTH_STORAGE_KEY = 'lexmedia_local_admin_auth'
@@ -73,6 +83,7 @@ function mapFirebaseUser(fbUser: FirebaseUser): User {
     uid: fbUser.uid,
     email: fbUser.email,
     displayName: fbUser.displayName || null,
+    photoURL: fbUser.photoURL || null,
     emailVerified: fbUser.emailVerified,
     providerIds: providerIds.length > 0 ? providerIds : ['password'],
   }
@@ -107,27 +118,58 @@ export function setSessionCookie(token: string, maxAgeSeconds = 604800) {
   document.cookie = `__session=${token}; path=/${maxAgePart}${sameSitePart}`
 }
 
+export async function syncServerSessionCookie(token: string, maxAgeSeconds = 604800): Promise<void> {
+  if (typeof window === 'undefined' || !token) return
+  try {
+    await fetch('/api/admin/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, maxAgeSeconds }),
+    })
+  } catch {}
+}
+
+export async function clearServerSessionCookie(): Promise<void> {
+  if (typeof window === 'undefined') return
+  try {
+    await fetch('/api/admin/session', { method: 'DELETE' })
+  } catch {}
+}
+
 export function clearSessionCookie() {
   if (typeof document === 'undefined') return
   const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
   const sameSitePart = isHttps ? '; SameSite=None; Secure; Partitioned' : '; SameSite=Lax'
-  document.cookie = `__session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT${sameSitePart}`
+  document.cookie = `__session=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT${sameSitePart}`
+  document.cookie = `__session=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT`
   try {
     sessionStorage.removeItem(SESSION_STORAGE_KEY)
   } catch {}
 }
 
-function hasSessionCookie(): boolean {
-  if (typeof document === 'undefined') return false
-  const cookiePresent = document.cookie
+function getSessionCookieValue(): string {
+  if (typeof document === 'undefined') return ''
+  const match = document.cookie
     .split(';')
-    .some((c) => c.trim().startsWith('__session=') && c.trim() !== '__session=')
-  if (cookiePresent) return true
-  try {
-    return Boolean(sessionStorage.getItem(SESSION_STORAGE_KEY))
-  } catch {
-    return false
+    .map((c) => c.trim())
+    .find((c) => c.startsWith('__session='))
+  return match ? match.slice('__session='.length).trim() : ''
+}
+
+function hasSessionCookie(): boolean {
+  if (getSessionCookieValue()) return true
+  if (typeof window !== 'undefined') {
+    try {
+      return Boolean(sessionStorage.getItem(SESSION_STORAGE_KEY))
+    } catch {
+      return false
+    }
   }
+  return false
+}
+
+function hasLocalAdminSessionCookie(): boolean {
+  return getSessionCookieValue() === 'active-admin-session'
 }
 
 function getFallbackAdminUser(): User {
@@ -156,12 +198,48 @@ function notifyListeners(user: User | null) {
   listeners.forEach((cb) => cb(user))
 }
 
+async function ensureAdminFirestoreProfile(fbUser: FirebaseUser): Promise<void> {
+  if (!isFirebaseConfigured || !fbUser?.uid) return
+  try {
+    const userRef = doc(db, 'users', fbUser.uid)
+    const snap = await getDoc(userRef)
+    if (!snap.exists()) {
+      const defaultName = fbUser.displayName?.trim() || 'LexMedia Admin'
+      await setDoc(
+        userRef,
+        {
+          uid: fbUser.uid,
+          email: fbUser.email || '',
+          name: defaultName,
+          displayName: defaultName,
+          photoURL: fbUser.photoURL || null,
+          role: 'admin',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      )
+    } else if (fbUser.photoURL && !snap.data()?.photoURL) {
+      await setDoc(
+        userRef,
+        {
+          photoURL: fbUser.photoURL,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      )
+    }
+  } catch (err) {
+    console.warn('[Auth] Admin profile bootstrap skipped:', err)
+  }
+}
+
 export async function getActiveIdToken(forceRefresh = false): Promise<string | null> {
   const authInstance = getAuthInstance()
   if (isFirebaseAuthConfigured && authInstance?.currentUser) {
     return authInstance.currentUser.getIdToken(forceRefresh)
   }
-  if (hasSessionCookie()) {
+  if (hasLocalAdminSessionCookie() || (!isFirebaseAuthConfigured && hasSessionCookie())) {
     return 'active-admin-session'
   }
   return null
@@ -175,10 +253,11 @@ export async function signInWithEmail(email: string, password: string, rememberM
   if (!isFirebaseAuthConfigured || !authInstance) {
     const existing = readLocalAuthRecord()
     if (existing) {
-      if (existing.email.toLowerCase() !== normalizedEmail) {
+      const sameStoredEmail = existing.email.toLowerCase() === normalizedEmail
+      if (!sameStoredEmail && !LOCAL_ALLOWED_ADMIN_EMAILS.has(normalizedEmail)) {
         throw createAuthError('auth/user-not-found', 'No account found with this email.')
       }
-      if (existing.password && existing.password !== password) {
+      if (sameStoredEmail && existing.password && existing.password !== password) {
         throw createAuthError('auth/invalid-credential', 'Incorrect password or invalid credentials.')
       }
     }
@@ -192,6 +271,7 @@ export async function signInWithEmail(email: string, password: string, rememberM
     }
     writeLocalAuthRecord(updatedRecord)
     setSessionCookie('active-admin-session', cookieMaxAge)
+    await syncServerSessionCookie('active-admin-session', cookieMaxAge)
 
     const user: User = {
       uid: updatedRecord.uid,
@@ -216,22 +296,48 @@ export async function signInWithEmail(email: string, password: string, rememberM
 
     const credential = await signInWithEmailAndPassword(authInstance, normalizedEmail, password)
     const fbUser = credential.user
-    const token = await fbUser.getIdToken()
+    const token = await fbUser.getIdToken(true)
 
-    setSessionCookie(token, cookieMaxAge)
+    const verifyRes = await fetch('/api/admin/verify-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, maxAgeSeconds: cookieMaxAge }),
+    })
+
+    if (!verifyRes.ok) {
+      try {
+        await firebaseSignOut(authInstance)
+      } catch {}
+      const data = await verifyRes.json().catch(() => ({}))
+      throw createAuthError(
+        'auth/unauthorized-admin',
+        data.error || 'This account is not authorized as a LexMedia workspace administrator.'
+      )
+    }
+
+    const verifyData = await verifyRes.json().catch(() => ({}))
+    const activeToken = verifyData?.claimUpdated ? await fbUser.getIdToken(true) : token
+
+    setSessionCookie(activeToken, cookieMaxAge)
+    if (verifyData?.claimUpdated) {
+      await syncServerSessionCookie(activeToken, cookieMaxAge)
+    }
+
     try {
       if (typeof window !== 'undefined' && fbUser.email) {
         sessionStorage.setItem(SESSION_STORAGE_KEY, fbUser.email)
       }
     } catch {}
 
+    await ensureAdminFirestoreProfile(fbUser)
+
     const user = mapFirebaseUser(fbUser)
     notifyListeners(user)
-    return { user: { ...user, getIdToken: async () => token } }
+    return { user: { ...user, getIdToken: async () => activeToken } }
   } catch (err: any) {
     console.warn('Firebase Auth sign-in attempted:', err?.code || err)
 
-    // Only fall back if Firebase Auth itself is unconfigured/disabled on the project
+    // Only fall back to local session if Firebase Auth API keys themselves are invalid/missing
     if (
       err?.code === 'auth/invalid-api-key' ||
       err?.code === 'auth/configuration-not-found'
@@ -244,7 +350,8 @@ export async function signInWithEmail(email: string, password: string, rememberM
         lastAuthenticatedAt: Date.now(),
       }
       writeLocalAuthRecord(updatedRecord)
-      setSessionCookie('active-admin-session', 604800)
+      setSessionCookie('active-admin-session', cookieMaxAge)
+      await syncServerSessionCookie('active-admin-session', cookieMaxAge)
       const user: User = {
         uid: updatedRecord.uid,
         email: updatedRecord.email,
@@ -265,11 +372,17 @@ export async function signInWithGoogle() {
   if (!isFirebaseAuthConfigured || !authInstance) {
     throw createAuthError(
       'auth/configuration-not-found',
-      'Google Sign-In requires Firebase Auth credentials to be configured. Please sign in with email and password.'
+      'Google Sign-In requires Firebase Auth credentials to be configured.'
     )
   }
 
   const provider = new GoogleAuthProvider()
+  provider.addScope('email')
+  provider.addScope('profile')
+  provider.setCustomParameters({ prompt: 'select_account' })
+
+  // IMPORTANT: signInWithPopup MUST be the first awaited call so browser popup blockers
+  // preserve the transient user-activation gesture inside iframes and mobile browsers.
   const credential = await signInWithPopup(authInstance, provider)
   const fbUser = credential.user
   const token = await fbUser.getIdToken(true)
@@ -277,32 +390,41 @@ export async function signInWithGoogle() {
   const verifyRes = await fetch('/api/admin/verify-session', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token }),
+    body: JSON.stringify({ token, maxAgeSeconds: 604800 }),
   })
 
   if (!verifyRes.ok) {
     try {
       await firebaseSignOut(authInstance)
     } catch {}
+    clearSessionCookie()
+    await clearServerSessionCookie()
     const data = await verifyRes.json().catch(() => ({}))
     throw createAuthError(
       'auth/unauthorized-admin',
-      data.error || 'This Google account is not authorized as a LexMedia admin.'
+      data.error || 'This Google account is not authorized as a LexMedia workspace administrator.'
     )
   }
 
-  // Refresh token again in case verify-session granted { admin: true } custom claim
-  const refreshedToken = await fbUser.getIdToken(true)
-  setSessionCookie(refreshedToken, 604800)
+  const verifyData = await verifyRes.json().catch(() => ({}))
+  const finalToken = verifyData?.claimUpdated ? await fbUser.getIdToken(true) : token
+
+  setSessionCookie(finalToken, 604800)
+  if (verifyData?.claimUpdated) {
+    await syncServerSessionCookie(finalToken, 604800)
+  }
+
   try {
     if (typeof window !== 'undefined' && fbUser.email) {
       sessionStorage.setItem(SESSION_STORAGE_KEY, fbUser.email)
     }
   } catch {}
 
+  await ensureAdminFirestoreProfile(fbUser)
+
   const user = mapFirebaseUser(fbUser)
   notifyListeners(user)
-  return { user: { ...user, getIdToken: async () => refreshedToken } }
+  return { user: { ...user, getIdToken: async () => finalToken } }
 }
 
 export async function signOut() {
@@ -315,6 +437,7 @@ export async function signOut() {
     }
   }
   clearSessionCookie()
+  await clearServerSessionCookie()
   notifyListeners(null)
 }
 
@@ -686,27 +809,33 @@ export function onAuthChange(callback: (user: User | null) => void) {
     }
   }
 
+  if (authInstance.currentUser) {
+    callback(mapFirebaseUser(authInstance.currentUser))
+  }
+
   let unsubscribe: () => void = () => {}
   try {
     unsubscribe = onAuthStateChanged(authInstance, (fbUser) => {
       if (fbUser) {
+        fbUser
+          .getIdToken()
+          .then((token) => setSessionCookie(token, 604800))
+          .catch(() => {})
         callback(mapFirebaseUser(fbUser))
-      } else if (hasSessionCookie()) {
+      } else if (hasLocalAdminSessionCookie()) {
         callback(getFallbackAdminUser())
       } else {
+        if (getSessionCookieValue()) {
+          clearSessionCookie()
+          void clearServerSessionCookie()
+        }
         callback(null)
       }
     })
   } catch (err) {
     console.warn('[Firebase Auth] Listener fallback active:', err)
+    callback(hasLocalAdminSessionCookie() ? getFallbackAdminUser() : null)
   }
-
-  const initial = authInstance.currentUser
-    ? mapFirebaseUser(authInstance.currentUser)
-    : hasSessionCookie()
-    ? getFallbackAdminUser()
-    : null
-  callback(initial)
 
   return () => {
     listeners.delete(callback)

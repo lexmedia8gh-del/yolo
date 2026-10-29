@@ -1,5 +1,7 @@
 import * as admin from 'firebase-admin';
+import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 import type { NextRequest } from 'next/server';
+import firebaseAppletConfig from '@/firebase-applet-config.json';
 
 function cleanAdminEnv(raw?: string): string | undefined {
   if (!raw) return undefined;
@@ -25,10 +27,42 @@ export function normalizeBucketName(raw?: string): string | undefined {
 }
 
 export function getFirebaseProjectId(): string {
+  const appletProject = cleanAdminEnv(firebaseAppletConfig?.projectId);
+  const validAppletProject =
+    appletProject && appletProject !== 'remixed-project-id' ? appletProject : undefined;
+
   return (
     cleanAdminEnv(process.env.FIREBASE_ADMIN_PROJECT_ID) ||
     cleanAdminEnv(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) ||
+    validAppletProject ||
     'lexmedia-client-system'
+  );
+}
+
+export function getFirebaseDatabaseId(): string | undefined {
+  const explicitDb =
+    cleanAdminEnv(process.env.FIREBASE_DATABASE_ID) ||
+    cleanAdminEnv(process.env.NEXT_PUBLIC_FIREBASE_DATABASE_ID);
+  if (explicitDb) return explicitDb;
+
+  const appletProject = cleanAdminEnv(firebaseAppletConfig?.projectId);
+  const appletDb = cleanAdminEnv(firebaseAppletConfig?.firestoreDatabaseId);
+  if (appletProject && getFirebaseProjectId() === appletProject && appletDb) {
+    return appletDb;
+  }
+  return undefined;
+}
+
+export function getAuthorizedAdminEmails(): string[] {
+  return Array.from(
+    new Set(
+      [
+        (process.env.ADMIN_EMAIL || '').toLowerCase().trim(),
+        'natlexmediah@gmail.com',
+        'lexmedia8gh@gmail.com',
+        'lexmediaapp@gmail.com',
+      ].filter(Boolean)
+    )
   );
 }
 
@@ -37,6 +71,7 @@ export function getCandidateStorageBuckets(): string[] {
   const candidates = [
     normalizeBucketName(process.env.FIREBASE_STORAGE_BUCKET),
     normalizeBucketName(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET),
+    normalizeBucketName(firebaseAppletConfig?.storageBucket),
     projectId ? `${projectId}.firebasestorage.app` : undefined,
     projectId ? `${projectId}.appspot.com` : undefined,
   ].filter((b): b is string => Boolean(b));
@@ -49,7 +84,7 @@ export function hasAdminCredentials(): boolean {
   return Boolean(clientEmail && privateKey);
 }
 
-export function getAdminDb() {
+function ensureAdminApp(): admin.app.App {
   if (!admin.apps.length) {
     const projectId = getFirebaseProjectId();
     const clientEmail = cleanAdminEnv(process.env.FIREBASE_ADMIN_CLIENT_EMAIL);
@@ -57,6 +92,7 @@ export function getAdminDb() {
     const storageBucket =
       normalizeBucketName(process.env.FIREBASE_STORAGE_BUCKET) ||
       normalizeBucketName(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET) ||
+      normalizeBucketName(firebaseAppletConfig?.storageBucket) ||
       `${projectId}.firebasestorage.app`;
 
     if (projectId && clientEmail && privateKey) {
@@ -83,26 +119,34 @@ export function getAdminDb() {
     }
   }
 
-  return admin.firestore();
+  return admin.app();
+}
+
+export function getAdminDb() {
+  const app = ensureAdminApp();
+  const dbId = getFirebaseDatabaseId();
+  if (dbId && dbId !== '(default)') {
+    return getAdminFirestore(app, dbId);
+  }
+  return admin.firestore(app);
 }
 
 export function getAdminStorage() {
-  getAdminDb();
-  return admin.storage();
+  const app = ensureAdminApp();
+  return admin.storage(app);
 }
+
 export function getAdminAuth() {
-  getAdminDb();
-  return admin.auth();
+  const app = ensureAdminApp();
+  return admin.auth(app);
 }
 
 /**
  * Verifies that a request was made by the authorized admin.
  * Authorization is determined by:
  *  1. Firebase ID token custom claim: admin === true  (primary, tamper-proof)
- *  2. Email matches ADMIN_EMAIL env var               (bootstrap fallback)
- *
- * The old Firestore user doc lookup and the 'active-admin-session' dev
- * bypass have been removed to prevent unauthorized access in production.
+ *  2. Verified email matches authorized admin allowlist (bootstrap fallback)
+ *  3. UID-bound users/{uid}.role === 'admin' document
  */
 export async function requireAdmin(request: NextRequest) {
   const authHeader = request.headers.get('authorization') || '';
@@ -121,7 +165,7 @@ export async function requireAdmin(request: NextRequest) {
     session === 'active-admin-session' &&
     (!hasAdminCredentials() || process.env.ALLOW_DEV_SESSION === 'true')
   ) {
-    return { ok: true as const, uid: 'admin-staff-user', email: 'admin@lexmedia.com' };
+    return { ok: true as const, uid: 'admin-staff-user', email: 'natlexmediah@gmail.com' };
   }
 
   try {
@@ -130,19 +174,17 @@ export async function requireAdmin(request: NextRequest) {
     // 1. Primary: check the Firebase custom claim (survives email changes)
     const hasAdminClaim = decoded.admin === true;
 
-    // 2. Bootstrap fallback: configured ADMIN_EMAIL / initial admin emails
-    const authorizedEmails = [
-      (process.env.ADMIN_EMAIL || '').toLowerCase().trim(),
-      'lexmedia8gh@gmail.com',
-      'lexmediaapp@gmail.com',
-    ].filter(Boolean);
+    // 2. Bootstrap fallback: configured ADMIN_EMAIL / authorized LexMedia admin emails
+    const authorizedEmails = getAuthorizedAdminEmails();
     const isAuthorizedEmail = Boolean(
-      decoded.email && authorizedEmails.includes(decoded.email.toLowerCase().trim())
+      decoded.email &&
+        decoded.email_verified !== false &&
+        authorizedEmails.includes(decoded.email.toLowerCase().trim())
     );
 
     // 3. UID-bound profile role check: preserves admin access if an admin changed their email
     let hasStoredAdminRole = false;
-    if (!hasAdminClaim && !isAuthorizedEmail) {
+    if (!hasAdminClaim && !isAuthorizedEmail && hasAdminCredentials()) {
       try {
         const userSnap = await getAdminDb().collection('users').doc(decoded.uid).get();
         hasStoredAdminRole = userSnap.exists && userSnap.data()?.role === 'admin';

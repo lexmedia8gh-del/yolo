@@ -113,7 +113,7 @@ export function Sidebar({ isOpen = true, onClose }: SidebarProps) {
       {/* Mobile Overlay */}
       {isOpen && onClose && (
         <div
-          className="fixed inset-0 bg-gray-900/30 backdrop-blur-xs z-30 lg:hidden"
+          className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-30 lg:hidden"
           onClick={onClose}
         />
       )}
@@ -151,15 +151,15 @@ export function Sidebar({ isOpen = true, onClose }: SidebarProps) {
                     className={cn(
                       'flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
                       isActive
-                        ? 'bg-indigo-50/80 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-semibold'
-                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/70 hover:text-gray-900 dark:hover:text-gray-100'
+                        ? 'bg-[#EFF6FF] dark:bg-blue-950/60 text-[#1D63ED] dark:text-blue-400 font-semibold'
+                        : 'text-slate-600 dark:text-gray-400 hover:bg-slate-50 dark:hover:bg-gray-800/70 hover:text-slate-900 dark:hover:text-gray-100'
                     )}
                   >
                     <Icon
                       size={18}
                       className={cn(
                         'shrink-0',
-                        isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400 dark:text-gray-500'
+                        isActive ? 'text-[#1D63ED] dark:text-blue-400' : 'text-slate-400 dark:text-gray-500'
                       )}
                     />
                     <span className="flex-1 truncate">{item.label}</span>
@@ -172,11 +172,11 @@ export function Sidebar({ isOpen = true, onClose }: SidebarProps) {
 
         {/* User Profile */}
         {lexUser && (
-          <div className="p-3 border-t border-gray-200 dark:border-gray-800 shrink-0 bg-gray-50/50 dark:bg-gray-850/50">
+          <div className="p-3 border-t border-gray-200 dark:border-gray-800 shrink-0 bg-slate-50/60 dark:bg-gray-900/50">
             <Link
               href="/settings"
               onClick={onClose}
-              className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-white dark:hover:bg-gray-800 hover:shadow-xs transition-all"
+              className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-white dark:hover:bg-gray-800 hover:shadow-sm transition-all"
             >
               <div className="flex items-center gap-3">
                 <Avatar name={lexUser?.name || 'Admin'} src={lexUser?.photoURL} size="sm" />

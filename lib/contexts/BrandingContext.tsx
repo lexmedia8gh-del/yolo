@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { subscribeToDocument, COLLECTIONS } from '@/lib/firebase/firestore'
+import { onAuthChange } from '@/lib/firebase/auth'
 import { sanitizeBrandingLogoUrl } from '@/lib/hooks/useInvoiceBranding'
 import type { BrandingSettings, BusinessSettings } from '@/lib/types'
 
@@ -15,14 +16,14 @@ export const DEFAULT_BRANDING: BrandingSettings = {
   logoLightStoragePath: '',
   faviconUrl: '',
   faviconStoragePath: '',
-  primaryColor: '#0A0A0A',
-  secondaryColor: '#6366F1',
-  accentColor: '#4F46E5',
-  backgroundColor: '#F8F9FC',
+  primaryColor: '#0F172A',
+  secondaryColor: '#1D63ED',
+  accentColor: '#1D63ED',
+  backgroundColor: '#F8FAFC',
   surfaceColor: '#FFFFFF',
-  textColor: '#111827',
-  mutedTextColor: '#6B7280',
-  buttonColor: '#0A0A0A',
+  textColor: '#0F172A',
+  mutedTextColor: '#64748B',
+  buttonColor: '#1D63ED',
   buttonTextColor: '#FFFFFF',
 }
 
@@ -66,8 +67,21 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true
+    let unsubBranding: (() => void) | null = null
+    let unsubBusiness: (() => void) | null = null
 
-    // 1. Fetch from server API immediately for fast, reliable initialization
+    const clearDocListeners = () => {
+      if (unsubBranding) {
+        unsubBranding()
+        unsubBranding = null
+      }
+      if (unsubBusiness) {
+        unsubBusiness()
+        unsubBusiness = null
+      }
+    }
+
+    // 1. Fetch from server API immediately for fast, safe initialization on both public (/login) and admin routes
     fetch('/api/branding', { cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
@@ -83,63 +97,67 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
           setLoading(false)
         }
       })
-      .catch((err) => {
-        console.warn('[Branding Context] API load warning, using defaults/listeners:', err)
+      .catch(() => {
         if (mounted) setLoading(false)
       })
 
-    // 2. Real-time subscription to Firestore settings/branding and settings/business
-    const unsubBranding = subscribeToDocument<BrandingSettings>(
-      COLLECTIONS.SETTINGS,
-      'branding',
-      (data) => {
-        if (mounted && data) {
-          setBranding((prev) => {
-            const sanitized = sanitizeBrandingFields(data, prev.logoUrl, prev.logoStoragePath)
-            return { ...prev, ...sanitized }
-          })
-          setLoading(false)
-        }
-      }
-    )
+    // 2. Only attach Firestore real-time listeners once an authenticated session is active
+    const unsubAuth = onAuthChange((activeUser) => {
+      clearDocListeners()
+      if (!mounted || !activeUser) return
 
-    const unsubBusiness = subscribeToDocument<BusinessSettings>(
-      COLLECTIONS.SETTINGS,
-      'business',
-      (bizData) => {
-        if (mounted && bizData) {
-          const bizLogo = sanitizeBrandingLogoUrl(bizData.logoURL, bizData.logoStoragePath)
-          if (bizLogo) {
+      unsubBranding = subscribeToDocument<BrandingSettings>(
+        COLLECTIONS.SETTINGS,
+        'branding',
+        (data) => {
+          if (mounted && data) {
             setBranding((prev) => {
-              if (prev.logoUrl) return prev
-              return {
-                ...prev,
-                logoUrl: bizLogo,
-                logoStoragePath: bizData.logoStoragePath || prev.logoStoragePath || '',
-              }
+              const sanitized = sanitizeBrandingFields(data, prev.logoUrl, prev.logoStoragePath)
+              return { ...prev, ...sanitized }
             })
+            setLoading(false)
           }
-          setLoading(false)
         }
-      }
-    )
+      )
+
+      unsubBusiness = subscribeToDocument<BusinessSettings>(
+        COLLECTIONS.SETTINGS,
+        'business',
+        (bizData) => {
+          if (mounted && bizData) {
+            const bizLogo = sanitizeBrandingLogoUrl(bizData.logoURL, bizData.logoStoragePath)
+            if (bizLogo) {
+              setBranding((prev) => {
+                if (prev.logoUrl) return prev
+                return {
+                  ...prev,
+                  logoUrl: bizLogo,
+                  logoStoragePath: bizData.logoStoragePath || prev.logoStoragePath || '',
+                }
+              })
+            }
+            setLoading(false)
+          }
+        }
+      )
+    })
 
     return () => {
       mounted = false
-      unsubBranding()
-      unsubBusiness()
+      unsubAuth()
+      clearDocListeners()
     }
   }, [])
 
   const cssVars = [
-    `--brand-primary:${branding.primaryColor || '#0A0A0A'}`,
-    `--brand-secondary:${branding.secondaryColor || '#6366F1'}`,
-    `--brand-accent:${branding.accentColor || '#4F46E5'}`,
-    `--brand-background:${branding.backgroundColor || '#F8F9FC'}`,
+    `--brand-primary:${branding.primaryColor || '#0F172A'}`,
+    `--brand-secondary:${branding.secondaryColor || '#1D63ED'}`,
+    `--brand-accent:${branding.accentColor || '#1D63ED'}`,
+    `--brand-background:${branding.backgroundColor || '#F8FAFC'}`,
     `--brand-surface:${branding.surfaceColor || '#FFFFFF'}`,
-    `--brand-text:${branding.textColor || '#111827'}`,
-    `--brand-muted:${branding.mutedTextColor || '#6B7280'}`,
-    `--brand-button:${branding.buttonColor || '#0A0A0A'}`,
+    `--brand-text:${branding.textColor || '#0F172A'}`,
+    `--brand-muted:${branding.mutedTextColor || '#64748B'}`,
+    `--brand-button:${branding.buttonColor || '#1D63ED'}`,
     `--brand-button-text:${branding.buttonTextColor || '#FFFFFF'}`,
   ].join(';')
 

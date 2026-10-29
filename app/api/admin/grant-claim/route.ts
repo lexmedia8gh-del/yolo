@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin"
+import { getAdminAuth, getAdminDb, getAuthorizedAdminEmails } from "@/lib/firebase/admin"
 
 export const dynamic = "force-dynamic"
 
@@ -16,11 +16,7 @@ export async function POST(req: NextRequest) {
     const targetEmail = (email || defaultAdminEmail).toLowerCase().trim()
 
     // Ensure the target email is an authorized admin email
-    const authorizedEmails = [
-      defaultAdminEmail,
-      "lexmedia8gh@gmail.com",
-      "lexmediaapp@gmail.com"
-    ].filter(Boolean)
+    const authorizedEmails = getAuthorizedAdminEmails()
 
     if (!authorizedEmails.includes(targetEmail)) {
       return NextResponse.json(

@@ -1,7 +1,8 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app'
-import { getFirestore, type Firestore } from 'firebase/firestore'
+import { doc, getDocFromServer, getFirestore, type Firestore } from 'firebase/firestore'
 import { getStorage, type FirebaseStorage } from 'firebase/storage'
 import { getAuth, type Auth } from 'firebase/auth'
+import firebaseAppletConfig from '@/firebase-applet-config.json'
 
 function cleanFirebaseEnv(raw?: string): string | undefined {
   if (!raw) return undefined
@@ -18,19 +19,53 @@ function cleanFirebaseEnv(raw?: string): string | undefined {
   return val || undefined
 }
 
-const firebaseConfig = {
-  apiKey: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY),
-  authDomain: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN),
-  projectId: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID),
-  storageBucket: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET),
-  messagingSenderId: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID),
-  appId: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_APP_ID),
-  measurementId: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID),
-}
+const envApiKey = cleanFirebaseEnv(
+  process.env.NEXT_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY
+)
+const envProjectId = cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID)
+const useEnvOverride = Boolean(
+  envApiKey &&
+    envProjectId &&
+    envApiKey.length >= 10 &&
+    !envApiKey.includes('placeholder') &&
+    envApiKey !== 'demo-api-key'
+)
+
+const appletProjectId = cleanFirebaseEnv(firebaseAppletConfig?.projectId)
+const appletDatabaseId = cleanFirebaseEnv(firebaseAppletConfig?.firestoreDatabaseId)
+
+const firebaseConfig = useEnvOverride
+  ? {
+      apiKey: envApiKey,
+      authDomain:
+        cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN) ||
+        `${envProjectId}.firebaseapp.com`,
+      projectId: envProjectId,
+      storageBucket:
+        cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET) ||
+        `${envProjectId}.firebasestorage.app`,
+      messagingSenderId: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID),
+      appId: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_APP_ID),
+      measurementId: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID),
+    }
+  : {
+      apiKey: cleanFirebaseEnv(firebaseAppletConfig?.apiKey),
+      authDomain: cleanFirebaseEnv(firebaseAppletConfig?.authDomain),
+      projectId: appletProjectId,
+      storageBucket: cleanFirebaseEnv(firebaseAppletConfig?.storageBucket),
+      messagingSenderId: cleanFirebaseEnv(firebaseAppletConfig?.messagingSenderId),
+      appId: cleanFirebaseEnv(firebaseAppletConfig?.appId),
+      measurementId: cleanFirebaseEnv(firebaseAppletConfig?.measurementId),
+    }
+
+export const resolvedFirestoreDatabaseId =
+  cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_DATABASE_ID) ||
+  (firebaseConfig.projectId === appletProjectId ? appletDatabaseId : undefined)
 
 const hasValidConfig = Boolean(
   firebaseConfig.apiKey &&
     firebaseConfig.projectId &&
+    firebaseConfig.projectId !== 'remixed-project-id' &&
     firebaseConfig.apiKey.length >= 10 &&
     !firebaseConfig.apiKey.includes('placeholder') &&
     firebaseConfig.apiKey !== 'demo-api-key'
@@ -51,19 +86,30 @@ if (hasValidConfig) {
 
   if (app) {
     try {
-      dbInstance = getFirestore(app)
+      dbInstance = resolvedFirestoreDatabaseId
+        ? getFirestore(app, resolvedFirestoreDatabaseId)
+        : getFirestore(app)
     } catch (err) {
       console.warn('[Firebase] Firestore initialization skipped:', err)
       dbInstance = null
     }
 
-    // Only initialize Firebase Client Auth in browser context to prevent SSR/build auth/invalid-api-key errors
+    // Initialize Firebase Client Auth & verify Firestore reachability in browser context
     if (typeof window !== 'undefined') {
       try {
         authInstance = getAuth(app)
       } catch (err) {
         console.warn('[Firebase] Auth initialization skipped:', err)
         authInstance = null
+      }
+
+      if (dbInstance) {
+        const activeDb = dbInstance
+        getDocFromServer(doc(activeDb, 'test', 'connection')).catch((error: unknown) => {
+          if (error instanceof Error && error.message.includes('the client is offline')) {
+            console.error('Please check your Firebase configuration.')
+          }
+        })
       }
     }
 

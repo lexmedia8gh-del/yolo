@@ -115,7 +115,7 @@ export function BrandLogoLockup({
         <div
           className={cn(
             dims.fallbackBox,
-            'bg-[#1D63ED] text-white flex items-center justify-center shadow-xs shrink-0'
+            'bg-[#1D63ED] text-white flex items-center justify-center shadow-sm shrink-0'
           )}
         >
           <Layers size={dims.iconSize} strokeWidth={2.2} />
@@ -140,7 +140,7 @@ export function BrandLogoLockup({
         <div
           className={cn(
             dims.fallbackBox,
-            'bg-slate-900/90 border border-slate-800 text-blue-400 flex items-center justify-center shadow-xs shrink-0'
+            'bg-slate-900/90 border border-slate-800 text-blue-400 flex items-center justify-center shadow-sm shrink-0'
           )}
         >
           <Layers size={dims.iconSize} strokeWidth={2.2} />
@@ -188,7 +188,7 @@ export function BrandLogoLockup({
       <div
         className={cn(
           dims.fallbackBox,
-          'bg-gray-900 dark:bg-indigo-600 text-white flex items-center justify-center shadow-xs shrink-0'
+          'bg-[#1D63ED] text-white flex items-center justify-center shadow-sm shrink-0'
         )}
       >
         <Layers size={dims.iconSize} strokeWidth={2.2} />
@@ -197,18 +197,18 @@ export function BrandLogoLockup({
   }
 
   return (
-    <div className={cn('flex items-center min-w-0', dims.gap, className)}>
+    <div className={cn('font-sans flex items-center min-w-0', dims.gap, className)}>
       {renderLogoGraphic()}
       <div className="min-w-0 text-left">
         <span
           className={cn(
-            'font-bold tracking-tight block leading-tight truncate',
+            'font-bold tracking-[-0.015em] block leading-tight truncate',
             dims.title,
             variant === 'dark'
               ? 'text-slate-100'
               : variant === 'light'
               ? 'text-[#0F172A]'
-              : 'text-gray-900 dark:text-gray-100'
+              : 'text-[#0F172A] dark:text-slate-100'
           )}
         >
           {displayBrandName}
@@ -222,7 +222,7 @@ export function BrandLogoLockup({
                 ? 'text-slate-400'
                 : variant === 'light'
                 ? 'text-[#64748B]'
-                : 'text-gray-500 dark:text-gray-400'
+                : 'text-[#64748B] dark:text-slate-400'
             )}
           >
             {subtitle}

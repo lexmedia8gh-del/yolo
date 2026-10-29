@@ -1,40 +1,54 @@
-import { NextRequest, NextResponse } from "next/server"
-import { getAdminAuth, getAdminDb, hasAdminCredentials } from "@/lib/firebase/admin"
+import { NextRequest, NextResponse } from 'next/server'
+import {
+  getAdminAuth,
+  getAdminDb,
+  getAuthorizedAdminEmails,
+  hasAdminCredentials,
+} from '@/lib/firebase/admin'
 
-export const dynamic = "force-dynamic"
+export const dynamic = 'force-dynamic'
+
+function buildSessionCookieHeader(token: string, req: NextRequest, maxAgeSeconds = 604800): string {
+  const proto = req.headers.get('x-forwarded-proto') || req.nextUrl.protocol.replace(':', '')
+  const isHttps = proto === 'https'
+  const base = `__session=${token}; Path=/; Max-Age=${maxAgeSeconds}`
+  return isHttps ? `${base}; SameSite=None; Secure; Partitioned` : `${base}; SameSite=Lax`
+}
 
 /**
  * POST /api/admin/verify-session
- * Called client-side after Google sign-in to confirm the user is an authorized admin.
- * Returns { ok: true } if admin, or { ok: false, error } if not authorized.
- * Body: { token: string }  (Firebase ID token)
+ * Called client-side after Google or Email sign-in to confirm the user is an authorized admin
+ * and persist the __session cookie reliably (including inside cross-origin preview iframes).
  */
 export async function POST(req: NextRequest) {
   try {
-    const { token } = await req.json()
+    const body = await req.json().catch(() => ({}))
+    const token = typeof body?.token === 'string' ? body.token.trim() : ''
+    const maxAgeSeconds =
+      typeof body?.maxAgeSeconds === 'number' && body.maxAgeSeconds > 0
+        ? Math.min(body.maxAgeSeconds, 2592000)
+        : 604800
+
     if (!token) {
-      return NextResponse.json({ ok: false, error: "No token provided" }, { status: 400 })
+      return NextResponse.json({ ok: false, error: 'No token provided' }, { status: 400 })
     }
 
     const auth = getAdminAuth()
     const decoded = await auth.verifyIdToken(token)
 
-    const authorizedEmails = [
-      (process.env.ADMIN_EMAIL || "").toLowerCase().trim(),
-      "lexmedia8gh@gmail.com",
-      "lexmediaapp@gmail.com",
-    ].filter(Boolean)
-
+    const authorizedEmails = getAuthorizedAdminEmails()
     const hasAdminClaim = decoded.admin === true
     const isAuthorizedEmail = Boolean(
-      decoded.email && authorizedEmails.includes(decoded.email.toLowerCase().trim())
+      decoded.email &&
+        decoded.email_verified !== false &&
+        authorizedEmails.includes(decoded.email.toLowerCase().trim())
     )
 
     let hasStoredAdminRole = false
-    if (!hasAdminClaim && !isAuthorizedEmail) {
+    if (!hasAdminClaim && !isAuthorizedEmail && hasAdminCredentials()) {
       try {
-        const snap = await getAdminDb().collection("users").doc(decoded.uid).get()
-        hasStoredAdminRole = snap.exists && snap.data()?.role === "admin"
+        const snap = await getAdminDb().collection('users').doc(decoded.uid).get()
+        hasStoredAdminRole = snap.exists && snap.data()?.role === 'admin'
       } catch {}
     }
 
@@ -42,13 +56,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           ok: false,
-          error: `Access Denied. The account "${decoded.email}" is not authorized as a LexMedia admin.`,
+          error: `Access denied. "${decoded.email || 'This account'}" is not authorized as a LexMedia workspace administrator.`,
         },
         { status: 403 }
       )
     }
 
-    // Ensure UID-bound admin claim is persisted so future email updates never lose authorization
+    let claimUpdated = false
     if (!hasAdminClaim && hasAdminCredentials()) {
       try {
         const userRecord = await auth.getUser(decoded.uid)
@@ -56,12 +70,20 @@ export async function POST(req: NextRequest) {
           ...(userRecord.customClaims || {}),
           admin: true,
         })
+        claimUpdated = true
       } catch {}
     }
 
-    return NextResponse.json({ ok: true, email: decoded.email, uid: decoded.uid })
+    const response = NextResponse.json({
+      ok: true,
+      email: decoded.email,
+      uid: decoded.uid,
+      claimUpdated,
+    })
+    response.headers.append('Set-Cookie', buildSessionCookieHeader(token, req, maxAgeSeconds))
+    return response
   } catch (error: any) {
-    console.error("[verify-session] Error:", error)
-    return NextResponse.json({ ok: false, error: "Invalid or expired token" }, { status: 401 })
+    console.error('[verify-session] Error:', error?.message || error)
+    return NextResponse.json({ ok: false, error: 'Invalid or expired token' }, { status: 401 })
   }
 }

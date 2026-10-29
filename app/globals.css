@@ -4,26 +4,28 @@
 
 /* ─── Design Tokens ─────────────────────────────────────────── */
 :root {
-  --font-inter: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --font-invoice-sans: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-invoice-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --color-accent: #4F46E5;
-  --color-accent-light: #EEF2FF;
-  --color-background: #F9FAFB;
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-inter: var(--font-sans);
+  --font-invoice-sans: var(--font-sans);
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-invoice-mono: var(--font-mono);
+  --color-accent: #1D63ED;
+  --color-accent-light: #EFF6FF;
+  --color-background: #F8FAFC;
   --color-surface: #FFFFFF;
-  --color-border: #E5E7EB;
-  --color-muted: #6B7280;
+  --color-border: #E2E8F0;
+  --color-muted: #64748B;
   --sidebar-width: 16rem;
   --topbar-height: 4rem;
 }
 
 .dark {
-  --color-accent: #6366F1;
-  --color-accent-light: #1E1B4B;
+  --color-accent: #3B82F6;
+  --color-accent-light: #172554;
   --color-background: #090D16;
   --color-surface: #111827;
   --color-border: #1F2937;
-  --color-muted: #9CA3AF;
+  --color-muted: #94A3B8;
 }
 
 /* ─── Base Styles ────────────────────────────────────────────── */
@@ -34,6 +36,7 @@
   }
 
   html {
+    font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
@@ -41,30 +44,30 @@
   }
 
   body {
-    font-family: var(--font-inter);
+    font-family: var(--font-sans);
     background-color: var(--color-background);
-    color: #111827;
-    font-size: 1rem; /* 16px minimum base size for ultimate readability */
+    color: #0F172A;
+    font-size: 1rem;
     line-height: 1.6;
-    letter-spacing: -0.011em;
+    letter-spacing: -0.01em;
     min-height: 100vh;
     transition: background-color 0.2s ease, color 0.2s ease;
   }
 
   .dark body {
-    color: #F3F4F6;
+    color: #F8FAFC;
     background-color: var(--color-background);
   }
 
-  /* Exquisite Global Focus Rings */
+  /* Global Focus Rings */
   :focus-visible {
-    outline: 2px solid #4F46E5;
+    outline: 2px solid #1D63ED;
     outline-offset: 2px;
     border-radius: 8px;
   }
 
   .dark :focus-visible {
-    outline: 2px solid #6366F1;
+    outline: 2px solid #3B82F6;
   }
 
   /* Ultra-modern Custom Scrollbars */
@@ -102,75 +105,75 @@
     background-clip: padding-box;
   }
 
-  /* Typography Hierarchy (Based on Major Second Scale 1.125 starting from 16px) */
+  /* Typography Hierarchy */
   h1 {
-    font-size: 2.027rem; /* ~32px */
-    font-weight: 800;
+    font-size: 2rem;
+    font-weight: 700;
     line-height: 1.2;
-    letter-spacing: -0.03em;
-    color: #111827;
+    letter-spacing: -0.025em;
+    color: #0F172A;
   }
 
   .dark h1 {
-    color: #F9FAFB;
+    color: #F8FAFC;
   }
 
   h2 {
-    font-size: 1.802rem; /* ~28px */
+    font-size: 1.75rem;
     font-weight: 700;
     line-height: 1.25;
-    letter-spacing: -0.025em;
-    color: #111827;
+    letter-spacing: -0.022em;
+    color: #0F172A;
   }
 
   .dark h2 {
-    color: #F9FAFB;
+    color: #F8FAFC;
   }
 
   h3 {
-    font-size: 1.602rem; /* ~25px */
-    font-weight: 650;
+    font-size: 1.5rem;
+    font-weight: 600;
     line-height: 1.3;
-    letter-spacing: -0.02em;
-    color: #111827;
+    letter-spacing: -0.018em;
+    color: #0F172A;
   }
 
   .dark h3 {
-    color: #F3F4F6;
+    color: #F1F5F9;
   }
 
   h4 {
-    font-size: 1.424rem; /* ~22px */
+    font-size: 1.25rem;
     font-weight: 600;
     line-height: 1.35;
     letter-spacing: -0.015em;
-    color: #111827;
+    color: #0F172A;
   }
 
   .dark h4 {
-    color: #E5E7EB;
+    color: #E2E8F0;
   }
 
   h5 {
-    font-size: 1.266rem; /* ~20px */
+    font-size: 1.125rem;
     font-weight: 600;
     line-height: 1.4;
-    color: #111827;
+    color: #0F172A;
   }
 
   .dark h5 {
-    color: #E5E7EB;
+    color: #E2E8F0;
   }
 
   h6 {
-    font-size: 1.125rem; /* ~18px */
+    font-size: 1rem;
     font-weight: 600;
     line-height: 1.4;
-    color: #111827;
+    color: #0F172A;
   }
 
   .dark h6 {
-    color: #E5E7EB;
+    color: #E2E8F0;
   }
 
   /* Standard form controls consistency */
@@ -408,19 +411,46 @@
 
 /* ─── Login Light Surface Isolation (Always Clean Light Mode) ── */
 .login-light-surface {
-  font-family: var(--font-invoice-sans);
+  font-family: var(--font-sans);
   color-scheme: light;
-  color: #0F172A;
+  background-color: #FFFFFF;
+  color: var(--login-heading, #0F172A);
 }
 
+.login-light-surface,
+.login-light-surface button,
+.login-light-surface input,
+.login-light-surface label {
+  font-family: var(--font-sans);
+}
+
+@media (min-width: 640px) {
+  .login-light-surface {
+    background-color: var(--login-bg, #F8FAFC);
+  }
+}
+
+.dark .login-light-surface {
+  background-color: #FFFFFF !important;
+  color: var(--login-heading, #0F172A) !important;
+}
+
+@media (min-width: 640px) {
+  .dark .login-light-surface {
+    background-color: var(--login-bg, #F8FAFC) !important;
+  }
+}
+
+.dark .login-light-surface.bg-white,
 .dark .login-light-surface .bg-white {
   background-color: #FFFFFF !important;
 }
 
 .dark .login-light-surface h1,
 .dark .login-light-surface h2,
-.dark .login-light-surface h3 {
-  color: #0F172A;
+.dark .login-light-surface h3,
+.dark .login-light-surface label {
+  color: var(--login-heading, #0F172A) !important;
 }
 
 @media (max-width: 639px) {

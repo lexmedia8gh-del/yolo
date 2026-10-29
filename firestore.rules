@@ -2,23 +2,30 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ─── Default: deny everything ────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
     // ─── Admin authorization ─────────────────────────────────────────────────
-    // Checks for the Firebase Custom Claim set by /api/admin/grant-claim,
-    // bootstrap admin email, or verified admin role on the user's own profile doc.
+    // Verifies Firebase Custom Claim, verified LexMedia administrator emails,
+    // or UID-bound admin role on the user's own profile document.
     function isAdmin() {
       return request.auth != null && (
         request.auth.token.admin == true ||
-        request.auth.token.email == 'lexmedia8gh@gmail.com' ||
+        (
+          request.auth.token.email_verified == true &&
+          request.auth.token.email in [
+            'natlexmediah@gmail.com',
+            'lexmedia8gh@gmail.com',
+            'lexmediaapp@gmail.com'
+          ]
+        ) ||
         (
           exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
         )
       );
-    }
-
-    // ─── Default: deny everything ────────────────────────────────────────────
-    match /{document=**} {
-      allow read, write: if false;
     }
 
     // ─── User profiles ───────────────────────────────────────────────────────
@@ -29,12 +36,16 @@ service cloud.firestore {
       allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
       allow create: if isAdmin()
         && request.auth.uid == uid
+        && request.resource.data.uid is string
+        && request.resource.data.uid.size() <= 128
         && request.resource.data.uid == uid
-        && request.resource.data.role == 'admin';
+        && request.resource.data.role == 'admin'
+        && (!('name' in request.resource.data) || (request.resource.data.name is string && request.resource.data.name.size() <= 120));
       allow update: if isAdmin()
         && request.auth.uid == uid
-        && (!('uid' in request.resource.data) || request.resource.data.uid == uid)
-        && (!('role' in resource.data) || request.resource.data.role == resource.data.role);
+        && (!('uid' in request.resource.data) || (request.resource.data.uid is string && request.resource.data.uid.size() <= 128 && request.resource.data.uid == uid))
+        && (!('role' in resource.data) || request.resource.data.role == resource.data.role)
+        && (!('name' in request.resource.data) || (request.resource.data.name is string && request.resource.data.name.size() <= 120));
       allow delete: if false;
     }
 

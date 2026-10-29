@@ -1,7 +1,7 @@
 'use client'
 
-import React, { useEffect, useState, Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import React, { useEffect, useRef, useState, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -21,7 +21,10 @@ import {
   signInWithGoogle,
   sendPasswordReset,
   setSessionCookie,
+  getActiveIdToken,
+  signOut,
 } from '@/lib/firebase/auth'
+import { useAuth } from '@/lib/contexts/AuthContext'
 import { useBranding } from '@/lib/contexts/BrandingContext'
 import { hexToRgba, normalizeHexColor } from '@/lib/hooks/useInvoiceBranding'
 import { getFirebaseErrorMessage } from '@/lib/utils'
@@ -29,6 +32,7 @@ import { BrandLogoLockup } from '@/components/branding/BrandLogoLockup'
 import toast from 'react-hot-toast'
 
 const REMEMBERED_EMAIL_KEY = 'lexmedia_remembered_email'
+const EMAIL_CHECK_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 // Form validation schema
 const loginSchema = z.object({
@@ -38,6 +42,15 @@ const loginSchema = z.object({
 })
 
 type LoginFormData = z.infer<typeof loginSchema>
+
+function resolveSafeRedirect(raw?: string | null): string {
+  if (!raw) return '/dashboard'
+  const trimmed = raw.trim()
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//') || trimmed.startsWith('/login')) {
+    return '/dashboard'
+  }
+  return trimmed
+}
 
 function getRelativeLuminance(hex: string): number {
   const clean = normalizeHexColor(hex, '#1D63ED').slice(1)
@@ -61,14 +74,14 @@ function darkenHex(hex: string, factor = 0.88): string {
 
 function LoginPageSkeleton() {
   return (
-    <div className="login-light-surface min-h-[100dvh] w-full bg-[#F6F8FC] flex items-center justify-center p-5">
-      <div className="w-full max-w-[440px] rounded-2xl bg-white border border-[#E2E8F0] p-8 shadow-xs space-y-5">
+    <div className="login-light-surface font-sans min-h-[100dvh] w-full bg-[#F8FAFC] flex items-center justify-center p-5">
+      <div className="w-full max-w-[440px] rounded-2xl bg-white border border-[#E2E8F0] p-8 shadow-sm space-y-5">
         <div className="h-9 w-36 bg-[#F1F5F9] rounded-lg mx-auto animate-pulse" />
-        <div className="space-y-3 pt-2">
+        <div className="space-y-2.5 pt-2">
           <div className="h-4 w-24 bg-[#F1F5F9] rounded animate-pulse" />
           <div className="h-12 w-full bg-[#F8FAFC] rounded-xl border border-[#E2E8F0] animate-pulse" />
         </div>
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           <div className="h-4 w-20 bg-[#F1F5F9] rounded animate-pulse" />
           <div className="h-12 w-full bg-[#F8FAFC] rounded-xl border border-[#E2E8F0] animate-pulse" />
         </div>
@@ -79,9 +92,9 @@ function LoginPageSkeleton() {
 }
 
 function LoginFormContent() {
-  const router = useRouter()
   const searchParams = useSearchParams()
-  const redirectTo = searchParams?.get('redirect') ?? '/dashboard'
+  const safeRedirectTo = resolveSafeRedirect(searchParams?.get('redirect'))
+  const { user: activeUser, loading: authLoading } = useAuth()
   const { branding } = useBranding()
 
   const [showPassword, setShowPassword] = useState(false)
@@ -93,6 +106,8 @@ function LoginFormContent() {
   const [resetEmail, setResetEmail] = useState('')
   const [resetSuccess, setResetSuccess] = useState(false)
   const [isResetLoading, setIsResetLoading] = useState(false)
+
+  const autoRedirectedRef = useRef(false)
 
   const {
     register,
@@ -119,8 +134,45 @@ function LoginFormContent() {
     } catch {}
   }, [getValues, setValue])
 
-  // Resolve colors from Branding Settings while preserving light readability & LexMedia blue defaults
-  const untouchedAccents = new Set([
+  // Seamlessly resume workspace if an authenticated admin session is already active in Firebase
+  useEffect(() => {
+    if (
+      authLoading ||
+      !activeUser ||
+      autoRedirectedRef.current ||
+      isSubmitting ||
+      isGoogleLoading
+    ) {
+      return
+    }
+    autoRedirectedRef.current = true
+    ;(async () => {
+      try {
+        const token = await getActiveIdToken()
+        if (!token) {
+          autoRedirectedRef.current = false
+          return
+        }
+        const sessionRes = await fetch('/api/admin/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, maxAgeSeconds: 604800 }),
+        })
+        if (sessionRes.ok) {
+          setSessionCookie(token, 604800)
+          window.location.replace(safeRedirectTo)
+        } else {
+          await signOut()
+          autoRedirectedRef.current = false
+        }
+      } catch {
+        autoRedirectedRef.current = false
+      }
+    })()
+  }, [authLoading, activeUser, safeRedirectTo, isSubmitting, isGoogleLoading])
+
+  // Resolve colors from Branding Settings while enforcing consistent LexMedia Blue & light contrast
+  const legacyAccents = new Set([
     '#0a0a0a',
     '#0f172a',
     '#111827',
@@ -132,39 +184,37 @@ function LoginFormContent() {
   const rawAccentLower = (branding.accentColor || '').trim().toLowerCase()
   const rawSecondaryLower = (branding.secondaryColor || '').trim().toLowerCase()
 
-  const resolvedBrandBlue = !untouchedAccents.has(rawButtonLower)
+  const resolvedBrandBlue = !legacyAccents.has(rawButtonLower)
     ? normalizeHexColor(branding.buttonColor, '#1D63ED')
-    : !untouchedAccents.has(rawAccentLower)
+    : !legacyAccents.has(rawAccentLower)
     ? normalizeHexColor(branding.accentColor, '#1D63ED')
-    : !untouchedAccents.has(rawSecondaryLower)
+    : !legacyAccents.has(rawSecondaryLower)
     ? normalizeHexColor(branding.secondaryColor, '#1D63ED')
     : '#1D63ED'
 
   const resolvedBrandBlueHover = darkenHex(resolvedBrandBlue, 0.88)
-  const resolvedBrandBlueFg =
-    getRelativeLuminance(resolvedBrandBlue) > 0.45 ? '#0F172A' : '#FFFFFF'
+  const isLightAccent = getRelativeLuminance(resolvedBrandBlue) > 0.45
+  const resolvedBrandBlueFg = isLightAccent ? '#0F172A' : '#FFFFFF'
   const resolvedBrandBlueRing = hexToRgba(resolvedBrandBlue, 0.16)
-  const resolvedBrandBlueShadow = hexToRgba(resolvedBrandBlue, 0.22)
+  const resolvedBrandBlueShadow = hexToRgba(resolvedBrandBlue, 0.2)
+  const resolvedBrandBlueWash = hexToRgba(resolvedBrandBlue, 0.045)
+  const resolvedBrandBlueRule = hexToRgba(resolvedBrandBlue, 0.28)
 
-  const candidateBg = normalizeHexColor(branding.backgroundColor, '#F6F8FC')
+  const candidateBg = normalizeHexColor(branding.backgroundColor, '#F8FAFC')
   const resolvedCanvasBg =
-    getRelativeLuminance(candidateBg) > 0.78 ? candidateBg : '#F6F8FC'
+    getRelativeLuminance(candidateBg) > 0.8 ? candidateBg : '#F8FAFC'
 
   const candidateSurface = normalizeHexColor(branding.surfaceColor, '#FFFFFF')
   const resolvedSurfaceBg =
-    getRelativeLuminance(candidateSurface) > 0.85 ? candidateSurface : '#FFFFFF'
+    getRelativeLuminance(candidateSurface) > 0.88 ? candidateSurface : '#FFFFFF'
 
-  const untouchedTextDefaults = new Set(['#111827', '#0a0a0a', ''])
+  const legacyTextDefaults = new Set(['#111827', '#0a0a0a', ''])
   const rawTextLower = (branding.textColor || '').trim().toLowerCase()
-  const candidateHeading = !untouchedTextDefaults.has(rawTextLower)
+  const candidateHeading = !legacyTextDefaults.has(rawTextLower)
     ? normalizeHexColor(branding.textColor, '#0F172A')
     : '#0F172A'
   const resolvedHeadingText =
-    getRelativeLuminance(candidateHeading) < 0.25 ? candidateHeading : '#0F172A'
-
-  const candidateMuted = normalizeHexColor(branding.mutedTextColor, '#64748B')
-  const resolvedMutedText =
-    getRelativeLuminance(candidateMuted) < 0.45 ? candidateMuted : '#64748B'
+    getRelativeLuminance(candidateHeading) < 0.22 ? candidateHeading : '#0F172A'
 
   const rawBrandName = (branding.businessName || '').trim()
   const footerBrandName =
@@ -177,23 +227,27 @@ function LoginFormContent() {
       --login-bg: ${resolvedCanvasBg};
       --login-surface: ${resolvedSurfaceBg};
       --login-heading: ${resolvedHeadingText};
-      --login-muted: ${resolvedMutedText};
+      --login-body: #334155;
+      --login-muted: #64748B;
+      --login-border: #E2E8F0;
+      --login-border-hover: #CBD5E1;
+      --login-input-bg: #F8FAFC;
       --login-accent: ${resolvedBrandBlue};
       --login-accent-hover: ${resolvedBrandBlueHover};
       --login-accent-fg: ${resolvedBrandBlueFg};
       --login-accent-ring: ${resolvedBrandBlueRing};
       --login-accent-shadow: ${resolvedBrandBlueShadow};
+      --login-accent-wash: ${resolvedBrandBlueWash};
+      --login-accent-rule: ${resolvedBrandBlueRule};
     }
   `
 
-  // Sign In submit
+  // Primary Email & Password Sign In
   const onSubmit = async (data: LoginFormData) => {
     setAuthError('')
     try {
       const remember = Boolean(data.rememberMe)
-      const userCredential = await signInWithEmail(data.email, data.password, remember)
-      const idToken = await userCredential.user.getIdToken()
-      setSessionCookie(idToken, remember ? 604800 : 86400)
+      await signInWithEmail(data.email, data.password, remember)
 
       try {
         if (remember) {
@@ -203,27 +257,31 @@ function LoginFormContent() {
         }
       } catch {}
 
-      router.push(redirectTo)
+      window.location.assign(safeRedirectTo)
     } catch (err: unknown) {
-      const code = (err as { code?: string }).code ?? ''
-      setAuthError(getFirebaseErrorMessage(code))
+      const code = (err as { code?: string })?.code ?? ''
+      const message = (err as { message?: string })?.message ?? ''
+      if (code === 'auth/unauthorized-admin' && message) {
+        setAuthError(message)
+      } else {
+        setAuthError(getFirebaseErrorMessage(code))
+      }
     }
   }
 
-  // Google sign in trigger
+  // Google / Gmail Sign In
   const handleGoogleLogin = async () => {
     setAuthError('')
     setIsGoogleLoading(true)
     try {
       await signInWithGoogle()
-      // Hard navigation ensures __session cookie is sent to server-side middleware and layouts
-      window.location.href = redirectTo || '/dashboard'
+      window.location.assign(safeRedirectTo)
     } catch (err: unknown) {
-      const code = (err as { code?: string }).code ?? ''
-      const message = (err as { message?: string }).message ?? ''
+      const code = (err as { code?: string })?.code ?? ''
+      const message = (err as { message?: string })?.message ?? ''
 
-      if (code === 'auth/popup-closed-by-user') {
-        // User cancelled popup — no error banner needed
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        // User intentionally closed or replaced the Google chooser popup
       } else if (
         code === 'auth/unauthorized-admin' ||
         code === 'auth/configuration-not-found'
@@ -237,12 +295,12 @@ function LoginFormContent() {
     }
   }
 
-  // Password reset action
+  // Password Reset Flow
   const handlePasswordReset = async (e: React.FormEvent) => {
     e.preventDefault()
     const trimmedEmail = resetEmail.trim()
-    if (!trimmedEmail) {
-      toast.error('Please enter your email address.')
+    if (!trimmedEmail || !EMAIL_CHECK_REGEX.test(trimmedEmail)) {
+      setAuthError('Please enter a valid email address.')
       return
     }
     setAuthError('')
@@ -250,9 +308,9 @@ function LoginFormContent() {
     try {
       await sendPasswordReset(trimmedEmail)
       setResetSuccess(true)
-      toast.success('Password reset link sent!')
+      toast.success('Password reset link sent')
     } catch (err: unknown) {
-      const code = (err as { code?: string }).code ?? ''
+      const code = (err as { code?: string })?.code ?? ''
       setAuthError(getFirebaseErrorMessage(code) || 'Failed to send password reset email.')
     } finally {
       setIsResetLoading(false)
@@ -264,14 +322,18 @@ function LoginFormContent() {
     ? 'Enter your email address to receive a password reset link.'
     : 'Sign in to continue to your workspace.'
 
+  const primarySpinnerBorder = isLightAccent
+    ? 'border-slate-900/30 border-t-slate-900'
+    : 'border-white/30 border-t-white'
+
   return (
-    <main className="login-light-surface login-theme-vars min-h-[100dvh] w-full overflow-x-hidden bg-white sm:bg-[var(--login-bg)] text-[var(--login-heading)] flex flex-col relative selection:bg-[var(--login-accent)] selection:text-white">
+    <main className="login-light-surface login-theme-vars font-sans min-h-[100dvh] w-full overflow-x-hidden text-[var(--login-heading)] flex flex-col relative selection:bg-[#1D63ED] selection:text-white">
       <style dangerouslySetInnerHTML={{ __html: scopedThemeCss }} />
 
-      {/* Subtle desktop-only soft corner accent wash */}
+      {/* Subtle desktop-only geometric corner wash */}
       <div
         aria-hidden="true"
-        className="hidden lg:block pointer-events-none fixed -bottom-28 -left-28 w-[420px] h-[420px] rounded-[72px] rotate-12 bg-[var(--login-accent)]/[0.05]"
+        className="hidden lg:block pointer-events-none fixed -bottom-28 -left-28 w-[420px] h-[420px] rounded-[72px] rotate-12 bg-[var(--login-accent-wash)]"
       />
 
       <div className="w-full max-w-[1040px] mx-auto flex-1 flex flex-col justify-between px-5 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-9 relative z-10">
@@ -282,12 +344,12 @@ function LoginFormContent() {
 
         {/* Main Responsive Content Container */}
         <div className="w-full my-auto py-1 sm:py-4 lg:grid lg:grid-cols-[1fr_440px] lg:items-center lg:gap-12 xl:gap-16">
-          {/* Desktop Left Welcome Column (Subtle, hidden on mobile & tablet) */}
+          {/* Desktop Left Welcome Column */}
           <div className="hidden lg:flex flex-col items-start max-w-[400px] pr-4">
-            <h1 className="text-[38px] font-bold tracking-[-0.025em] leading-[1.15] text-[var(--login-heading)]">
+            <h1 className="text-[36px] font-bold tracking-[-0.025em] leading-[1.15] text-[var(--login-heading)] [text-wrap:balance]">
               {headingTitle}
             </h1>
-            <p className="mt-3 text-[16px] leading-relaxed text-[var(--login-muted)] font-normal">
+            <p className="mt-3 text-[16px] leading-[1.6] text-[var(--login-muted)] font-normal">
               {supportingCopy}
             </p>
             <div
@@ -296,11 +358,11 @@ function LoginFormContent() {
             />
           </div>
 
-          {/* Centered Form Column (Full-width single column on mobile, 440px card on sm+/desktop) */}
+          {/* Centered Form Column (Single column on mobile, 440px card on sm+/desktop) */}
           <div className="w-full max-w-[440px] mx-auto lg:mx-0">
             <div
               id="login-card"
-              className="w-full bg-white sm:bg-[var(--login-surface)] sm:rounded-2xl sm:border sm:border-[#E2E8F0] sm:p-8 lg:p-9 sm:shadow-[0_14px_40px_-12px_rgba(15,23,42,0.08),0_2px_6px_-1px_rgba(15,23,42,0.03)]"
+              className="w-full bg-white sm:bg-[var(--login-surface)] sm:rounded-2xl sm:border sm:border-[var(--login-border)] sm:p-8 lg:p-9 sm:shadow-[0_14px_40px_-12px_rgba(15,23,42,0.08),0_2px_6px_-1px_rgba(15,23,42,0.03)]"
             >
               {/* Desktop Card Brand Lockup */}
               <div className="hidden lg:flex justify-center mb-7">
@@ -309,19 +371,19 @@ function LoginFormContent() {
 
               {/* Mobile & Tablet Heading Block */}
               <div className="lg:hidden mb-6">
-                <h1 className="text-[26px] sm:text-[28px] font-bold tracking-[-0.025em] leading-[1.2] text-[var(--login-heading)]">
+                <h1 className="text-[26px] sm:text-[28px] font-bold tracking-[-0.025em] leading-[1.2] text-[var(--login-heading)] [text-wrap:balance]">
                   {headingTitle}
                 </h1>
-                <p className="mt-1.5 text-sm leading-relaxed text-[var(--login-muted)] font-normal">
+                <p className="mt-1.5 text-[15px] leading-[1.55] text-[var(--login-muted)] font-normal">
                   {supportingCopy}
                 </p>
                 <div
                   aria-hidden="true"
-                  className="mt-3.5 w-8 h-[2px] rounded-full bg-[var(--login-accent)]/30"
+                  className="mt-3.5 w-8 h-[2px] rounded-full bg-[var(--login-accent-rule)]"
                 />
               </div>
 
-              {/* Concise Error Banner */}
+              {/* Concise Error Alert */}
               {authError && (
                 <div
                   role="alert"
@@ -351,7 +413,7 @@ function LoginFormContent() {
                           <CheckCircle2 size={16} className="shrink-0" />
                           <span>Reset link sent</span>
                         </div>
-                        <p className="text-[#166534] leading-relaxed">
+                        <p className="text-[#166534] leading-relaxed font-normal">
                           If an account exists for{' '}
                           <strong className="font-semibold">{resetEmail.trim()}</strong>, you will
                           receive password reset instructions shortly.
@@ -367,7 +429,7 @@ function LoginFormContent() {
                           setResetEmail('')
                           setAuthError('')
                         }}
-                        className="w-full h-12 rounded-xl bg-white border border-[#E2E8F0] hover:bg-[#F8FAFC] hover:border-[#CBD5E1] text-[#0F172A] font-semibold text-sm transition-colors flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)] focus-visible:ring-offset-2"
+                        className="w-full h-12 px-5 rounded-xl bg-white border border-[var(--login-border)] hover:bg-[#F8FAFC] hover:border-[var(--login-border-hover)] text-[var(--login-heading)] font-semibold text-sm transition-colors flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)] focus-visible:ring-offset-2"
                       >
                         <ArrowLeft size={16} />
                         <span>Back to Sign In</span>
@@ -378,12 +440,12 @@ function LoginFormContent() {
                       <div className="space-y-1.5">
                         <label
                           htmlFor="reset-email-input"
-                          className="block text-[13px] font-semibold text-[var(--login-heading)]"
+                          className="block text-[13px] font-semibold leading-5 text-[var(--login-heading)]"
                         >
                           Email address
                         </label>
                         <div className="relative">
-                          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#64748B]">
+                          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[var(--login-muted)]">
                             <Mail size={18} strokeWidth={1.8} />
                           </div>
                           <input
@@ -396,7 +458,7 @@ function LoginFormContent() {
                             value={resetEmail}
                             onChange={(e) => setResetEmail(e.target.value)}
                             disabled={isResetLoading}
-                            className="w-full h-12 pl-11 pr-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] text-sm placeholder:text-[#94A3B8] transition-colors focus:bg-white focus:outline-none focus:border-[var(--login-accent)] focus:ring-4 focus:ring-[var(--login-accent-ring)] disabled:opacity-60"
+                            className="w-full h-12 pl-11 pr-4 rounded-xl bg-[var(--login-input-bg)] border border-[var(--login-border)] text-[var(--login-heading)] text-sm font-normal placeholder:text-[#94A3B8] transition-colors focus:bg-white focus:outline-none focus:border-[var(--login-accent)] focus:ring-4 focus:ring-[var(--login-accent-ring)] disabled:opacity-60"
                           />
                         </div>
                       </div>
@@ -405,17 +467,19 @@ function LoginFormContent() {
                         id="reset-submit-button"
                         type="submit"
                         disabled={isResetLoading}
-                        className="w-full h-12 rounded-xl bg-[var(--login-accent)] hover:bg-[var(--login-accent-hover)] text-[var(--login-accent-fg)] font-semibold text-sm shadow-[0_6px_18px_-4px_var(--login-accent-shadow)] transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)] focus-visible:ring-offset-2"
+                        className="w-full h-12 px-5 rounded-xl bg-[var(--login-accent)] hover:bg-[var(--login-accent-hover)] text-[var(--login-accent-fg)] font-semibold text-sm shadow-[0_6px_18px_-4px_var(--login-accent-shadow)] transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)] focus-visible:ring-offset-2"
                       >
                         {isResetLoading ? (
                           <span className="flex items-center gap-2">
-                            <span className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+                            <span
+                              className={`w-4 h-4 border-2 ${primarySpinnerBorder} rounded-full animate-spin`}
+                            />
                             <span>Sending link...</span>
                           </span>
                         ) : (
                           <>
                             <span>Send Reset Link</span>
-                            <ArrowRight size={16} />
+                            <ArrowRight size={16} strokeWidth={2.2} />
                           </>
                         )}
                       </button>
@@ -427,7 +491,7 @@ function LoginFormContent() {
                           setIsResetMode(false)
                           setAuthError('')
                         }}
-                        className="w-full min-h-[44px] rounded-xl text-[13px] font-semibold text-[#475569] hover:text-[#0F172A] hover:bg-[#F8FAFC] transition-colors flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)]"
+                        className="w-full min-h-[44px] px-4 rounded-xl text-[13px] font-semibold text-[var(--login-body)] hover:text-[var(--login-heading)] hover:bg-[#F8FAFC] transition-colors flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)]"
                       >
                         <ArrowLeft size={15} />
                         <span>Back to Sign In</span>
@@ -447,12 +511,12 @@ function LoginFormContent() {
                   <div className="space-y-1.5">
                     <label
                       htmlFor="login-email-input"
-                      className="block text-[13px] font-semibold text-[var(--login-heading)]"
+                      className="block text-[13px] font-semibold leading-5 text-[var(--login-heading)]"
                     >
                       Email address
                     </label>
                     <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#64748B]">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[var(--login-muted)]">
                         <Mail size={18} strokeWidth={1.8} />
                       </div>
                       <input
@@ -464,10 +528,10 @@ function LoginFormContent() {
                         aria-invalid={Boolean(errors.email)}
                         aria-describedby={errors.email ? 'login-email-error' : undefined}
                         disabled={isSubmitting || isGoogleLoading}
-                        className={`w-full h-12 pl-11 pr-4 rounded-xl bg-[#F8FAFC] border text-[#0F172A] text-sm placeholder:text-[#94A3B8] transition-colors focus:bg-white focus:outline-none focus:ring-4 disabled:opacity-60 ${
+                        className={`w-full h-12 pl-11 pr-4 rounded-xl bg-[var(--login-input-bg)] border text-[var(--login-heading)] text-sm font-normal placeholder:text-[#94A3B8] transition-colors focus:bg-white focus:outline-none focus:ring-4 disabled:opacity-60 ${
                           errors.email
-                            ? 'border-[#DC2626] focus:border-[#DC2626] focus:ring-[#DC2626]/15'
-                            : 'border-[#E2E8F0] focus:border-[var(--login-accent)] focus:ring-[var(--login-accent-ring)]'
+                            ? 'border-[#DC2626] focus:border-[#DC2626] focus:ring-red-600/15'
+                            : 'border-[var(--login-border)] focus:border-[var(--login-accent)] focus:ring-[var(--login-accent-ring)]'
                         }`}
                         {...register('email')}
                       />
@@ -487,12 +551,12 @@ function LoginFormContent() {
                   <div className="space-y-1.5">
                     <label
                       htmlFor="login-password-input"
-                      className="block text-[13px] font-semibold text-[var(--login-heading)]"
+                      className="block text-[13px] font-semibold leading-5 text-[var(--login-heading)]"
                     >
                       Password
                     </label>
                     <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#64748B]">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[var(--login-muted)]">
                         <Lock size={18} strokeWidth={1.8} />
                       </div>
                       <input
@@ -503,10 +567,10 @@ function LoginFormContent() {
                         aria-invalid={Boolean(errors.password)}
                         aria-describedby={errors.password ? 'login-password-error' : undefined}
                         disabled={isSubmitting || isGoogleLoading}
-                        className={`w-full h-12 pl-11 pr-12 rounded-xl bg-[#F8FAFC] border text-[#0F172A] text-sm placeholder:text-[#94A3B8] transition-colors focus:bg-white focus:outline-none focus:ring-4 disabled:opacity-60 ${
+                        className={`w-full h-12 pl-11 pr-12 rounded-xl bg-[var(--login-input-bg)] border text-[var(--login-heading)] text-sm font-normal placeholder:text-[#94A3B8] transition-colors focus:bg-white focus:outline-none focus:ring-4 disabled:opacity-60 ${
                           errors.password
-                            ? 'border-[#DC2626] focus:border-[#DC2626] focus:ring-[#DC2626]/15'
-                            : 'border-[#E2E8F0] focus:border-[var(--login-accent)] focus:ring-[var(--login-accent-ring)]'
+                            ? 'border-[#DC2626] focus:border-[#DC2626] focus:ring-red-600/15'
+                            : 'border-[var(--login-border)] focus:border-[var(--login-accent)] focus:ring-[var(--login-accent-ring)]'
                         }`}
                         {...register('password')}
                       />
@@ -517,7 +581,7 @@ function LoginFormContent() {
                         disabled={isSubmitting || isGoogleLoading}
                         aria-label={showPassword ? 'Hide password' : 'Show password'}
                         aria-pressed={showPassword}
-                        className="absolute inset-y-0 right-0 w-11 h-12 flex items-center justify-center rounded-r-xl text-[#64748B] hover:text-[#0F172A] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--login-accent)]"
+                        className="absolute inset-y-0 right-0 w-11 h-12 flex items-center justify-center rounded-r-xl text-[var(--login-muted)] hover:text-[var(--login-heading)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--login-accent)]"
                       >
                         {showPassword ? (
                           <EyeOff size={18} strokeWidth={1.8} />
@@ -558,7 +622,7 @@ function LoginFormContent() {
                           className="absolute text-[var(--login-accent-fg)] opacity-0 peer-checked:opacity-100 transition-opacity pointer-events-none"
                         />
                       </span>
-                      <span className="text-[13px] font-medium text-[#334155] group-hover:text-[#0F172A] transition-colors whitespace-nowrap">
+                      <span className="text-[13px] font-medium text-[var(--login-body)] group-hover:text-[var(--login-heading)] transition-colors whitespace-nowrap">
                         Remember me
                       </span>
                     </label>
@@ -587,11 +651,13 @@ function LoginFormContent() {
                     id="login-submit-button"
                     type="submit"
                     disabled={isSubmitting || isGoogleLoading}
-                    className="w-full h-12 rounded-xl bg-[var(--login-accent)] hover:bg-[var(--login-accent-hover)] text-[var(--login-accent-fg)] font-semibold text-sm shadow-[0_6px_18px_-4px_var(--login-accent-shadow)] transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)] focus-visible:ring-offset-2"
+                    className="w-full h-12 px-5 rounded-xl bg-[var(--login-accent)] hover:bg-[var(--login-accent-hover)] text-[var(--login-accent-fg)] font-semibold text-sm shadow-[0_6px_18px_-4px_var(--login-accent-shadow)] transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)] focus-visible:ring-offset-2"
                   >
                     {isSubmitting ? (
                       <span className="flex items-center gap-2">
-                        <span className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+                        <span
+                          className={`w-4 h-4 border-2 ${primarySpinnerBorder} rounded-full animate-spin`}
+                        />
                         <span>Signing in...</span>
                       </span>
                     ) : (
@@ -608,11 +674,11 @@ function LoginFormContent() {
               {!isResetMode && (
                 <>
                   <div className="relative my-5 flex items-center" role="separator">
-                    <div className="flex-1 border-t border-[#E2E8F0]" />
-                    <span className="px-3 text-[11px] uppercase tracking-wider text-[#94A3B8] font-semibold select-none">
+                    <div className="flex-1 border-t border-[var(--login-border)]" />
+                    <span className="px-3 text-[11px] tracking-[0.06em] text-[var(--login-muted)] font-semibold select-none">
                       OR
                     </span>
-                    <div className="flex-1 border-t border-[#E2E8F0]" />
+                    <div className="flex-1 border-t border-[var(--login-border)]" />
                   </div>
 
                   <button
@@ -620,12 +686,12 @@ function LoginFormContent() {
                     type="button"
                     disabled={isSubmitting || isGoogleLoading}
                     onClick={handleGoogleLogin}
-                    className="w-full h-12 rounded-xl bg-white border border-[#E2E8F0] hover:bg-[#F8FAFC] hover:border-[#CBD5E1] text-[#0F172A] font-semibold text-sm transition-colors flex items-center justify-center gap-2.5 disabled:opacity-60 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)] focus-visible:ring-offset-2"
+                    className="w-full h-12 px-5 rounded-xl bg-white border border-[var(--login-border)] hover:bg-[#F8FAFC] hover:border-[var(--login-border-hover)] text-[var(--login-heading)] font-semibold text-sm transition-colors flex items-center justify-center gap-2.5 disabled:opacity-60 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)] focus-visible:ring-offset-2"
                   >
                     {isGoogleLoading ? (
                       <span className="flex items-center gap-2">
-                        <span className="w-4 h-4 border-2 border-[#94A3B8]/40 border-t-[#0F172A] rounded-full animate-spin" />
-                        <span>Connecting...</span>
+                        <span className="w-4 h-4 border-2 border-slate-300 border-t-slate-900 rounded-full animate-spin" />
+                        <span>Connecting to Google...</span>
                       </span>
                     ) : (
                       <>
@@ -659,7 +725,7 @@ function LoginFormContent() {
               )}
 
               {/* Desktop Card Footer */}
-              <p className="hidden lg:block mt-7 text-center text-xs text-[#94A3B8] font-normal">
+              <p className="hidden lg:block mt-7 text-center text-xs text-[var(--login-muted)] font-normal">
                 © 2026 {footerBrandName}
               </p>
             </div>
@@ -668,7 +734,7 @@ function LoginFormContent() {
 
         {/* Mobile & Tablet Subtle Footer */}
         <footer className="lg:hidden w-full max-w-[440px] mx-auto pt-6 pb-1 text-center">
-          <p className="text-xs text-[#94A3B8] font-normal">© 2026 {footerBrandName}</p>
+          <p className="text-xs text-[var(--login-muted)] font-normal">© 2026 {footerBrandName}</p>
         </footer>
       </div>
     </main>

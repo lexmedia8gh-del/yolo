@@ -61,16 +61,15 @@ export function TopBar({ onMenuClick }: TopBarProps) {
   const handleSignOut = async () => {
     try {
       await signOut()
-      document.cookie = '__session=; Max-Age=0; path=/'
-      router.push('/login')
       toast.success('Signed out successfully')
+      window.location.assign('/login')
     } catch {
       toast.error('Failed to sign out')
     }
   }
 
   return (
-    <header className="h-16 border-b border-gray-200 dark:border-gray-800 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xs flex items-center justify-between px-4 sm:px-6 shrink-0 sticky top-0 z-20 transition-colors">
+    <header className="h-16 border-b border-gray-200 dark:border-gray-800 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm flex items-center justify-between px-4 sm:px-6 shrink-0 sticky top-0 z-20 transition-colors">
       {/* Left: Mobile menu toggle or Desktop breadcrumb */}
       <div className="flex items-center gap-3">
         <button

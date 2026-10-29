@@ -246,17 +246,22 @@ export function getFirebaseErrorMessage(code: string): string {
     'auth/user-token-expired':
       'Your session has expired. Please sign in again to continue.',
     'auth/user-mismatch':
-      'The account selected for reauthentication does not match the signed-in administrator.',
+      'The selected Google account does not match the signed-in administrator.',
     'auth/popup-closed-by-user':
-      'Reauthentication window was closed before completing verification.',
+      'Sign-in window was closed before completing authentication.',
+    'auth/popup-blocked':
+      'Sign-in popup was blocked by your browser. Please allow popups for this site and try again.',
+    'auth/unauthorized-domain':
+      'This domain is not yet authorized in Firebase Authentication settings.',
     'auth/weak-password': 'Password must be at least 6 characters long.',
     'auth/operation-not-allowed':
-      'This authentication operation is not enabled in your Firebase project settings.',
+      'Email/Password sign-in is not enabled in Firebase yet. Please use "Continue with Google" below, or enable Email/Password in your Firebase Console.',
     'auth/too-many-requests':
       'Too many attempts. Please wait a moment and try again.',
     'auth/network-request-failed': 'Network error. Please check your connection and try again.',
-    'auth/invalid-credential': 'Incorrect password or invalid credentials.',
-    'auth/configuration-not-found': 'Firebase Authentication is not configured yet. Please sign in with email and password.',
+    'auth/invalid-credential': 'Incorrect email or password. Please check your credentials and try again.',
+    'auth/configuration-not-found':
+      'Firebase Authentication is not configured yet. Please sign in with email and password.',
     'permission-denied': 'You do not have permission to perform this action.',
   }
   return messages[code] ?? 'An unexpected error occurred. Please try again.'
