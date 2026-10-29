@@ -20,6 +20,7 @@ export async function GET(
     let linkDocId = ''
     let invoiceData: any = null
     let quickJobData: any = null
+    let projectData: any = null
 
     // 1. Try querying clientLinks via Admin DB if available
     try {
@@ -109,6 +110,26 @@ export async function GET(
                     quickJobId: qjDoc.id,
                   }
                   linkDocId = qjDoc.id
+                } else {
+                  // Check Projects by doc id
+                  const projDoc = await adminDb.collection(COLLECTIONS.PROJECTS).doc(token).get()
+                  if (projDoc.exists) {
+                    const proj = projDoc.data()!
+                    projectData = { id: projDoc.id, ...proj }
+                    linkData = {
+                      token,
+                      amount: proj.outstandingBalance !== undefined ? proj.outstandingBalance : (proj.price || 0),
+                      currency: proj.currency || 'GHS',
+                      clientName: proj.clientName || '',
+                      projectName: proj.name || '',
+                      invoiceNumber: '',
+                      title: `Payment for Project: ${proj.name || ''}`,
+                      status: (proj.paymentStatus === 'Paid' || (proj.outstandingBalance !== undefined && proj.outstandingBalance <= 0)) ? 'Paid' : (proj.paymentStatus || 'Pending Payment'),
+                      paymentStatus: proj.paymentStatus || 'Pending Payment',
+                      projectId: projDoc.id,
+                    }
+                    linkDocId = projDoc.id
+                  }
                 }
               }
             }
@@ -127,6 +148,13 @@ export async function GET(
         const qjSnap = await adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(linkData.quickJobId).get()
         if (qjSnap.exists) {
           quickJobData = { id: qjSnap.id, ...qjSnap.data() }
+        }
+      }
+
+      if (linkData?.projectId) {
+        const projSnap = await adminDb.collection(COLLECTIONS.PROJECTS).doc(linkData.projectId).get()
+        if (projSnap.exists) {
+          projectData = { id: projSnap.id, ...projSnap.data() }
         }
       }
     } catch {
@@ -173,6 +201,17 @@ export async function GET(
           const qjSnap = await getDoc(qjRef)
           if (qjSnap.exists()) {
             quickJobData = { id: qjSnap.id, ...qjSnap.data() }
+          }
+        } catch {}
+      }
+
+      // Check project if available
+      if (linkData?.projectId) {
+        try {
+          const projRef = doc(db, COLLECTIONS.PROJECTS, linkData.projectId)
+          const projSnap = await getDoc(projRef)
+          if (projSnap.exists()) {
+            projectData = { id: projSnap.id, ...projSnap.data() }
           }
         } catch {}
       }
@@ -225,6 +264,31 @@ export async function GET(
       } catch {}
     }
 
+    // 4. Fallback: check projects directly by doc ID
+    if (!linkData) {
+      try {
+        const projRef = doc(db, COLLECTIONS.PROJECTS, token)
+        const projSnap = await getDoc(projRef)
+        if (projSnap.exists()) {
+          const proj = projSnap.data()!
+          projectData = { id: projSnap.id, ...proj }
+          linkData = {
+            token,
+            amount: proj.outstandingBalance !== undefined ? proj.outstandingBalance : (proj.price || 0),
+            currency: proj.currency || 'GHS',
+            clientName: proj.clientName || '',
+            projectName: proj.name || '',
+            invoiceNumber: '',
+            title: `Payment for Project: ${proj.name || ''}`,
+            status: (proj.paymentStatus === 'Paid' || (proj.outstandingBalance !== undefined && proj.outstandingBalance <= 0)) ? 'Paid' : (proj.paymentStatus || 'Pending Payment'),
+            paymentStatus: proj.paymentStatus || 'Pending Payment',
+            projectId: projSnap.id,
+          }
+          linkDocId = projSnap.id
+        }
+      } catch {}
+    }
+
     if (!linkData) {
       return NextResponse.json(
         { error: 'Payment link not found or invalid' },
@@ -232,10 +296,20 @@ export async function GET(
       )
     }
 
+    const isCancelled = linkData.status === 'Cancelled'
+    let isExpired = false
+    if (linkData.expiresAt) {
+      const expDate = linkData.expiresAt?.toDate ? linkData.expiresAt.toDate() : new Date(linkData.expiresAt)
+      if (!isNaN(expDate.getTime()) && expDate.getTime() < Date.now()) {
+        isExpired = true
+      }
+    }
+
     const isAlreadyPaid =
       linkData.status === 'Paid' ||
       linkData.paymentStatus === 'Paid' ||
-      invoiceData?.status === 'Paid'
+      invoiceData?.status === 'Paid' ||
+      (projectData && (projectData.paymentStatus === 'Paid' || (projectData.outstandingBalance !== undefined && projectData.outstandingBalance <= 0)))
 
     let deliveryAccessToken: string | null = null
     try {
@@ -253,28 +327,40 @@ export async function GET(
       }
     } catch {}
 
+    const resolvedStatus = isCancelled
+      ? 'Cancelled'
+      : isExpired
+      ? 'Expired'
+      : isAlreadyPaid
+      ? 'Paid'
+      : (linkData.status || 'Pending Payment')
+
     return NextResponse.json({
       success: true,
       link: {
         id: linkDocId,
         token: linkData.token || linkDocId,
-        amount: Number(linkData.amount || (quickJobData ? quickJobData.outstandingBalance : (invoiceData?.balanceDue || invoiceData?.total || 0))),
-        currency: linkData.currency || quickJobData?.currency || invoiceData?.currency || 'GHS',
+        amount: Number(linkData.amount || (projectData ? projectData.outstandingBalance : (quickJobData ? quickJobData.outstandingBalance : (invoiceData?.balanceDue || invoiceData?.total || 0)))),
+        currency: linkData.currency || projectData?.currency || quickJobData?.currency || invoiceData?.currency || 'GHS',
         title:
           linkData.title ||
-          (quickJobData?.jobDescription
+          (projectData?.name
+            ? `Payment for Project: ${projectData.name}`
+            : quickJobData?.jobDescription
             ? `Payment for Quick Job: ${quickJobData.jobDescription}`
             : invoiceData?.invoiceNumber
             ? `Invoice ${invoiceData.invoiceNumber} Payment`
             : `Payment from ${linkData.clientName || 'Client'}`),
-        clientName: linkData.clientName || quickJobData?.clientName || invoiceData?.clientName || 'Client',
-        projectName: linkData.projectName || quickJobData?.jobDescription || invoiceData?.projectName || '',
+        clientName: linkData.clientName || projectData?.clientName || quickJobData?.clientName || invoiceData?.clientName || 'Client',
+        projectName: linkData.projectName || projectData?.name || quickJobData?.jobDescription || invoiceData?.projectName || '',
         invoiceNumber: linkData.invoiceNumber || invoiceData?.invoiceNumber || '',
-        status: isAlreadyPaid ? 'Paid' : (linkData.status || 'Pending Payment'),
+        status: resolvedStatus,
         paymentStatus: isAlreadyPaid ? 'Paid' : (linkData.paymentStatus || 'Pending Payment'),
         notes: linkData.notes || '',
         invoiceId: linkData.invoiceId || null,
         quickJobId: linkData.quickJobId || null,
+        projectId: linkData.projectId || null,
+        expiresAt: linkData.expiresAt ? (linkData.expiresAt?.toDate ? linkData.expiresAt.toDate().toISOString() : new Date(linkData.expiresAt).toISOString()) : null,
       },
       invoice: invoiceData
         ? {
@@ -297,6 +383,22 @@ export async function GET(
             paymentStatus: quickJobData.paymentStatus,
           }
         : null,
+      project: projectData
+        ? {
+            id: projectData.id,
+            name: projectData.name,
+            serviceName: projectData.serviceName || '',
+            packageTitle: projectData.packageTitle || '',
+            price: Number(projectData.price) || 0,
+            amountPaid: Number(projectData.amountPaid) || 0,
+            outstandingBalance: Number(projectData.outstandingBalance) || 0,
+            currency: projectData.currency || 'GHS',
+            status: projectData.status,
+            paymentStatus: projectData.paymentStatus,
+          }
+        : null,
+      isCancelled,
+      isExpired,
       isAlreadyPaid,
       deliveryAccessToken,
     })

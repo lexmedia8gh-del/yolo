@@ -48,6 +48,7 @@ function PublicPaymentPageInner() {
   const [linkData, setLinkData] = useState<ClientLink | null>(null)
   const [invoiceData, setInvoiceData] = useState<Invoice | null>(null)
   const [quickJobData, setQuickJobData] = useState<any>(null)
+  const [projectData, setProjectData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [isProcessing, setIsProcessing] = useState(false)
   const [paymentSuccess, setPaymentSuccess] = useState(false)
@@ -72,6 +73,9 @@ function PublicPaymentPageInner() {
             }
             if (apiData.quickJob) {
               setQuickJobData(apiData.quickJob)
+            }
+            if (apiData.project) {
+              setProjectData(apiData.project)
             }
             if (apiData.isAlreadyPaid) {
               setPaymentSuccess(true)
@@ -127,6 +131,20 @@ function PublicPaymentPageInner() {
             if (qj) {
               setQuickJobData(qj)
               if (qj.paymentStatus === 'Paid' || (qj.outstandingBalance !== undefined && qj.outstandingBalance <= 0)) {
+                setPaymentSuccess(true)
+              }
+            }
+          } catch {}
+        }
+
+        // Safe project lookup
+        if (match.projectId) {
+          try {
+            const allProjects = await getDocuments<any>(COLLECTIONS.PROJECTS)
+            const proj = allProjects.find((p) => p.id === match.projectId)
+            if (proj) {
+              setProjectData(proj)
+              if (proj.paymentStatus === 'Paid' || (proj.outstandingBalance !== undefined && proj.outstandingBalance <= 0)) {
                 setPaymentSuccess(true)
               }
             }
@@ -257,26 +275,38 @@ function PublicPaymentPageInner() {
     paymentSuccess ||
     linkData.status === 'Paid' ||
     linkData.paymentStatus === 'Paid' ||
-    (invoiceData && invoiceData.status === 'Paid')
+    (invoiceData && invoiceData.status === 'Paid') ||
+    (projectData && (projectData.paymentStatus === 'Paid' || (projectData.outstandingBalance !== undefined && projectData.outstandingBalance <= 0)))
+
   const isCancelled = linkData.status === 'Cancelled'
+  const isExpired =
+    linkData.status === 'Expired' ||
+    (linkData.expiresAt ? new Date(linkData.expiresAt as string).getTime() < Date.now() : false)
 
   const isQuickJob = !!quickJobData || !!linkData.quickJobId
+  const isProject = !isQuickJob && (!!projectData || !!linkData.projectId)
 
-  const invoiceTotal = quickJobData
-    ? Number(quickJobData.originalAgreedPrice || 0)
+  const originalTotal = isQuickJob
+    ? Number(quickJobData?.originalAgreedPrice || 0)
+    : isProject
+    ? Number(projectData?.price || linkData.amount || 0)
     : (invoiceData?.total || linkData.amount || 0)
 
   const paymentReceivedAmount = verifiedAmount || linkData.amount || 0
 
-  const totalPaid = quickJobData
-    ? Number(quickJobData.amountPaid || 0) + (paymentSuccess ? paymentReceivedAmount : 0)
-    : (invoiceData?.amountPaid ?? (isAlreadyPaid ? invoiceTotal : paymentReceivedAmount))
+  const totalPaid = isQuickJob
+    ? Number(quickJobData?.amountPaid || 0) + (paymentSuccess ? paymentReceivedAmount : 0)
+    : isProject
+    ? Number(projectData?.amountPaid || 0) + (paymentSuccess ? paymentReceivedAmount : 0)
+    : (invoiceData?.amountPaid ?? (isAlreadyPaid ? originalTotal : paymentReceivedAmount))
 
-  const remainingBalance = quickJobData
-    ? Math.max(0, invoiceTotal - totalPaid)
-    : (invoiceData?.balanceDue ?? Math.max(0, invoiceTotal - totalPaid))
+  const remainingBalance = isQuickJob
+    ? Math.max(0, originalTotal - totalPaid)
+    : isProject
+    ? Math.max(0, (projectData?.outstandingBalance !== undefined ? Number(projectData.outstandingBalance) : originalTotal) - (paymentSuccess ? paymentReceivedAmount : 0))
+    : (invoiceData?.balanceDue ?? Math.max(0, originalTotal - totalPaid))
 
-  const isFullyPaid = remainingBalance <= 0 || invoiceData?.status === 'Paid' || linkData.status === 'Paid'
+  const isFullyPaid = remainingBalance <= 0 || invoiceData?.status === 'Paid' || linkData.status === 'Paid' || projectData?.paymentStatus === 'Paid'
 
   if (isAlreadyPaid || paymentSuccess) {
     return (
@@ -334,41 +364,41 @@ function PublicPaymentPageInner() {
                   <div className="bg-gray-50/80 rounded-2xl p-5 border border-gray-200/70 text-left space-y-3">
                     <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-200/65">
                       <span className="text-gray-500 font-medium">Client</span>
-                      <span className="font-bold text-gray-900 text-right">{linkData.clientName || quickJobData?.clientName || invoiceData?.clientName || 'Valued Client'}</span>
+                      <span className="font-bold text-gray-900 text-right">{linkData.clientName || projectData?.clientName || quickJobData?.clientName || invoiceData?.clientName || 'Valued Client'}</span>
                     </div>
 
                     <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-200/65">
-                      <span className="text-gray-500 font-medium">{isQuickJob ? 'Job Description' : 'Project / Service'}</span>
+                      <span className="text-gray-500 font-medium">{isQuickJob ? 'Job Description' : isProject ? 'Project' : 'Project / Service'}</span>
                       <span className="font-semibold text-gray-900 text-right">
-                        {quickJobData?.jobDescription || linkData.projectName || invoiceData?.projectName || linkData.title || 'Professional Service'}
+                        {projectData?.name || quickJobData?.jobDescription || linkData.projectName || invoiceData?.projectName || linkData.title || 'Professional Service'}
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-200/65">
                       <span className="text-gray-500 font-medium">Payment Received</span>
                       <span className="font-mono font-bold text-emerald-600">
-                        {formatCurrency(paymentReceivedAmount, linkData.currency || invoiceData?.currency || quickJobData?.currency)}
+                        {formatCurrency(paymentReceivedAmount, linkData.currency || projectData?.currency || invoiceData?.currency || quickJobData?.currency)}
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-200/65">
-                      <span className="text-gray-500 font-medium">{isQuickJob ? 'Original Job Total' : 'Invoice Total'}</span>
+                      <span className="text-gray-500 font-medium">{isQuickJob ? 'Original Job Total' : isProject ? 'Original Project Price' : 'Invoice Total'}</span>
                       <span className="font-mono font-semibold text-gray-900">
-                        {formatCurrency(invoiceTotal, linkData.currency || invoiceData?.currency || quickJobData?.currency)}
+                        {formatCurrency(originalTotal, linkData.currency || projectData?.currency || invoiceData?.currency || quickJobData?.currency)}
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-200/65">
                       <span className="text-gray-500 font-medium">Total Paid to Date</span>
                       <span className="font-mono font-semibold text-gray-900">
-                        {formatCurrency(totalPaid, linkData.currency || invoiceData?.currency || quickJobData?.currency)}
+                        {formatCurrency(totalPaid, linkData.currency || projectData?.currency || invoiceData?.currency || quickJobData?.currency)}
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between text-sm py-2 font-bold pt-1">
                       <span className="text-gray-800">Remaining Balance</span>
                       <span className="font-mono text-indigo-600 text-base">
-                        {formatCurrency(remainingBalance, linkData.currency || invoiceData?.currency || quickJobData?.currency)}
+                        {formatCurrency(remainingBalance, linkData.currency || projectData?.currency || invoiceData?.currency || quickJobData?.currency)}
                       </span>
                     </div>
                   </div>
@@ -446,7 +476,7 @@ function PublicPaymentPageInner() {
                 {/* Amount Header Banner */}
                 <div className="text-center p-6 rounded-2xl bg-gradient-to-b from-gray-50 to-white border border-gray-100 space-y-1.5 shadow-sm">
                   <span className="text-[11px] font-bold uppercase tracking-widest text-gray-400">
-                    {isAlreadyPaid ? 'Amount Paid' : isQuickJob ? 'Amount Due for This Payment' : 'Total Amount Due'}
+                    {isAlreadyPaid ? 'Amount Paid' : (isQuickJob || isProject) ? 'Amount Due for This Payment' : 'Total Amount Due'}
                   </span>
                   <div className="text-4xl sm:text-5xl font-black tracking-tight text-indigo-600 dark:text-indigo-600 font-mono">
                     {formatCurrency(linkData.amount || invoiceData?.balanceDue || 0, linkData.currency || invoiceData?.currency)}
@@ -460,6 +490,10 @@ function PublicPaymentPageInner() {
                       <Badge variant="danger" className="px-3.5 py-1 font-semibold text-xs">
                         Cancelled
                       </Badge>
+                    ) : isExpired ? (
+                      <Badge variant="danger" className="px-3.5 py-1 font-semibold text-xs">
+                        Expired
+                      </Badge>
                     ) : (
                       <Badge variant="warning" className="px-3.5 py-1 font-semibold text-xs gap-1.5 shadow-sm">
                         <Clock size={13} /> Awaiting Secure Payment
@@ -467,6 +501,61 @@ function PublicPaymentPageInner() {
                     )}
                   </div>
                 </div>
+
+                {/* Project Financial Breakdown (Requirement 3) */}
+                {isProject && projectData && (
+                  <div className="bg-slate-50/90 rounded-2xl p-5 border border-gray-200/80 space-y-3 text-xs sm:text-sm">
+                    <div className="flex items-start justify-between text-gray-600 font-medium pb-2 border-b border-gray-200/60">
+                      <span className="text-gray-500">Project</span>
+                      <span className="font-semibold text-gray-900 text-right max-w-[260px]">
+                        {projectData.name || linkData.projectName || 'Project'}
+                      </span>
+                    </div>
+                    {(projectData.serviceName || projectData.packageTitle) && (
+                      <div className="flex items-start justify-between text-gray-600 font-medium pb-2 border-b border-gray-200/60">
+                        <span className="text-gray-500">Service / Package</span>
+                        <span className="font-semibold text-gray-900 text-right max-w-[260px]">
+                          {[projectData.serviceName, projectData.packageTitle].filter(Boolean).join(' • ')}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between text-gray-600 font-medium pb-2 border-b border-gray-200/60">
+                      <span className="text-gray-500">Original Project Total</span>
+                      <span className="font-mono font-bold text-gray-900">
+                        {formatCurrency(projectData.price, linkData.currency || projectData.currency)}
+                      </span>
+                    </div>
+                    {Number(projectData.amountPaid || 0) > 0 && (
+                      <div className="flex items-center justify-between text-gray-600 font-medium pb-2 border-b border-gray-200/60">
+                        <span className="text-gray-500">Previously Paid Amount</span>
+                        <span className="font-mono font-semibold text-emerald-600">
+                          {formatCurrency(projectData.amountPaid || 0, linkData.currency || projectData.currency)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between font-bold text-gray-900 pb-2 border-b border-gray-200/60">
+                      <span className="text-indigo-600 font-semibold">Amount Due for This Payment</span>
+                      <span className="font-mono text-indigo-600 text-base">
+                        {formatCurrency(linkData.amount || 0, linkData.currency || projectData.currency)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-gray-700 font-medium pt-0.5">
+                      <span className="text-gray-500">Remaining Balance After Payment</span>
+                      <span className="font-mono font-bold text-gray-900">
+                        {formatCurrency(
+                          Math.max(
+                            0,
+                            (projectData.outstandingBalance !== undefined
+                              ? Number(projectData.outstandingBalance)
+                              : Number(projectData.price || 0) - Number(projectData.amountPaid || 0)) -
+                              Number(linkData.amount || 0)
+                          ),
+                          linkData.currency || projectData.currency
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Quick Job Financial Breakdown (Specification Requirement 3) */}
                 {isQuickJob && quickJobData && (
@@ -515,8 +604,8 @@ function PublicPaymentPageInner() {
                   </div>
                 )}
 
-                {/* Invoice Financial Breakdown (if invoice data exists and not quick job) */}
-                {invoiceData && !isQuickJob && (
+                {/* Invoice Financial Breakdown (if invoice data exists and not quick job and not project) */}
+                {invoiceData && !isQuickJob && !isProject && (
                   <div className="bg-slate-50 rounded-2xl p-4 border border-gray-200/60 space-y-2.5 text-xs">
                     <div className="flex items-center justify-between text-gray-600 font-medium pb-2 border-b border-gray-200/60">
                       <span>Invoice Total</span>
@@ -538,21 +627,24 @@ function PublicPaymentPageInner() {
                 {/* Summary Metadata */}
                 <StaggerContainer delayStart={0.18} className="space-y-3 pt-1">
                   <StaggerItem>
-                    <div className="flex items-center justify-between text-sm py-2.5 border-b border-gray-100">
-                      <span className="text-gray-500 flex items-center gap-2">
-                        <Building2 size={16} className="text-gray-400" /> Client
-                      </span>
-                      <span className="font-semibold text-gray-900 text-right">{linkData.clientName || quickJobData?.clientName || invoiceData?.clientName || 'Valued Client'}</span>
-                    </div>
-                  </StaggerItem>
+                  {(linkData.clientName || projectData?.clientName || quickJobData?.clientName || invoiceData?.clientName) && (
+                    <StaggerItem>
+                      <div className="flex items-center justify-between text-sm py-2.5 border-b border-gray-100">
+                        <span className="text-gray-500 flex items-center gap-2">
+                          <Building2 size={16} className="text-gray-400" /> Client
+                        </span>
+                        <span className="font-semibold text-gray-900 text-right">{linkData.clientName || projectData?.clientName || quickJobData?.clientName || invoiceData?.clientName || 'Valued Client'}</span>
+                      </div>
+                    </StaggerItem>
+                  )}
 
-                  {(linkData.projectName || quickJobData?.jobDescription || invoiceData?.projectName) && (
+                  {(linkData.projectName || projectData?.name || quickJobData?.jobDescription || invoiceData?.projectName) && (
                     <StaggerItem>
                       <div className="flex items-center justify-between text-sm py-2.5 border-b border-gray-100">
                         <span className="text-gray-500 flex items-center gap-2">
                           <FileText size={16} className="text-gray-400" /> {isQuickJob ? 'Job Description' : 'Project'}
                         </span>
-                        <span className="font-semibold text-gray-900 text-right">{quickJobData?.jobDescription || linkData.projectName || invoiceData?.projectName}</span>
+                        <span className="font-semibold text-gray-900 text-right">{projectData?.name || quickJobData?.jobDescription || linkData.projectName || invoiceData?.projectName}</span>
                       </div>
                     </StaggerItem>
                   )}
@@ -593,8 +685,12 @@ function PublicPaymentPageInner() {
                       </p>
                     </SuccessReveal>
                   ) : isCancelled ? (
-                    <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 text-center text-sm text-gray-500">
+                    <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 text-center text-sm text-gray-500 font-medium">
                       This payment link is no longer accepting payments.
+                    </div>
+                  ) : isExpired ? (
+                    <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-center text-sm text-amber-700 font-medium">
+                      This payment link has expired and can no longer be used.
                     </div>
                   ) : (
                     <Button

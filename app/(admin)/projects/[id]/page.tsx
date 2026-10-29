@@ -38,6 +38,8 @@ import { where } from '@/lib/firebase/firestore'
 import { ProjectDeliveryManager } from '@/components/delivery/ProjectDeliveryManager'
 import { RecordPaymentModal } from '@/components/payments/RecordPaymentModal'
 import { PaymentDetailsModal } from '@/components/payments/PaymentDetailsModal'
+import { ProjectPaymentLinkModal } from '@/components/projects/ProjectPaymentLinkModal'
+import { ProjectPaymentRequests } from '@/components/projects/ProjectPaymentRequests'
 import type { Project, Invoice, Payment, ClientLink, ProjectStatus } from '@/lib/types'
 import {
   formatCurrency,
@@ -70,6 +72,8 @@ export default function ProjectDetailPage() {
   const [invoice, setInvoice] = useState<Invoice | null>(null)
   const [payments, setPayments] = useState<Payment[]>([])
   const [paymentLink, setPaymentLink] = useState<ClientLink | null>(null)
+  const [projectLinks, setProjectLinks] = useState<ClientLink[]>([])
+  const [showCreateLinkModal, setShowCreateLinkModal] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const [updatingStatus, setUpdatingStatus] = useState(false)
@@ -114,7 +118,13 @@ export default function ProjectDetailPage() {
       const links = await getDocuments<ClientLink>(COLLECTIONS.CLIENT_LINKS, [
         where('projectId', '==', id),
       ])
-      setPaymentLink(links[0] ?? null)
+      const sortedLinks = (links || []).sort((a: any, b: any) => {
+        const aDate = a.createdAt ? new Date(a.createdAt as any).getTime() : 0
+        const bDate = b.createdAt ? new Date(b.createdAt as any).getTime() : 0
+        return bDate - aDate
+      })
+      setProjectLinks(sortedLinks)
+      setPaymentLink(sortedLinks[0] ?? null)
     } catch (err) {
       console.error('Project reload error:', err)
     }
@@ -227,7 +237,16 @@ export default function ProjectDetailPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<Link2 size={14} />}
+            onClick={() => setShowCreateLinkModal(true)}
+            disabled={balance <= 0}
+          >
+            Create Payment Link
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -406,6 +425,14 @@ export default function ProjectDetailPage() {
             </div>
           )}
 
+          {/* Project Payment Requests & Links */}
+          <ProjectPaymentRequests
+            project={project}
+            links={projectLinks}
+            onRefresh={reloadProjectData}
+            onOpenCreateModal={() => setShowCreateLinkModal(true)}
+          />
+
           {/* Client Delivery File System */}
           <ProjectDeliveryManager
             project={project}
@@ -543,6 +570,20 @@ export default function ProjectDetailPage() {
           onSuccess={() => {
             reloadProjectData()
             toast.success('Payment recorded successfully')
+          }}
+        />
+      )}
+
+      {/* Project Payment Link Creation Modal */}
+      {project && (
+        <ProjectPaymentLinkModal
+          isOpen={showCreateLinkModal}
+          onClose={() => setShowCreateLinkModal(false)}
+          project={project}
+          client={client}
+          onSuccess={() => {
+            reloadProjectData()
+            setShowCreateLinkModal(false)
           }}
         />
       )}

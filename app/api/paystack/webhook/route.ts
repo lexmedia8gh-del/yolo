@@ -109,6 +109,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // If still no clientLink, try by paymentRequestId from metadata
+    if (!linkData && metadata.paymentRequestId) {
+      const prDoc = await adminDb.collection('clientLinks').doc(metadata.paymentRequestId).get()
+      if (prDoc.exists) {
+        linkRef = prDoc.ref
+        linkData = prDoc.data()
+      }
+    }
+
     // Build the batch
     const batch = adminDb.batch()
 
@@ -158,8 +167,19 @@ export async function POST(req: NextRequest) {
       const projectSnap = await projectRef.get()
       if (projectSnap.exists) {
         const proj = projectSnap.data()!
-        const projTotal = proj.price ?? 0
-        const prevProjPaid = proj.amountPaid ?? 0
+        const projTotal = Number(proj.price ?? 0)
+
+        // Calculate verified payments sum + offline payments
+        const existingPmtsSnap = await adminDb
+          .collection('payments')
+          .where('projectId', '==', projectId)
+          .where('status', '==', 'success')
+          .get()
+        const existingPaidFromPmts = existingPmtsSnap.docs.reduce(
+          (sum, doc) => sum + (Number(doc.data().amount) || 0),
+          0
+        )
+        const prevProjPaid = Math.max(existingPaidFromPmts, Number(proj.amountPaid || 0))
         const newProjPaid = prevProjPaid + amountPaid
         const newProjBalance = Math.max(0, projTotal - newProjPaid)
         const newProjPayStatus = newProjPaid >= projTotal ? 'Paid' : 'Partially Paid'
@@ -301,7 +321,7 @@ export async function POST(req: NextRequest) {
       clientName,
       projectId,
       quickJobId,
-      paymentRequestId: linkRef?.id || linkData?.id || token || '',
+      paymentRequestId: metadata.paymentRequestId || linkRef?.id || linkData?.id || token || '',
       deliveryId: deliveryDocToUnlock?.id || targetDeliveryId || '',
       deliveryAccessToken: resolvedDeliveryAccessToken,
       paystackReference: reference,

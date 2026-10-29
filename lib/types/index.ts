@@ -315,11 +315,12 @@ export interface ClientLink {
   isCustom?: boolean
   status: 'Pending Payment' | 'Payment Processing' | 'Paid' | 'Failed' | 'Expired' | 'Cancelled' | 'active' | 'disabled' | 'archived'
   paymentStatus: PaymentStatus
-  expiresAt?: Timestamp
+  paystackReference?: string
+  expiresAt?: Timestamp | string
   viewCount: number
-  lastViewedAt?: Timestamp
-  createdAt: Timestamp
-  updatedAt: Timestamp
+  lastViewedAt?: Timestamp | string
+  createdAt: Timestamp | string
+  updatedAt?: Timestamp | string
   createdBy: string
 }
 

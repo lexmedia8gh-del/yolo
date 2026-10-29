@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
     let serverQuickJobId = ''
     let serverProjectId = ''
     let serverClientId = ''
+    let serverPaymentRequestId = ''
 
     // ─── Resolve Server-Truth Financial Data ──────────────────────────
     if (token) {
@@ -29,6 +30,7 @@ export async function POST(req: NextRequest) {
       if (!linkSnap.empty) {
         const linkDoc = linkSnap.docs[0]
         const linkData = linkDoc.data()
+        serverPaymentRequestId = linkDoc.id
 
         // Check if payment link is already paid
         if (linkData.status === 'Paid' || linkData.paymentStatus === 'Paid') {
@@ -162,16 +164,17 @@ export async function POST(req: NextRequest) {
               }, { status: 400 })
             }
 
-            const targetAmount = savedRequestAmount > 0 ? Math.min(savedRequestAmount, balance) : balance
+            const targetAmount = savedRequestAmount > 0 ? savedRequestAmount : balance
             if (targetAmount <= 0) {
               return NextResponse.json({ error: 'Payment amount must be greater than zero.' }, { status: 400 })
             }
-            if (savedRequestAmount > balance) {
+            if (targetAmount > balance) {
               return NextResponse.json({
-                error: `Payment amount exceeds current project balance of GH₵${balance.toFixed(2)}.`,
+                error: `Payment amount (GH₵${targetAmount.toFixed(2)}) exceeds current project outstanding balance of GH₵${balance.toFixed(2)}.`,
               }, { status: 400 })
             }
             serverAmount = targetAmount
+            serverInvoiceNumber = projData.reference || `PROJ-${serverProjectId.slice(0, 8).toUpperCase()}`
           }
         }
       } else {
@@ -301,6 +304,26 @@ export async function POST(req: NextRequest) {
               const verifiedPaymentsSum = paymentsSnap.docs.reduce((sum, doc) => sum + (Number(doc.data().amount) || 0), 0)
               const trustedPaid = Math.max(verifiedPaymentsSum, Number(invData.amountPaid || 0))
               serverAmount = Math.max(0, total - trustedPaid)
+            } else {
+              // 5. Try checking projects directly by doc id
+              const projDoc = await adminDb.collection(COLLECTIONS.PROJECTS).doc(token).get()
+              if (projDoc.exists) {
+                const projData = projDoc.data()!
+                serverProjectId = projDoc.id
+                serverClientId = projData.clientId || ''
+                serverClientName = projData.clientName || serverClientName
+                serverEmail = projData.clientEmail || serverEmail
+                serverInvoiceNumber = projData.reference || `PROJ-${serverProjectId.slice(0, 8).toUpperCase()}`
+                const total = Number(projData.price || projData.totalAmount || 0)
+                const paymentsSnap = await adminDb
+                  .collection(COLLECTIONS.PAYMENTS)
+                  .where('projectId', '==', serverProjectId)
+                  .where('status', '==', 'success')
+                  .get()
+                const verifiedPaymentsSum = paymentsSnap.docs.reduce((sum, doc) => sum + (Number(doc.data().amount) || 0), 0)
+                const trustedPaid = Math.max(verifiedPaymentsSum, Number(projData.amountPaid || 0))
+                serverAmount = Math.max(0, total - trustedPaid)
+              }
             }
           }
         }
@@ -360,6 +383,7 @@ export async function POST(req: NextRequest) {
         callback_url: callbackUrl,
         metadata: {
           token: token || null,
+          paymentRequestId: serverPaymentRequestId || null,
           deliveryAccessToken: serverDeliveryAccessToken || null,
           deliveryId: serverDeliveryId || null,
           invoiceId: serverInvoiceId || null,

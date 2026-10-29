@@ -181,6 +181,21 @@ export async function GET(req: NextRequest) {
           amount: invData.balanceDue !== undefined ? invData.balanceDue : (invData.total || 0),
           status: 'Pending',
         }
+      } else {
+        // 2.7 Fallback: check projects directly by doc id
+        const projDoc = await adminDb.collection('projects').doc(token).get()
+        if (projDoc.exists) {
+          const pData = projDoc.data()!
+          linkData = {
+            projectId: projDoc.id,
+            projectName: pData.name || '',
+            clientId: pData.clientId || '',
+            clientName: pData.clientName || 'Client',
+            clientEmail: pData.clientEmail || '',
+            amount: pData.outstandingBalance !== undefined ? pData.outstandingBalance : (pData.price || 0),
+            status: 'Pending',
+          }
+        }
       }
     }
 
@@ -247,8 +262,19 @@ export async function GET(req: NextRequest) {
       const projectSnap = await projectRef.get()
       if (projectSnap.exists) {
         const proj = projectSnap.data()!
-        const projTotal = proj.price ?? 0
-        const prevProjPaid = proj.amountPaid ?? 0
+        const projTotal = Number(proj.price ?? 0)
+
+        // Calculate verified payments sum + offline payments
+        const existingPmtsSnap = await adminDb
+          .collection('payments')
+          .where('projectId', '==', linkData.projectId)
+          .where('status', '==', 'success')
+          .get()
+        const existingPaidFromPmts = existingPmtsSnap.docs.reduce(
+          (sum, doc) => sum + (Number(doc.data().amount) || 0),
+          0
+        )
+        const prevProjPaid = Math.max(existingPaidFromPmts, Number(proj.amountPaid || 0))
         const newProjPaid = prevProjPaid + amountPaid
         const newProjBalance = Math.max(0, projTotal - newProjPaid)
         const newProjPayStatus = newProjPaid >= projTotal ? 'Paid' : 'Partially Paid'
