@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Building2,
   CreditCard,
@@ -12,6 +12,12 @@ import {
   Palette,
   RotateCcw,
   Layers,
+  Mail,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  RefreshCw,
+  ShieldCheck,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card } from '@/components/ui/Card'
@@ -23,7 +29,14 @@ import { LogoUploadField } from '@/components/branding/LogoUploadField'
 import { sanitizeBrandingLogoUrl } from '@/lib/hooks/useInvoiceBranding'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { getDocument, setDocument, COLLECTIONS } from '@/lib/firebase/firestore'
-import { changePassword } from '@/lib/firebase/auth'
+import {
+  changePassword,
+  getActiveIdToken,
+  initiateAdminEmailChange,
+  reauthenticateAdminWithGoogle,
+  updateAdminDisplayName,
+} from '@/lib/firebase/auth'
+import { getFirebaseErrorMessage } from '@/lib/utils'
 import type { BusinessSettings, BrandingSettings } from '@/lib/types'
 import toast from 'react-hot-toast'
 
@@ -133,18 +146,77 @@ function ColorField({
   )
 }
 
+const ACCOUNT_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+
 export default function SettingsPage() {
-  const { user, lexUser } = useAuth()
+  const { user, lexUser, refreshUser } = useAuth()
   const [activeTab, setActiveTab] = useState<SettingsTab>('business')
   const [settings, setSettings] = useState<Partial<BusinessSettings>>(DEFAULT_SETTINGS)
   const [branding, setBranding] = useState<BrandingSettings>(DEFAULT_BRANDING)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
+  // Account Profile Editing State
+  const [accountName, setAccountName] = useState('')
+  const [accountEmail, setAccountEmail] = useState('')
+  const [accountEdited, setAccountEdited] = useState(false)
+  const [accountSaving, setAccountSaving] = useState(false)
+  const [accountNameError, setAccountNameError] = useState('')
+  const [accountEmailError, setAccountEmailError] = useState('')
+  const [accountGeneralError, setAccountGeneralError] = useState('')
+  const [accountSuccessMsg, setAccountSuccessMsg] = useState('')
+
+  // Reauthentication & Pending Verification State
+  const [reauthPassword, setReauthPassword] = useState('')
+  const [reauthPasswordError, setReauthPasswordError] = useState('')
+  const [needsReauthPrompt, setNeedsReauthPrompt] = useState(false)
+  const [checkingPendingEmail, setCheckingPendingEmail] = useState(false)
+  const [resendingPendingEmail, setResendingPendingEmail] = useState(false)
+
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [passwordLoading, setPasswordLoading] = useState(false)
+
+  const baselineName = (lexUser?.name || user?.displayName || '').trim()
+  const baselineEmail = (user?.email || lexUser?.email || '').trim()
+  const pendingVerificationEmail =
+    lexUser?.pendingEmail &&
+    lexUser.pendingEmail.trim().toLowerCase() !== baselineEmail.toLowerCase()
+      ? lexUser.pendingEmail.trim()
+      : null
+
+  const normalizedInputName = accountName.trim().replace(/\s+/g, ' ')
+  const normalizedInputEmail = accountEmail.trim().toLowerCase()
+  const isNameChanged = normalizedInputName !== baselineName.replace(/\s+/g, ' ')
+  const isEmailChanged =
+    Boolean(baselineEmail) && normalizedInputEmail !== baselineEmail.toLowerCase()
+  const hasAccountChanges = isNameChanged || isEmailChanged
+
+  const hasPasswordProvider =
+    !user?.providerIds || user.providerIds.includes('password')
+  const hasGoogleProvider = Boolean(user?.providerIds?.includes('google.com'))
+
+  // Support ?tab=account deep-linking (including return from email verification link)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const tabParam = params.get('tab') as SettingsTab | null
+    if (tabParam && tabs.some((t) => t.id === tabParam)) {
+      setActiveTab(tabParam)
+      if (tabParam === 'account') {
+        refreshUser().catch(() => {})
+      }
+    }
+  }, [refreshUser])
+
+  // Keep form prepopulated with authoritative profile values unless user has unsaved edits
+  useEffect(() => {
+    if (!accountEdited) {
+      if (baselineName) setAccountName(baselineName)
+      if (baselineEmail) setAccountEmail(baselineEmail)
+    }
+  }, [baselineName, baselineEmail, accountEdited])
 
   useEffect(() => {
     let active = true
@@ -290,6 +362,374 @@ export default function SettingsPage() {
     }
   }
 
+  const validateAccountInputs = (): boolean => {
+    let valid = true
+    setAccountNameError('')
+    setAccountEmailError('')
+    setReauthPasswordError('')
+    setAccountGeneralError('')
+
+    if (!normalizedInputName) {
+      setAccountNameError('Full name cannot be empty.')
+      valid = false
+    } else if (normalizedInputName.length < 2) {
+      setAccountNameError('Full name must be at least 2 characters.')
+      valid = false
+    } else if (normalizedInputName.length > 120) {
+      setAccountNameError('Full name must be 120 characters or fewer.')
+      valid = false
+    }
+
+    if (!normalizedInputEmail) {
+      setAccountEmailError('Email address cannot be empty.')
+      valid = false
+    } else if (
+      normalizedInputEmail.length > 254 ||
+      !ACCOUNT_EMAIL_REGEX.test(normalizedInputEmail)
+    ) {
+      setAccountEmailError('Please enter a valid email address.')
+      valid = false
+    }
+
+    if (
+      isEmailChanged &&
+      needsReauthPrompt &&
+      hasPasswordProvider &&
+      !hasGoogleProvider &&
+      !reauthPassword
+    ) {
+      setReauthPasswordError('Please enter your current password to confirm this email change.')
+      valid = false
+    }
+
+    return valid
+  }
+
+  const executeAccountSave = async (options?: { skipPasswordOption?: boolean }) => {
+    if (accountSaving) return
+    if (!hasAccountChanges) return
+    if (!validateAccountInputs()) return
+
+    if (!user?.uid) {
+      setAccountGeneralError('Your session has expired. Please sign in again to save changes.')
+      return
+    }
+
+    setAccountSaving(true)
+    setAccountGeneralError('')
+    setAccountSuccessMsg('')
+
+    try {
+      const initialToken = await getActiveIdToken()
+      if (!initialToken) {
+        throw Object.assign(
+          new Error('Your session has expired. Please sign in again.'),
+          { code: 'auth/user-token-expired' }
+        )
+      }
+
+      // 1. Process Firebase Authentication email change first if email was modified
+      let emailOutcome:
+        | { status: 'updated'; activeEmail: string }
+        | { status: 'verification_sent'; activeEmail: string; pendingEmail: string }
+        | null = null
+
+      if (isEmailChanged) {
+        emailOutcome = await initiateAdminEmailChange(
+          normalizedInputEmail,
+          !options?.skipPasswordOption && reauthPassword
+            ? { currentPassword: reauthPassword }
+            : undefined
+        )
+      }
+
+      // 2. Persist & verify via backend admin account route BEFORE mutating client profile state
+      //    so network or backend failures never leave partial client state or falsely report success.
+      const latestToken = (await getActiveIdToken(true)) || initialToken
+      let patchRes: Response
+      try {
+        patchRes = await fetch('/api/admin/account', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${latestToken}`,
+          },
+          body: JSON.stringify({
+            ...(isNameChanged ? { name: normalizedInputName } : {}),
+            ...(emailOutcome?.status === 'verification_sent'
+              ? { pendingEmail: emailOutcome.pendingEmail }
+              : isEmailChanged
+              ? { pendingEmail: null }
+              : {}),
+          }),
+        })
+      } catch {
+        throw Object.assign(
+          new Error('Network error while saving profile changes. Please check your connection and try again.'),
+          { code: 'auth/network-request-failed' }
+        )
+      }
+
+      const patchPayload = await patchRes.json().catch(() => ({}))
+      if (!patchRes.ok || patchPayload?.ok === false) {
+        if (patchPayload?.field === 'name') {
+          setAccountNameError(patchPayload.error || 'Invalid full name.')
+          return
+        }
+        if (patchPayload?.field === 'email') {
+          setAccountEmailError(patchPayload.error || 'Invalid email address.')
+          return
+        }
+        throw Object.assign(
+          new Error(patchPayload?.error || 'Failed to save account changes.'),
+          { code: patchPayload?.code || (patchRes.status === 401 ? 'auth/user-token-expired' : 'backend-error') }
+        )
+      }
+
+      // 3. Process Firebase Authentication displayName update if name was modified
+      if (isNameChanged) {
+        await updateAdminDisplayName(normalizedInputName)
+      }
+
+      // 4. Synchronize Firestore users/{uid} document without overwriting unrelated fields
+      const authoritativeEmail =
+        emailOutcome?.status === 'updated'
+          ? emailOutcome.activeEmail
+          : emailOutcome?.status === 'verification_sent'
+          ? emailOutcome.activeEmail
+          : baselineEmail
+
+      const firestoreUpdate: Record<string, unknown> = {
+        uid: user.uid,
+        email: authoritativeEmail,
+        role: lexUser?.role || 'admin',
+      }
+
+      if (isNameChanged) {
+        firestoreUpdate.name = normalizedInputName
+        firestoreUpdate.displayName = normalizedInputName
+      }
+
+      if (emailOutcome?.status === 'verification_sent') {
+        firestoreUpdate.pendingEmail = emailOutcome.pendingEmail
+        firestoreUpdate.pendingEmailRequestedAt = new Date().toISOString()
+      } else if (emailOutcome?.status === 'updated') {
+        firestoreUpdate.pendingEmail = null
+        firestoreUpdate.pendingEmailRequestedAt = null
+      }
+
+      await setDocument(COLLECTIONS.USERS, user.uid, firestoreUpdate, true)
+      await refreshUser()
+
+      // 5. Update clean form state and report accurate confirmation
+      setAccountName(normalizedInputName)
+      setReauthPassword('')
+      setReauthPasswordError('')
+      setNeedsReauthPrompt(false)
+
+      if (emailOutcome?.status === 'verification_sent') {
+        // Keep active verified email in the field until the pending address is verified
+        setAccountEmail(emailOutcome.activeEmail)
+        setAccountEdited(false)
+        const msg = isNameChanged
+          ? `Full name updated. A verification link has been sent to ${emailOutcome.pendingEmail} — confirm it to complete your email change.`
+          : `Verification email sent to ${emailOutcome.pendingEmail}. Your login email remains ${emailOutcome.activeEmail} until verified.`
+        setAccountSuccessMsg(msg)
+        toast.success('Verification email sent!')
+      } else {
+        const finalEmail =
+          emailOutcome?.status === 'updated' ? emailOutcome.activeEmail : baselineEmail
+        setAccountEmail(finalEmail)
+        setAccountEdited(false)
+        const msg =
+          isNameChanged && isEmailChanged
+            ? 'Full name and email address updated successfully.'
+            : isEmailChanged
+            ? 'Email address updated successfully.'
+            : 'Full name updated successfully.'
+        setAccountSuccessMsg(msg)
+        toast.success(msg)
+      }
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || ''
+      const rawMessage = (err as { message?: string })?.message || ''
+
+      if (code === 'auth/email-already-in-use') {
+        setAccountEmailError('This email address is already registered to another account.')
+      } else if (code === 'auth/invalid-email') {
+        setAccountEmailError('Please enter a valid email address.')
+      } else if (code === 'validation/invalid-name') {
+        setAccountNameError(rawMessage || 'Please enter a valid full name.')
+      } else if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        setNeedsReauthPrompt(true)
+        setReauthPasswordError('Incorrect current password. Please verify your password and try again.')
+      } else if (code === 'auth/requires-recent-login') {
+        setNeedsReauthPrompt(true)
+        if (hasPasswordProvider && !reauthPassword) {
+          setReauthPasswordError('For your security, enter your current password to confirm this email change.')
+        }
+        setAccountGeneralError(
+          'Firebase requires recent authentication before changing your email address. Please confirm your identity below and save again.'
+        )
+      } else {
+        const friendly =
+          code && code !== 'backend-error'
+            ? getFirebaseErrorMessage(code)
+            : rawMessage || 'Failed to save account changes. Please try again.'
+        setAccountGeneralError(friendly)
+      }
+    } finally {
+      setAccountSaving(false)
+    }
+  }
+
+  const handleSaveAccountForm = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    await executeAccountSave()
+  }
+
+  const handleGoogleReauthAndSave = async () => {
+    if (accountSaving) return
+    if (!validateAccountInputs()) return
+    setAccountGeneralError('')
+    setReauthPasswordError('')
+    try {
+      await reauthenticateAdminWithGoogle()
+      setNeedsReauthPrompt(false)
+      await executeAccountSave({ skipPasswordOption: true })
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || ''
+      setAccountGeneralError(getFirebaseErrorMessage(code))
+    }
+  }
+
+  const handleResetAccountChanges = () => {
+    setAccountName(baselineName)
+    setAccountEmail(baselineEmail)
+    setAccountEdited(false)
+    setAccountNameError('')
+    setAccountEmailError('')
+    setReauthPassword('')
+    setReauthPasswordError('')
+    setNeedsReauthPrompt(false)
+    setAccountGeneralError('')
+    setAccountSuccessMsg('')
+  }
+
+  const handleCheckPendingVerification = async () => {
+    if (!pendingVerificationEmail || checkingPendingEmail) return
+    setCheckingPendingEmail(true)
+    setAccountGeneralError('')
+    setAccountSuccessMsg('')
+    try {
+      await refreshUser()
+      const currentAuthEmail = (user?.email || '').trim().toLowerCase()
+      // Re-check directly via token/auth reload
+      const { reloadAndSyncAdminAuthUser } = await import('@/lib/firebase/auth')
+      const freshAuthUser = await reloadAndSyncAdminAuthUser()
+      const latestEmail = (freshAuthUser?.email || currentAuthEmail).trim()
+
+      if (latestEmail.toLowerCase() === pendingVerificationEmail.toLowerCase() && user?.uid) {
+        await setDocument(
+          COLLECTIONS.USERS,
+          user.uid,
+          {
+            uid: user.uid,
+            email: latestEmail,
+            pendingEmail: null,
+            pendingEmailRequestedAt: null,
+          },
+          true
+        )
+        const token = await getActiveIdToken(true)
+        if (token) {
+          await fetch('/api/admin/account', {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ pendingEmail: null }),
+          }).catch(() => {})
+        }
+        await refreshUser()
+        setAccountEmail(latestEmail)
+        setAccountEdited(false)
+        setAccountSuccessMsg(`Email verified! Your account now uses ${latestEmail}.`)
+        toast.success('New email verified and synced!')
+      } else {
+        toast('Verification is still pending. Please click the link sent to your new email first.')
+      }
+    } catch {
+      setAccountGeneralError('Could not check verification status. Please check your connection and try again.')
+    } finally {
+      setCheckingPendingEmail(false)
+    }
+  }
+
+  const handleResendPendingVerification = async () => {
+    if (!pendingVerificationEmail || resendingPendingEmail) return
+    setResendingPendingEmail(true)
+    setAccountGeneralError('')
+    setAccountSuccessMsg('')
+    try {
+      const outcome = await initiateAdminEmailChange(
+        pendingVerificationEmail,
+        reauthPassword ? { currentPassword: reauthPassword } : undefined
+      )
+      if (outcome.status === 'verification_sent') {
+        setAccountSuccessMsg(`Verification link resent to ${outcome.pendingEmail}.`)
+        toast.success('Verification email resent!')
+      } else {
+        await refreshUser()
+        setAccountSuccessMsg(`Email updated to ${outcome.activeEmail}.`)
+      }
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || ''
+      if (code === 'auth/requires-recent-login') {
+        setNeedsReauthPrompt(true)
+        setAccountGeneralError('Please confirm your identity below before resending the verification email.')
+      } else {
+        setAccountGeneralError(getFirebaseErrorMessage(code))
+      }
+    } finally {
+      setResendingPendingEmail(false)
+    }
+  }
+
+  const handleCancelPendingEmail = async () => {
+    if (!user?.uid) return
+    setAccountGeneralError('')
+    try {
+      const token = await getActiveIdToken()
+      if (token) {
+        const res = await fetch('/api/admin/account', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ pendingEmail: null }),
+        })
+        if (!res.ok) throw new Error('Failed to clear pending email.')
+      }
+      await setDocument(
+        COLLECTIONS.USERS,
+        user.uid,
+        {
+          uid: user.uid,
+          pendingEmail: null,
+          pendingEmailRequestedAt: null,
+        },
+        true
+      )
+      await refreshUser()
+      toast.success('Pending email notice cleared.')
+    } catch {
+      setAccountGeneralError('Failed to clear pending email state. Please try again.')
+    }
+  }
+
   const handlePasswordChange = async () => {
     if (newPassword !== confirmPassword) { toast.error('New passwords do not match.'); return }
     if (newPassword.length < 6) { toast.error('Password must be at least 6 characters.'); return }
@@ -301,7 +741,11 @@ export default function SettingsPage() {
       setCurrentPassword(''); setNewPassword(''); setConfirmPassword('')
     } catch (err: unknown) {
       const code = (err as { code?: string }).code ?? ''
-      toast.error(code === 'auth/wrong-password' ? 'Current password is incorrect.' : 'Failed to change password. Please try again.')
+      toast.error(
+        code === 'auth/wrong-password' || code === 'auth/invalid-credential'
+          ? 'Current password is incorrect.'
+          : getFirebaseErrorMessage(code)
+      )
     } finally { setPasswordLoading(false) }
   }
 
@@ -310,6 +754,20 @@ export default function SettingsPage() {
 
   const updateBranding = (key: keyof BrandingSettings, value: string) =>
     setBranding((prev) => ({ ...prev, [key]: value }))
+
+  const isHeaderSaving = activeTab === 'account' ? accountSaving : saving
+  const isHeaderDisabled =
+    activeTab === 'data_reset' ||
+    (activeTab === 'account' ? accountSaving || !hasAccountChanges : saving)
+  const handleHeaderSaveClick = () => {
+    if (activeTab === 'account') {
+      void executeAccountSave()
+    } else if (activeTab === 'branding') {
+      void handleSaveBranding()
+    } else {
+      void handleSave()
+    }
+  }
 
   return (
     <div className="animate-fade-in">
@@ -320,9 +778,9 @@ export default function SettingsPage() {
           <Button
             variant="primary"
             icon={<Save size={16} />}
-            onClick={activeTab === 'branding' ? handleSaveBranding : handleSave}
-            loading={saving}
-            disabled={activeTab === 'account' || activeTab === 'data_reset'}
+            onClick={handleHeaderSaveClick}
+            loading={isHeaderSaving}
+            disabled={isHeaderDisabled}
           >
             Save Changes
           </Button>
@@ -627,14 +1085,209 @@ export default function SettingsPage() {
                       <ThemeToggle variant="segmented" />
                     </div>
                   </Card>
+
                   <Card>
-                    <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-6">My Profile</h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <Input label="Full Name" value={lexUser?.name ?? ''} readOnly helperText="Contact your administrator to change your name" />
-                      <Input label="Email Address" value={lexUser?.email ?? user?.email ?? ''} readOnly />
-                      <Input label="Role" value={lexUser?.role ?? ''} readOnly className="capitalize" />
-                    </div>
+                    <form onSubmit={handleSaveAccountForm} noValidate className="space-y-5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">My Profile</h3>
+                          <p className="text-sm text-muted dark:text-gray-400 mt-0.5">
+                            Update your administrator display name and authenticated sign-in email address.
+                          </p>
+                        </div>
+                      </div>
+
+                      {accountGeneralError && (
+                        <div
+                          role="alert"
+                          className="flex items-start gap-2.5 p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 text-rose-700 dark:text-rose-300 text-xs"
+                        >
+                          <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                          <span>{accountGeneralError}</span>
+                        </div>
+                      )}
+
+                      {accountSuccessMsg && (
+                        <div
+                          role="status"
+                          className="flex items-start gap-2.5 p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-300 text-xs"
+                        >
+                          <CheckCircle2 size={16} className="shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
+                          <span>{accountSuccessMsg}</span>
+                        </div>
+                      )}
+
+                      {pendingVerificationEmail && (
+                        <div className="p-4 rounded-xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 space-y-3">
+                          <div className="flex items-start gap-2.5">
+                            <Clock size={16} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                            <div className="space-y-1 text-xs">
+                              <p className="font-semibold text-amber-900 dark:text-amber-200">
+                                Pending Email Verification
+                              </p>
+                              <p className="text-amber-800 dark:text-amber-300/90 leading-relaxed">
+                                Current verified email:{' '}
+                                <strong className="font-semibold">{baselineEmail}</strong> · Pending new email:{' '}
+                                <strong className="font-semibold">{pendingVerificationEmail}</strong>
+                              </p>
+                              <p className="text-amber-700 dark:text-amber-400">
+                                Open the verification email sent to {pendingVerificationEmail} and click the confirmation link. Your account continues using {baselineEmail} until verified.
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 pl-6">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              icon={<RefreshCw size={13} />}
+                              loading={checkingPendingEmail}
+                              onClick={handleCheckPendingVerification}
+                            >
+                              Check Verification Status
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              loading={resendingPendingEmail}
+                              onClick={handleResendPendingVerification}
+                            >
+                              Resend Link
+                            </Button>
+                            <button
+                              type="button"
+                              onClick={handleCancelPendingEmail}
+                              className="text-xs font-medium text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 px-2 py-1"
+                            >
+                              Dismiss Notice
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <Input
+                          label="Full Name"
+                          value={accountName}
+                          onChange={(e) => {
+                            setAccountName(e.target.value)
+                            setAccountEdited(true)
+                            if (accountNameError) setAccountNameError('')
+                            if (accountSuccessMsg) setAccountSuccessMsg('')
+                          }}
+                          leftIcon={<User size={15} />}
+                          error={accountNameError}
+                          helperText="Displayed across the portal, activity logs, and navigation"
+                          disabled={accountSaving}
+                          required
+                        />
+
+                        <Input
+                          label="Email Address"
+                          type="email"
+                          value={accountEmail}
+                          onChange={(e) => {
+                            setAccountEmail(e.target.value)
+                            setAccountEdited(true)
+                            if (accountEmailError) setAccountEmailError('')
+                            if (accountSuccessMsg) setAccountSuccessMsg('')
+                          }}
+                          leftIcon={<Mail size={15} />}
+                          error={accountEmailError}
+                          helperText={
+                            user?.emailVerified === false
+                              ? `Current sign-in email (${baselineEmail}) — unverified`
+                              : `Current verified sign-in email: ${baselineEmail || '—'}`
+                          }
+                          disabled={accountSaving}
+                          required
+                        />
+
+                        <Input
+                          label="Role"
+                          value={lexUser?.role ?? 'admin'}
+                          readOnly
+                          disabled
+                          className="capitalize"
+                          helperText="Administrator access level (read-only)"
+                        />
+                      </div>
+
+                      {(isEmailChanged || needsReauthPrompt) && (
+                        <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 space-y-3">
+                          <div className="flex items-start gap-2">
+                            <ShieldCheck size={16} className="text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+                            <div className="text-xs space-y-0.5">
+                              <p className="font-semibold text-gray-900 dark:text-gray-100">
+                                Confirm Identity for Email Change
+                              </p>
+                              <p className="text-gray-600 dark:text-gray-400">
+                                Changing your sign-in email from <strong>{baselineEmail}</strong> to{' '}
+                                <strong>{normalizedInputEmail || accountEmail}</strong> requires recent authentication.
+                              </p>
+                            </div>
+                          </div>
+
+                          {hasPasswordProvider && (
+                            <div className="max-w-sm">
+                              <Input
+                                label="Current Password"
+                                type="password"
+                                value={reauthPassword}
+                                onChange={(e) => {
+                                  setReauthPassword(e.target.value)
+                                  if (reauthPasswordError) setReauthPasswordError('')
+                                }}
+                                leftIcon={<Lock size={15} />}
+                                placeholder="Enter your current password"
+                                error={reauthPasswordError}
+                                helperText="Confirms your identity before updating Firebase Authentication"
+                                disabled={accountSaving}
+                              />
+                            </div>
+                          )}
+
+                          {hasGoogleProvider && (
+                            <div className="pt-1">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={handleGoogleReauthAndSave}
+                                disabled={accountSaving || !hasAccountChanges}
+                              >
+                                Verify with Google &amp; Save Email
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center justify-end gap-2.5 pt-3 border-t border-gray-100 dark:border-gray-800">
+                        {hasAccountChanges && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={handleResetAccountChanges}
+                            disabled={accountSaving}
+                          >
+                            Reset
+                          </Button>
+                        )}
+                        <Button
+                          type="submit"
+                          variant="primary"
+                          icon={<Save size={15} />}
+                          loading={accountSaving}
+                          disabled={accountSaving || !hasAccountChanges}
+                        >
+                          Save Changes
+                        </Button>
+                      </div>
+                    </form>
                   </Card>
+
                   <Card>
                     <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">Change Password</h3>
                     <p className="text-sm text-muted dark:text-gray-400 mb-6">You must know your current password to set a new one.</p>

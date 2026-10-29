@@ -240,10 +240,22 @@ export function getFirebaseErrorMessage(code: string): string {
     'auth/user-not-found': 'No account found with this email.',
     'auth/wrong-password': 'Incorrect password. Please try again.',
     'auth/invalid-email': 'Please enter a valid email address.',
+    'auth/email-already-in-use': 'This email address is already registered to another account.',
+    'auth/requires-recent-login':
+      'For your security, please reauthenticate to confirm this account change.',
+    'auth/user-token-expired':
+      'Your session has expired. Please sign in again to continue.',
+    'auth/user-mismatch':
+      'The account selected for reauthentication does not match the signed-in administrator.',
+    'auth/popup-closed-by-user':
+      'Reauthentication window was closed before completing verification.',
+    'auth/weak-password': 'Password must be at least 6 characters long.',
+    'auth/operation-not-allowed':
+      'This authentication operation is not enabled in your Firebase project settings.',
     'auth/too-many-requests':
-      'Too many failed attempts. Please try again later.',
-    'auth/network-request-failed': 'Network error. Please check your connection.',
-    'auth/invalid-credential': 'Invalid email or password.',
+      'Too many attempts. Please wait a moment and try again.',
+    'auth/network-request-failed': 'Network error. Please check your connection and try again.',
+    'auth/invalid-credential': 'Incorrect password or invalid credentials.',
     'auth/configuration-not-found': 'Firebase Authentication is not configured yet. Please sign in with email and password.',
     'permission-denied': 'You do not have permission to perform this action.',
   }

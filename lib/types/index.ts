@@ -11,11 +11,15 @@ export interface LexUser {
   uid: string
   email: string
   name: string
+  displayName?: string
+  pendingEmail?: string | null
+  pendingEmailRequestedAt?: Timestamp | string | null
   role: UserRole
   photoURL?: string
   phone?: string
-  createdAt: Timestamp
-  lastLogin?: Timestamp
+  createdAt: Timestamp | string
+  updatedAt?: Timestamp | string
+  lastLogin?: Timestamp | string
 }
 
 // ─── Client ──────────────────────────────────────────────────

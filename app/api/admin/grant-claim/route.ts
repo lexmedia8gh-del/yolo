@@ -44,13 +44,26 @@ export async function POST(req: NextRequest) {
       throw err
     }
 
-    await auth.setCustomUserClaims(userRecord.uid, { admin: true })
+    await auth.setCustomUserClaims(userRecord.uid, {
+      ...(userRecord.customClaims || {}),
+      admin: true,
+    })
 
     const db = getAdminDb()
-    await db.collection("users").doc(userRecord.uid).set(
+    const userDocRef = db.collection("users").doc(userRecord.uid)
+    const existingSnap = await userDocRef.get()
+    const existingData = existingSnap.exists ? existingSnap.data() : undefined
+    const resolvedName =
+      existingData?.name?.trim() ||
+      userRecord.displayName?.trim() ||
+      existingData?.displayName?.trim() ||
+      "LexMedia Admin"
+
+    await userDocRef.set(
       {
         email: targetEmail,
-        displayName: userRecord.displayName || "LexMedia Admin",
+        name: resolvedName,
+        displayName: resolvedName,
         role: "admin",
         uid: userRecord.uid,
         grantedAt: new Date().toISOString(),

@@ -105,38 +105,63 @@ export function getAdminAuth() {
  * bypass have been removed to prevent unauthorized access in production.
  */
 export async function requireAdmin(request: NextRequest) {
-  const session = request.cookies.get('__session')?.value;
+  const authHeader = request.headers.get('authorization') || '';
+  const bearerToken = authHeader.toLowerCase().startsWith('bearer ')
+    ? authHeader.slice(7).trim()
+    : '';
+  const cookieToken = request.cookies.get('__session')?.value || '';
+  const session = bearerToken || cookieToken;
+
   if (!session) {
     return { ok: false as const, status: 401, error: 'Authentication required.' };
   }
 
-  // Allow the admin staff session for both local development and standard admin authentication flows
-  if (session === 'active-admin-session') {
+  // Allow fallback local admin session only when Firebase Admin credentials are not configured (or explicitly enabled)
+  if (
+    session === 'active-admin-session' &&
+    (!hasAdminCredentials() || process.env.ALLOW_DEV_SESSION === 'true')
+  ) {
     return { ok: true as const, uid: 'admin-staff-user', email: 'admin@lexmedia.com' };
   }
 
   try {
     const decoded = await getAdminAuth().verifyIdToken(session);
 
-    // Primary: check the Firebase custom claim set via /api/admin/grant-claim
+    // 1. Primary: check the Firebase custom claim (survives email changes)
     const hasAdminClaim = decoded.admin === true;
 
-    // Bootstrap fallback: allow the configured ADMIN_EMAIL even before the claim is granted
+    // 2. Bootstrap fallback: configured ADMIN_EMAIL / initial admin emails
     const authorizedEmails = [
       (process.env.ADMIN_EMAIL || '').toLowerCase().trim(),
       'lexmedia8gh@gmail.com',
-      'lexmediaapp@gmail.com'
+      'lexmediaapp@gmail.com',
     ].filter(Boolean);
-    const isAuthorizedEmail = decoded.email && authorizedEmails.includes(decoded.email.toLowerCase().trim());
+    const isAuthorizedEmail = Boolean(
+      decoded.email && authorizedEmails.includes(decoded.email.toLowerCase().trim())
+    );
 
+    // 3. UID-bound profile role check: preserves admin access if an admin changed their email
+    let hasStoredAdminRole = false;
     if (!hasAdminClaim && !isAuthorizedEmail) {
+      try {
+        const userSnap = await getAdminDb().collection('users').doc(decoded.uid).get();
+        hasStoredAdminRole = userSnap.exists && userSnap.data()?.role === 'admin';
+      } catch (dbErr) {
+        console.warn('[Auth] Could not inspect users doc during admin check:', dbErr);
+      }
+    }
+
+    if (!hasAdminClaim && !isAuthorizedEmail && !hasStoredAdminRole) {
       console.warn(`[Auth] Unauthorized access attempt by: ${decoded.email}`);
       return { ok: false as const, status: 403, error: 'Administrator access required.' };
     }
 
     return { ok: true as const, uid: decoded.uid, email: decoded.email };
   } catch (error) {
-    console.warn('[Auth] Admin request rejected:', error instanceof Error ? error.message : 'Invalid session');
+    console.warn(
+      '[Auth] Admin request rejected:',
+      error instanceof Error ? error.message : 'Invalid session'
+    );
     return { ok: false as const, status: 401, error: 'Invalid or expired session.' };
   }
 }

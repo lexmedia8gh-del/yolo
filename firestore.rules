@@ -3,12 +3,16 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ─── Admin authorization ─────────────────────────────────────────────────
-    // Checks for the Firebase Custom Claim set by /api/admin/grant-claim.
-    // This is server-verified and tamper-proof — cannot be faked from the client.
+    // Checks for the Firebase Custom Claim set by /api/admin/grant-claim,
+    // bootstrap admin email, or verified admin role on the user's own profile doc.
     function isAdmin() {
       return request.auth != null && (
         request.auth.token.admin == true ||
-        request.auth.token.email == 'lexmedia8gh@gmail.com'
+        request.auth.token.email == 'lexmedia8gh@gmail.com' ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+        )
       );
     }
 
@@ -18,10 +22,20 @@ service cloud.firestore {
     }
 
     // ─── User profiles ───────────────────────────────────────────────────────
-    // Admin can manage all; user can read only their own profile.
+    // Authenticated user can read their own profile (or admin can read);
+    // client-side writes are restricted to the authenticated admin's own uid
+    // and cannot alter role privileges.
     match /users/{uid} {
       allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
-      allow write: if isAdmin();
+      allow create: if isAdmin()
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.role == 'admin';
+      allow update: if isAdmin()
+        && request.auth.uid == uid
+        && (!('uid' in request.resource.data) || request.resource.data.uid == uid)
+        && (!('role' in resource.data) || request.resource.data.role == resource.data.role);
+      allow delete: if false;
     }
 
     // ─── Core Business Data (Admin Only) ─────────────────────────────────────
