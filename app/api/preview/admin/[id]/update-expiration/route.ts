@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
-import { db } from '@/lib/firebase/config'
+import { db, isFirebaseConfigured } from '@/lib/firebase/config'
 import { doc, updateDoc, getDoc } from 'firebase/firestore'
 import { FieldValue, Timestamp as AdminTimestamp } from 'firebase-admin/firestore'
 import type { PreviewExpirationOption } from '@/lib/types'
@@ -52,6 +52,9 @@ export async function POST(
         preview: { id, ...snap.data() },
       })
     } catch {
+      if (!isFirebaseConfigured) {
+        return NextResponse.json({ error: 'Firebase database is not configured.' }, { status: 503 })
+      }
       // Client SDK fallback
       const docRef = doc(db, COLLECTIONS.CLIENT_PREVIEWS, id)
       await updateDoc(docRef, {

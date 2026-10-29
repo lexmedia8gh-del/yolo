@@ -56,21 +56,38 @@ export function formatAmount(amount: number): string {
 }
 
 // ─── Date Formatting ─────────────────────────────────────────
-export function formatDate(
-  date: Timestamp | Date | string | null | undefined,
-  fmt = 'dd MMM yyyy'
-): string {
-  if (!date) return '—'
+export function resolveDateValue(
+  date: Timestamp | Date | string | number | { seconds?: number; _seconds?: number; toDate?: () => Date } | null | undefined
+): Date | null {
+  if (!date) return null
   try {
     let d: Date
     if (date instanceof Timestamp) {
       d = date.toDate()
     } else if (date instanceof Date) {
       d = date
+    } else if (typeof (date as any)?.toDate === 'function') {
+      d = (date as any).toDate()
+    } else if (typeof (date as any)?.seconds === 'number') {
+      d = new Date((date as any).seconds * 1000)
+    } else if (typeof (date as any)?._seconds === 'number') {
+      d = new Date((date as any)._seconds * 1000)
     } else {
-      d = new Date(date)
+      d = new Date(date as string | number)
     }
-    if (!isValid(d)) return '—'
+    return isValid(d) ? d : null
+  } catch {
+    return null
+  }
+}
+
+export function formatDate(
+  date: Timestamp | Date | string | null | undefined,
+  fmt = 'dd MMM yyyy'
+): string {
+  const d = resolveDateValue(date)
+  if (!d) return '—'
+  try {
     return format(d, fmt)
   } catch {
     return '—'
@@ -78,19 +95,18 @@ export function formatDate(
 }
 
 export function formatRelativeTime(
-  date: Timestamp | Date | null | undefined
+  date: Timestamp | Date | string | null | undefined
 ): string {
-  if (!date) return '—'
+  const d = resolveDateValue(date)
+  if (!d) return '—'
   try {
-    const d = date instanceof Timestamp ? date.toDate() : date
-    if (!isValid(d)) return '—'
     return formatDistanceToNow(d, { addSuffix: true })
   } catch {
     return '—'
   }
 }
 
-export function formatDateTime(date: Timestamp | Date | null | undefined): string {
+export function formatDateTime(date: Timestamp | Date | string | null | undefined): string {
   return formatDate(date, 'dd MMM yyyy, h:mm a')
 }
 
@@ -228,6 +244,7 @@ export function getFirebaseErrorMessage(code: string): string {
       'Too many failed attempts. Please try again later.',
     'auth/network-request-failed': 'Network error. Please check your connection.',
     'auth/invalid-credential': 'Invalid email or password.',
+    'auth/configuration-not-found': 'Firebase Authentication is not configured yet. Please sign in with email and password.',
     'permission-denied': 'You do not have permission to perform this action.',
   }
   return messages[code] ?? 'An unexpected error occurred. Please try again.'

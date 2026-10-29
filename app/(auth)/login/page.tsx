@@ -18,7 +18,7 @@ import {
   CheckCircle2,
   ArrowLeft,
 } from 'lucide-react'
-import { signInWithEmail, signInWithGoogle, sendPasswordReset } from '@/lib/firebase/auth'
+import { signInWithEmail, signInWithGoogle, sendPasswordReset, setSessionCookie } from '@/lib/firebase/auth'
 import { getFirebaseErrorMessage } from '@/lib/utils'
 import { PageLoader } from '@/components/ui/Spinner'
 import { getDocument, COLLECTIONS } from '@/lib/firebase/firestore'
@@ -101,9 +101,7 @@ function LoginFormContent() {
     try {
       const userCredential = await signInWithEmail(data.email, data.password)
       const idToken = await userCredential.user.getIdToken()
-      document.cookie = `__session=${idToken}; path=/; ${
-        data.rememberMe ? 'max-age=604800' : ''
-      }`
+      setSessionCookie(idToken, data.rememberMe ? 604800 : 86400)
       router.push(redirectTo)
     } catch (err: unknown) {
       const code = (err as { code?: string }).code ?? ''

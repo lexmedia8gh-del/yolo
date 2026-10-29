@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
-import { db } from '@/lib/firebase/config'
+import { db, isFirebaseConfigured } from '@/lib/firebase/config'
 import { collection, getDocs, addDoc, updateDoc, doc, Timestamp as ClientTimestamp } from 'firebase/firestore'
 import { FieldValue, Timestamp as AdminTimestamp } from 'firebase-admin/firestore'
 import { generateSecureToken } from '@/lib/utils'
@@ -48,15 +48,17 @@ export async function GET(req: NextRequest) {
       }))
     } catch {
       // Client SDK fallback
-      const snap = await getDocs(collection(db, COLLECTIONS.CLIENT_PREVIEWS))
-      previews = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      }))
-      if (projectId) {
-        previews = previews.filter((p) => p.projectId === projectId)
-      } else if (clientId) {
-        previews = previews.filter((p) => p.clientId === clientId)
+      if (isFirebaseConfigured) {
+        const snap = await getDocs(collection(db, COLLECTIONS.CLIENT_PREVIEWS))
+        previews = snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        }))
+        if (projectId) {
+          previews = previews.filter((p) => p.projectId === projectId)
+        } else if (clientId) {
+          previews = previews.filter((p) => p.clientId === clientId)
+        }
       }
     }
 
@@ -190,6 +192,12 @@ export async function POST(req: NextRequest) {
         })
       }
     } catch {
+      if (!isFirebaseConfigured) {
+        return NextResponse.json(
+          { error: 'Firebase database is not configured.' },
+          { status: 503 }
+        )
+      }
       // Client SDK fallback when Admin SDK is not configured in current runtime
       if (id) {
         const docRef = doc(db, COLLECTIONS.CLIENT_PREVIEWS, id)

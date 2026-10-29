@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb, getAdminStorage } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
-import { db } from '@/lib/firebase/config'
+// Removed db import
 import { collection, query, where, getDocs, doc, getDoc, deleteDoc } from 'firebase/firestore'
 import { FieldValue, Timestamp } from 'firebase-admin/firestore'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 import fs from 'fs'
 import path from 'path'
+
+export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
   try {
@@ -49,24 +51,27 @@ export async function POST(req: NextRequest) {
     }
 
     if (!deliveryData || !fileData) {
-      const deliveriesRef = collection(db, COLLECTIONS.DELIVERIES)
-      const q = query(deliveriesRef, where('accessToken', '==', token))
-      const snap = await getDocs(q)
+      const { db, isFirebaseConfigured } = await import('@/lib/firebase/config')
+      if (isFirebaseConfigured) {
+        const deliveriesRef = collection(db, COLLECTIONS.DELIVERIES)
+        const q = query(deliveriesRef, where('accessToken', '==', token))
+        const snap = await getDocs(q)
 
-      if (snap.empty) {
-        return NextResponse.json({ error: 'Invalid delivery token' }, { status: 404 })
-      }
+        if (snap.empty) {
+          return NextResponse.json({ error: 'Invalid delivery token' }, { status: 404 })
+        }
 
-      const deliveryDoc = snap.docs[0]
-      deliveryData = deliveryDoc.data()
-      deliveryId = deliveryDoc.id
+        const deliveryDoc = snap.docs[0]
+        deliveryData = deliveryDoc.data()
+        deliveryId = deliveryDoc.id
 
-      const fileDocRef = doc(db, COLLECTIONS.DELIVERY_FILES, fileId)
-      const fileSnap = await getDoc(fileDocRef)
+        const fileDocRef = doc(db, COLLECTIONS.DELIVERY_FILES, fileId)
+        const fileSnap = await getDoc(fileDocRef)
 
-      if (fileSnap.exists()) {
-        fileData = fileSnap.data()
-        await deleteDoc(fileDocRef)
+        if (fileSnap.exists()) {
+          fileData = fileSnap.data()
+          await deleteDoc(fileDocRef)
+        }
       }
     }
 

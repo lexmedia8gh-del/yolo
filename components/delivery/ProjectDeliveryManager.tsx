@@ -192,6 +192,7 @@ export function ProjectDeliveryManager({
   useEffect(() => {
     if (!resolvedTargetId) return
     loadDeliveryData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTargetId])
 
   const loadDeliveryData = async () => {

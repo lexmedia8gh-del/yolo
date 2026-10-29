@@ -1,12 +1,25 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/firebase/config'
+import { db, isFirebaseConfigured } from '@/lib/firebase/config'
 import { collection, addDoc, getDocs, serverTimestamp } from 'firebase/firestore'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET() {
   const result: any = {
     projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'lexmedia-client-system',
-    apiKeyConfigured: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== 'demo-api-key',
+    apiKeyConfigured: isFirebaseConfigured,
     appIdConfigured: !!process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  }
+
+  if (!isFirebaseConfigured) {
+    return NextResponse.json(
+      {
+        status: 'unconfigured',
+        message: 'Firebase environment variables are not configured yet.',
+        ...result,
+      },
+      { status: 200 }
+    )
   }
 
   try {

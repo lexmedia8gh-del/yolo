@@ -27,8 +27,6 @@ import { useAuth } from '@/lib/hooks/useAuth'
 import { useTheme } from '@/lib/contexts/ThemeContext'
 import { getDocument, setDocument, COLLECTIONS } from '@/lib/firebase/firestore'
 import { changePassword } from '@/lib/firebase/auth'
-import { storage } from '@/lib/firebase/config'
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
 import type { BusinessSettings, BrandingSettings } from '@/lib/types'
 import toast from 'react-hot-toast'
 

@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
-import { db } from '@/lib/firebase/config'
-import { collection, query, where, getDocs, Timestamp as ClientTimestamp } from 'firebase/firestore'
 import { Timestamp as AdminTimestamp } from 'firebase-admin/firestore'
+import { Timestamp as ClientTimestamp } from 'firebase/firestore'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 import { cleanStoragePath, KNOWN_STORAGE_BUCKETS, STORAGE_BUCKETS } from '@/lib/supabase/storage'
 import { isSupabaseConfigured } from '@/lib/supabase/client'
@@ -86,32 +85,20 @@ export async function GET(
     let previewDoc: any = null
 
     // 1. Fetch preview from Admin DB
-    try {
-      const adminDb = getAdminDb()
-      const snap = await adminDb
-        .collection(COLLECTIONS.CLIENT_PREVIEWS)
-        .where('token', '==', token)
-        .limit(1)
-        .get()
+    const adminDb = getAdminDb()
+    const snap = await adminDb
+      .collection(COLLECTIONS.CLIENT_PREVIEWS)
+      .where('token', '==', token)
+      .limit(1)
+      .get()
 
-      if (!snap.empty) {
-        previewDoc = snap.docs[0].data()
-      } else {
-        const byId = await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(token).get()
-        if (byId.exists) {
-          previewDoc = byId.data()
-        }
+    if (!snap.empty) {
+      previewDoc = snap.docs[0].data()
+    } else {
+      const byId = await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(token).get()
+      if (byId.exists) {
+        previewDoc = byId.data()
       }
-    } catch {
-      // Client Firestore fallback
-      try {
-        const previewsRef = collection(db, COLLECTIONS.CLIENT_PREVIEWS)
-        const q = query(previewsRef, where('token', '==', token))
-        const snap = await getDocs(q)
-        if (!snap.empty) {
-          previewDoc = snap.docs[0].data()
-        }
-      } catch {}
     }
 
     if (!previewDoc) {

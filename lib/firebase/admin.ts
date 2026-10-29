@@ -1,22 +1,47 @@
 import * as admin from 'firebase-admin';
 import type { NextRequest } from 'next/server';
 
+function cleanAdminEnv(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  let val = String(raw).trim();
+  if (
+    (val.startsWith('"') && val.endsWith('"')) ||
+    (val.startsWith("'") && val.endsWith("'"))
+  ) {
+    val = val.slice(1, -1).trim();
+  }
+  return val || undefined;
+}
+
 export function getAdminDb() {
   if (!admin.apps.length) {
-    const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'lexmedia-client-system';
-    const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
-    const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    const projectId =
+      cleanAdminEnv(process.env.FIREBASE_ADMIN_PROJECT_ID) ||
+      cleanAdminEnv(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) ||
+      'lexmedia-client-system';
+    const clientEmail = cleanAdminEnv(process.env.FIREBASE_ADMIN_CLIENT_EMAIL);
+    const privateKey = cleanAdminEnv(process.env.FIREBASE_ADMIN_PRIVATE_KEY)?.replace(/\\n/g, '\n');
 
-    try {
-      if (projectId && clientEmail && privateKey) {
+    if (projectId && clientEmail && privateKey) {
+      try {
         admin.initializeApp({
           credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
+          projectId,
         });
-      } else {
-        admin.initializeApp({ projectId });
+      } catch (error: any) {
+        console.warn('Firebase Admin cert init warning, using projectId fallback:', error?.message);
+        try {
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId });
+          }
+        } catch {}
       }
-    } catch (error: any) {
-      console.error('Firebase Admin init error:', error.stack);
+    } else {
+      try {
+        admin.initializeApp({ projectId });
+      } catch (error: any) {
+        console.error('Firebase Admin init error:', error?.message);
+      }
     }
   }
 

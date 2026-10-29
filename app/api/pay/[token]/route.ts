@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
-import { db } from '@/lib/firebase/config'
+import { db, isFirebaseConfigured } from '@/lib/firebase/config'
 import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET(
   req: NextRequest,
@@ -162,7 +164,7 @@ export async function GET(
     }
 
     // 2. Fallback to client Firestore SDK
-    if (!linkData) {
+    if (!linkData && isFirebaseConfigured) {
       const linksRef = collection(db, COLLECTIONS.CLIENT_LINKS)
       // Check where token == token
       const q = query(linksRef, where('token', '==', token))
@@ -218,7 +220,7 @@ export async function GET(
     }
 
     // 3. Fallback: check invoices directly by token, invoiceNumber, or doc ID
-    if (!linkData) {
+    if (!linkData && isFirebaseConfigured) {
       try {
         const invRef = collection(db, COLLECTIONS.INVOICES)
         let invSnap = await getDocs(query(invRef, where('paymentLinkToken', '==', token)))
@@ -265,7 +267,7 @@ export async function GET(
     }
 
     // 4. Fallback: check projects directly by doc ID
-    if (!linkData) {
+    if (!linkData && isFirebaseConfigured) {
       try {
         const projRef = doc(db, COLLECTIONS.PROJECTS, token)
         const projSnap = await getDoc(projRef)

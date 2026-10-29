@@ -40,6 +40,7 @@ import { RecordPaymentModal } from '@/components/payments/RecordPaymentModal'
 import { PaymentDetailsModal } from '@/components/payments/PaymentDetailsModal'
 import { ProjectPaymentLinkModal } from '@/components/projects/ProjectPaymentLinkModal'
 import { ProjectPaymentRequests } from '@/components/projects/ProjectPaymentRequests'
+import { EditProjectModal } from '@/components/projects/EditProjectModal'
 import type { Project, Invoice, Payment, ClientLink, ProjectStatus } from '@/lib/types'
 import {
   formatCurrency,
@@ -74,6 +75,7 @@ export default function ProjectDetailPage() {
   const [paymentLink, setPaymentLink] = useState<ClientLink | null>(null)
   const [projectLinks, setProjectLinks] = useState<ClientLink[]>([])
   const [showCreateLinkModal, setShowCreateLinkModal] = useState(false)
+  const [showEditProjectModal, setShowEditProjectModal] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const [updatingStatus, setUpdatingStatus] = useState(false)
@@ -259,6 +261,14 @@ export default function ProjectDetailPage() {
             variant="outline"
             size="sm"
             icon={<Edit2 size={14} />}
+            onClick={() => setShowEditProjectModal(true)}
+          >
+            Edit Project
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<Edit2 size={14} />}
             onClick={() => { setNewStatus(project.status); setShowStatusModal(true) }}
           >
             Update Status
@@ -337,6 +347,27 @@ export default function ProjectDetailPage() {
                   </div>
                 </div>
               )}
+              {project.priority && (
+                <div className="flex items-start gap-3">
+                  <AlertCircle size={15} className="text-indigo-500 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs text-gray-500">Priority</p>
+                    <p className="font-medium text-gray-900 capitalize">{project.priority}</p>
+                  </div>
+                </div>
+              )}
+              {project.description && (
+                <div className="pt-2 border-t border-gray-100">
+                  <p className="text-xs text-gray-500 mb-1">Description</p>
+                  <p className="text-xs text-gray-700 whitespace-pre-wrap">{project.description}</p>
+                </div>
+              )}
+              {project.deliverables && (
+                <div className="pt-2 border-t border-gray-100">
+                  <p className="text-xs text-gray-500 mb-1">Deliverables</p>
+                  <p className="text-xs text-gray-700 whitespace-pre-wrap">{project.deliverables}</p>
+                </div>
+              )}
               {project.notes && (
                 <div className="pt-2 border-t border-gray-100">
                   <p className="text-xs text-gray-500 mb-1">Notes</p>
@@ -365,10 +396,15 @@ export default function ProjectDetailPage() {
                 </button>
               </div>
               <div className="flex gap-2">
-                <Button size="sm" variant="outline" fullWidth icon={<ExternalLink size={13} />}
-                  onClick={() => window.open(paymentUrl, '_blank')}>
-                  Open
-                </Button>
+                <a
+                  href={paymentUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 inline-flex items-center justify-center h-8 px-3 text-xs font-medium rounded-lg gap-1.5 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 shadow-sm transition-colors"
+                >
+                  <ExternalLink size={13} />
+                  <span>Open</span>
+                </a>
                 {client?.whatsappNumber && (
                   <Button
                     size="sm"
@@ -597,6 +633,20 @@ export default function ProjectDetailPage() {
           reloadProjectData()
         }}
       />
+
+      {/* Edit Project Modal */}
+      {project && (
+        <EditProjectModal
+          project={project}
+          isOpen={showEditProjectModal}
+          onClose={() => setShowEditProjectModal(false)}
+          payments={payments}
+          links={projectLinks}
+          onSuccess={() => {
+            reloadProjectData()
+          }}
+        />
+      )}
     </div>
   )
 }

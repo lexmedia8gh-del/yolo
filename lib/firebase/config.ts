@@ -1,31 +1,88 @@
-import { initializeApp, getApps, getApp } from 'firebase/app'
-import { getFirestore } from 'firebase/firestore'
-import { getStorage } from 'firebase/storage'
-import { getAuth } from 'firebase/auth'
+import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app'
+import { getFirestore, type Firestore } from 'firebase/firestore'
+import { getStorage, type FirebaseStorage } from 'firebase/storage'
+import { getAuth, type Auth } from 'firebase/auth'
 
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || 'AIzaSyAIbgXrTEEma9lB6x745P2mTG68U7HoGXU',
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || 'lexmedia-client-system.firebaseapp.com',
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'lexmedia-client-system',
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'lexmedia-client-system.appspot.com',
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '829561425796',
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || '1:829561425796:web:678f79a2abc8c0543a57d1',
-  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
+function cleanFirebaseEnv(raw?: string): string | undefined {
+  if (!raw) return undefined
+  let val = String(raw).trim()
+  // Strip accidental KEY= prefix if pasted into environment variables
+  val = val.replace(/^[A-Z0-9_]+\s*=\s*/i, '').trim()
+  // Strip surrounding quotes
+  if (
+    (val.startsWith('"') && val.endsWith('"')) ||
+    (val.startsWith("'") && val.endsWith("'"))
+  ) {
+    val = val.slice(1, -1).trim()
+  }
+  return val || undefined
 }
 
-// Prevent multiple initialization in Next.js dev mode
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig)
+const firebaseConfig = {
+  apiKey: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY),
+  authDomain: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN),
+  projectId: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID),
+  storageBucket: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET),
+  messagingSenderId: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID),
+  appId: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_APP_ID),
+  measurementId: cleanFirebaseEnv(process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID),
+}
 
-export const db = getFirestore(app)
-export const auth = getAuth(app)
+const hasValidConfig = Boolean(
+  firebaseConfig.apiKey &&
+    firebaseConfig.projectId &&
+    firebaseConfig.apiKey.length >= 10 &&
+    !firebaseConfig.apiKey.includes('placeholder') &&
+    firebaseConfig.apiKey !== 'demo-api-key'
+)
 
-// Explicitly pass the bucket URL to avoid default bucket resolution issues.
-// Firebase Storage requires the correct bucket format:
-//   Old format: <project-id>.appspot.com
-//   New format: <project-id>.firebasestorage.app
-// The storageBucket in firebaseConfig is used automatically by getStorage(app).
-export const storage = getStorage(app)
+let app: FirebaseApp | null = null
+let dbInstance: Firestore | null = null
+let authInstance: Auth | null = null
+let storageInstance: FirebaseStorage | null = null
+
+if (hasValidConfig) {
+  try {
+    app = getApps().length ? getApp() : initializeApp(firebaseConfig)
+  } catch (err) {
+    console.warn('[Firebase] App initialization skipped:', err)
+    app = null
+  }
+
+  if (app) {
+    try {
+      dbInstance = getFirestore(app)
+    } catch (err) {
+      console.warn('[Firebase] Firestore initialization skipped:', err)
+      dbInstance = null
+    }
+
+    // Only initialize Firebase Client Auth in browser context to prevent SSR/build auth/invalid-api-key errors
+    if (typeof window !== 'undefined') {
+      try {
+        authInstance = getAuth(app)
+      } catch (err) {
+        console.warn('[Firebase] Auth initialization skipped:', err)
+        authInstance = null
+      }
+    }
+
+    try {
+      storageInstance = getStorage(app)
+    } catch (err) {
+      console.warn('[Firebase] Storage initialization skipped:', err)
+      storageInstance = null
+    }
+  }
+}
+
+export const isFirebaseConfigured = Boolean(app && dbInstance)
+export const isFirebaseAuthConfigured = Boolean(app && authInstance)
+export const isFirebaseStorageConfigured = Boolean(app && storageInstance)
+
+export const db: Firestore = (dbInstance ?? ({} as unknown)) as Firestore
+export const auth: Auth = (authInstance ?? ({} as unknown)) as Auth
+export const storage: FirebaseStorage = (storageInstance ?? ({} as unknown)) as FirebaseStorage
+export const getAuthInstance = (): Auth | null => authInstance
 
 export default app
-
-

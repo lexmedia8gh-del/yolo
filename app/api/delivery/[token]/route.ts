@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
-import { db } from '@/lib/firebase/config'
+// db import removed
 import { collection, query, where, getDocs, doc, getDoc, updateDoc, Timestamp as ClientTimestamp } from 'firebase/firestore'
 import { Timestamp as AdminTimestamp } from 'firebase-admin/firestore'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET(
   req: NextRequest,
   { params }: { params: { token: string } }
 ) {
+  const { db, isFirebaseConfigured } = await import('@/lib/firebase/config')
   try {
     const token = params.token
     if (!token) {
@@ -59,7 +62,7 @@ export async function GET(
     }
 
     // If not found or Admin SDK failed, use client Firestore fallback
-    if (!deliveryDocData) {
+    if (!deliveryDocData && isFirebaseConfigured) {
       const deliveriesRef = collection(db, COLLECTIONS.DELIVERIES)
       const q = query(deliveriesRef, where('accessToken', '==', token))
       const snap = await getDocs(q)

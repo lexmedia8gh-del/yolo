@@ -62,6 +62,7 @@ export function PreviewAccessLogsModal({
     if (isOpen) {
       fetchLogs()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, previewId])
 
   const filtered = logs.filter((log) => {

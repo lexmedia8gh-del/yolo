@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getAdminAuth } from "@/lib/firebase/admin"
 
+export const dynamic = "force-dynamic"
+
 /**
  * POST /api/admin/verify-session
  * Called client-side after Google sign-in to confirm the user has the admin custom claim.

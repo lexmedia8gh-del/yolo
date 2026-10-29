@@ -24,11 +24,13 @@ import {
   COLLECTIONS,
   getDocuments,
   addDocument,
+  updateDocument,
   writeBatch,
   db,
   doc,
   collection,
   serverTimestamp,
+  isFirebaseConfigured,
 } from '@/lib/firebase/firestore'
 import type { Client, Service, Package, Invoice, ClientLink } from '@/lib/types'
 import {
@@ -256,89 +258,166 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
       const depositAmount = depositValidation.depositAmount
       const outstandingBalance = totalAmount
 
-      // 2. Prepare refs
-      const projectRef = doc(collection(db, COLLECTIONS.PROJECTS))
-      const invoiceRef = doc(collection(db, COLLECTIONS.INVOICES))
+      const resolvedProjectName = projectName || `${client.fullName} — ${selectedPackage.title}`
+      let createdProjectId = ''
+      let createdInvoiceId = ''
 
-      // 3. Batch write — atomic
-      const batch = writeBatch(db)
+      if (isFirebaseConfigured) {
+        // 2. Prepare refs
+        const projectRef = doc(collection(db, COLLECTIONS.PROJECTS))
+        const invoiceRef = doc(collection(db, COLLECTIONS.INVOICES))
+        createdProjectId = projectRef.id
+        createdInvoiceId = invoiceRef.id
 
-      // Project doc
-      batch.set(projectRef, {
-        name: projectName || `${client.fullName} — ${selectedPackage.title}`,
-        clientId: client.id,
-        clientName: client.fullName,
-        clientEmail: client.email,
-        serviceId: selectedService.id,
-        serviceName: selectedService.name,
-        packageId: selectedPackage.id,
-        packageTitle: selectedPackage.title,
-        invoiceId: invoiceRef.id,
-        invoiceNumber,
-        price: totalAmount,
-        depositAmount,
-        amountPaid: 0,
-        outstandingBalance,
-        currency: selectedPackage.currency || 'GHS',
-        status: 'Awaiting Payment',
-        paymentStatus: 'Unpaid',
-        progress: 0,
-        startDate: startDate || null,
-        deadline: dueDate || null,
-        notes: projectNotes || '',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        createdBy: 'admin',
-      })
+        // 3. Batch write — atomic
+        const batch = writeBatch(db)
 
-      // Invoice doc — one line item for the package
-      batch.set(invoiceRef, {
-        invoiceNumber,
-        clientId: client.id,
-        clientName: client.fullName,
-        clientEmail: client.email,
-        projectId: projectRef.id,
-        projectName: projectName || `${client.fullName} — ${selectedPackage.title}`,
-        packageId: selectedPackage.id,
-        packageTitle: selectedPackage.title,
-        serviceId: selectedService.id,
-        serviceName: selectedService.name,
-        items: [
-          {
-            id: `item_${Date.now()}`,
-            description: `${selectedService.name} — ${selectedPackage.title}`,
-            quantity: 1,
-            unitPrice: totalAmount,
-            total: totalAmount,
-          },
-        ],
-        subtotal: totalAmount,
-        discountAmount: 0,
-        taxAmount: 0,
-        total: totalAmount,
-        amountPaid: 0,
-        balanceDue: totalAmount,
-        depositAmount,
-        currency: selectedPackage.currency || 'GHS',
-        status: 'Pending',
-        invoiceDate: serverTimestamp(),
-        dueDate: dueDate || null,
-        notes: projectNotes || '',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        createdBy: 'admin',
-      })
+        // Project doc
+        batch.set(projectRef, {
+          name: resolvedProjectName,
+          clientId: client.id,
+          clientName: client.fullName,
+          clientEmail: client.email,
+          serviceId: selectedService.id,
+          serviceName: selectedService.name,
+          packageId: selectedPackage.id,
+          packageTitle: selectedPackage.title,
+          invoiceId: invoiceRef.id,
+          invoiceNumber,
+          price: totalAmount,
+          depositAmount,
+          amountPaid: 0,
+          outstandingBalance,
+          currency: selectedPackage.currency || 'GHS',
+          status: 'Awaiting Payment',
+          paymentStatus: 'Unpaid',
+          progress: 0,
+          startDate: startDate || null,
+          deadline: dueDate || null,
+          notes: projectNotes || '',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          createdBy: 'admin',
+        })
 
-      // Update client counters
-      const clientRef = doc(db, COLLECTIONS.CLIENTS, client.id)
-      batch.update(clientRef, {
-        projectCount: (client.projectCount || 0) + 1,
-        totalBilled: (client.totalBilled || 0) + totalAmount,
-        outstandingBalance: (client.outstandingBalance || 0) + totalAmount,
-        updatedAt: serverTimestamp(),
-      })
+        // Invoice doc — one line item for the package
+        batch.set(invoiceRef, {
+          invoiceNumber,
+          clientId: client.id,
+          clientName: client.fullName,
+          clientEmail: client.email,
+          projectId: projectRef.id,
+          projectName: resolvedProjectName,
+          packageId: selectedPackage.id,
+          packageTitle: selectedPackage.title,
+          serviceId: selectedService.id,
+          serviceName: selectedService.name,
+          items: [
+            {
+              id: `item_${Date.now()}`,
+              description: `${selectedService.name} — ${selectedPackage.title}`,
+              quantity: 1,
+              unitPrice: totalAmount,
+              total: totalAmount,
+            },
+          ],
+          subtotal: totalAmount,
+          discountAmount: 0,
+          taxAmount: 0,
+          total: totalAmount,
+          amountPaid: 0,
+          balanceDue: totalAmount,
+          depositAmount,
+          currency: selectedPackage.currency || 'GHS',
+          status: 'Pending',
+          invoiceDate: serverTimestamp(),
+          dueDate: dueDate || null,
+          notes: projectNotes || '',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          createdBy: 'admin',
+        })
 
-      await batch.commit()
+        // Update client counters
+        const clientRef = doc(db, COLLECTIONS.CLIENTS, client.id)
+        batch.update(clientRef, {
+          projectCount: (client.projectCount || 0) + 1,
+          totalBilled: (client.totalBilled || 0) + totalAmount,
+          outstandingBalance: (client.outstandingBalance || 0) + totalAmount,
+          updatedAt: serverTimestamp(),
+        })
+
+        await batch.commit()
+      } else {
+        createdProjectId = await addDocument(COLLECTIONS.PROJECTS, {
+          name: resolvedProjectName,
+          clientId: client.id,
+          clientName: client.fullName,
+          clientEmail: client.email,
+          serviceId: selectedService.id,
+          serviceName: selectedService.name,
+          packageId: selectedPackage.id,
+          packageTitle: selectedPackage.title,
+          invoiceNumber,
+          price: totalAmount,
+          depositAmount,
+          amountPaid: 0,
+          outstandingBalance,
+          currency: selectedPackage.currency || 'GHS',
+          status: 'Awaiting Payment',
+          paymentStatus: 'Unpaid',
+          progress: 0,
+          startDate: startDate || null,
+          deadline: dueDate || null,
+          notes: projectNotes || '',
+          createdBy: 'admin',
+        })
+
+        createdInvoiceId = await addDocument(COLLECTIONS.INVOICES, {
+          invoiceNumber,
+          clientId: client.id,
+          clientName: client.fullName,
+          clientEmail: client.email,
+          projectId: createdProjectId,
+          projectName: resolvedProjectName,
+          packageId: selectedPackage.id,
+          packageTitle: selectedPackage.title,
+          serviceId: selectedService.id,
+          serviceName: selectedService.name,
+          items: [
+            {
+              id: `item_${Date.now()}`,
+              description: `${selectedService.name} — ${selectedPackage.title}`,
+              quantity: 1,
+              unitPrice: totalAmount,
+              total: totalAmount,
+            },
+          ],
+          subtotal: totalAmount,
+          discountAmount: 0,
+          taxAmount: 0,
+          total: totalAmount,
+          amountPaid: 0,
+          balanceDue: totalAmount,
+          depositAmount,
+          currency: selectedPackage.currency || 'GHS',
+          status: 'Pending',
+          invoiceDate: new Date().toISOString(),
+          dueDate: dueDate || null,
+          notes: projectNotes || '',
+          createdBy: 'admin',
+        })
+
+        await updateDocument(COLLECTIONS.PROJECTS, createdProjectId, {
+          invoiceId: createdInvoiceId,
+        })
+
+        await updateDocument(COLLECTIONS.CLIENTS, client.id, {
+          projectCount: (client.projectCount || 0) + 1,
+          totalBilled: (client.totalBilled || 0) + totalAmount,
+          outstandingBalance: (client.outstandingBalance || 0) + totalAmount,
+        })
+      }
 
       // 4. Generate payment link (separate — can be retried if it fails)
       let linkToken = generateSecureToken('p_')
@@ -352,11 +431,11 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
           token: linkToken,
           clientId: client.id,
           clientName: client.fullName,
-          projectId: projectRef.id,
-          projectName: projectName || `${client.fullName} — ${selectedPackage.title}`,
+          projectId: createdProjectId,
+          projectName: resolvedProjectName,
           packageId: selectedPackage.id,
           packageTitle: selectedPackage.title,
-          invoiceId: invoiceRef.id,
+          invoiceId: createdInvoiceId,
           invoiceNumber,
           amount: depositAmount,
           currency: selectedPackage.currency || 'GHS',
@@ -371,8 +450,8 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
       }
 
       setResult({
-        projectId: projectRef.id,
-        invoiceId: invoiceRef.id,
+        projectId: createdProjectId,
+        invoiceId: createdInvoiceId,
         invoiceNumber,
         linkToken,
         paymentUrl,

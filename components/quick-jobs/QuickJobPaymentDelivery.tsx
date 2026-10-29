@@ -109,6 +109,7 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
 
   useEffect(() => {
     fetchAssociatedRecords()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialJob.id])
 
   // Outstanding Balance and Payment State

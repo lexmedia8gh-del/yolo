@@ -134,11 +134,13 @@ export async function POST(req: NextRequest) {
     } catch (adminDbErr: any) {
       console.warn('[Delivery Upload] Admin Firestore set warning, using client SDK fallback:', adminDbErr?.message)
       const { doc, setDoc, serverTimestamp } = await import('firebase/firestore')
-      const { db } = await import('@/lib/firebase/config')
-      await setDoc(doc(db, COLLECTIONS.DELIVERY_FILES, id), {
-        ...fileRecord,
-        uploadedAt: serverTimestamp(),
-      })
+      const { db, isFirebaseConfigured } = await import('@/lib/firebase/config')
+      if (isFirebaseConfigured) {
+        await setDoc(doc(db, COLLECTIONS.DELIVERY_FILES, id), {
+          ...fileRecord,
+          uploadedAt: serverTimestamp(),
+        })
+      }
     }
 
     // If this is for a Quick Job, synchronize the Quick Job status

@@ -87,6 +87,8 @@ export type ProjectStatus =
 
 export type PaymentStatus = 'Unpaid' | 'Partially Paid' | 'Paid'
 
+export type ProjectPriority = 'low' | 'medium' | 'high' | 'urgent'
+
 export interface Project {
   id: string
   name: string
@@ -105,15 +107,18 @@ export interface Project {
   amountPaid?: number // total paid so far
   outstandingBalance?: number // price - amountPaid
   currency: string
-  startDate?: Timestamp
-  deadline?: Timestamp
+  startDate?: Timestamp | string | null
+  deadline?: Timestamp | string | null
   status: ProjectStatus
+  priority?: ProjectPriority
+  deliverables?: string
   paymentStatus: PaymentStatus
   progress: number // 0-100
   notes?: string
   fileIds?: string[]
-  createdAt: Timestamp
-  updatedAt: Timestamp
+  createdAt: Timestamp | string
+  updatedAt: Timestamp | string
+  updatedBy?: string
   createdBy: string
 }
 

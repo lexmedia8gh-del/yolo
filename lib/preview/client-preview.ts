@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
-import { db } from '@/lib/firebase/config'
+import { db, isFirebaseConfigured } from '@/lib/firebase/config'
 import {
   collection,
   query,
@@ -99,7 +99,7 @@ export async function handleGetClientPreview(
     }
 
     // 2. Client Firestore SDK fallback
-    if (!previewDoc) {
+    if (!previewDoc && isFirebaseConfigured) {
       try {
         const previewsRef = collection(db, COLLECTIONS.CLIENT_PREVIEWS)
         const q = query(previewsRef, where('token', '==', token))
@@ -239,7 +239,7 @@ export async function handleGetClientPreview(
           ipSnippet,
           timestamp: FieldValue.serverTimestamp(),
         })
-      } else {
+      } else if (isFirebaseConfigured) {
         const docRef = doc(db, COLLECTIONS.CLIENT_PREVIEWS, previewId)
         await updateDoc(docRef, {
           lastViewedAt: clientServerTimestamp(),

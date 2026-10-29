@@ -3,6 +3,8 @@ import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 import { FieldValue } from 'firebase-admin/firestore'
 
+export const dynamic = 'force-dynamic'
+
 // Meta webhook verification
 export async function GET(req: NextRequest) {
   const url = new URL(req.url)

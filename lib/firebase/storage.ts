@@ -5,7 +5,7 @@ import {
   deleteObject,
   type UploadTaskSnapshot,
 } from 'firebase/storage'
-import { storage } from './config'
+import { storage, isFirebaseStorageConfigured } from './config'
 import { isSupabaseConfigured, getSupabaseClient } from '../supabase/client'
 import { STORAGE_BUCKETS } from '../supabase/storage'
 import { ResumableUploadTask, UploadTaskProgress } from '../supabase/resumable'
@@ -65,6 +65,8 @@ export async function deleteDeliveryFile(storagePath: string): Promise<void> {
       console.warn('Supabase delete warning:', err?.message)
     }
   }
+
+  if (!isFirebaseStorageConfigured) return
 
   try {
     const fileRef = ref(storage, storagePath)

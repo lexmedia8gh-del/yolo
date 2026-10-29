@@ -163,6 +163,7 @@ function PublicPaymentPageInner() {
     }
 
     loadPaymentDetails()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, refQuery])
 
   const verifyPaystackTransaction = async (reference: string, link: ClientLink) => {

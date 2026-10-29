@@ -47,7 +47,7 @@ import {
   deleteDocument,
   subscribeToCollection,
 } from '@/lib/firebase/firestore'
-import { auth } from '@/lib/firebase/config'
+import { getAuthInstance } from '@/lib/firebase/config'
 import type {
   QuickJob,
   QuickJobStatus,
@@ -550,7 +550,8 @@ export default function QuickJobsPage() {
     if (isSubmitting) return
 
     // Verify authentication
-    const currentUser = auth.currentUser
+    const authInstance = getAuthInstance()
+    const currentUser = authInstance?.currentUser
     console.log('[Quick Job Auth Verification]:', {
       authenticated: !!currentUser,
       uid: currentUser?.uid || null,

@@ -1,22 +1,22 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   FolderKanban,
   Search,
   Filter,
   Eye,
-  ChevronRight,
-  Calendar,
+  Edit2,
   Trash2,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { Badge } from '@/components/ui/Badge'
 import { Spinner } from '@/components/ui/Spinner'
 import { Modal } from '@/components/ui/Modal'
+import { EditProjectModal } from '@/components/projects/EditProjectModal'
 import {
   COLLECTIONS,
   getDocuments,
@@ -39,12 +39,19 @@ const STATUS_OPTIONS: ProjectStatus[] = [
 ]
 
 export default function ProjectsPage() {
+  const router = useRouter()
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [deletingProject, setDeletingProject] = useState<Project | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const refreshProjects = useCallback(async () => {
+    const data = await getDocuments<Project>(COLLECTIONS.PROJECTS)
+    if (data) setProjects(data)
+  }, [])
 
   useEffect(() => {
     setLoading(true)
@@ -169,9 +176,19 @@ export default function ProjectsPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-xs">
                   {filtered.map((project) => (
-                    <tr key={project.id} className="hover:bg-gray-50/60 transition-colors">
+                    <tr
+                      key={project.id}
+                      onClick={() => router.push(`/projects/${project.id}`)}
+                      className="hover:bg-gray-50/60 transition-colors cursor-pointer"
+                    >
                       <td className="py-3 px-4">
-                        <div className="font-semibold text-gray-900 max-w-[180px] truncate">{project.name}</div>
+                        <Link
+                          href={`/projects/${project.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="font-semibold text-gray-900 hover:text-indigo-600 transition-colors max-w-[180px] truncate block"
+                        >
+                          {project.name}
+                        </Link>
                         {project.invoiceNumber && (
                           <div className="text-[11px] text-gray-400 font-mono mt-0.5">{project.invoiceNumber}</div>
                         )}
@@ -179,6 +196,7 @@ export default function ProjectsPage() {
                       <td className="py-3 px-4">
                         <Link
                           href={`/clients/${project.clientId}`}
+                          onClick={(e) => e.stopPropagation()}
                           className="font-medium text-indigo-600 hover:underline"
                         >
                           {project.clientName}
@@ -207,7 +225,7 @@ export default function ProjectsPage() {
                       <td className="py-3 px-4 text-gray-500 text-[11px] whitespace-nowrap">
                         {formatDate(project.createdAt)}
                       </td>
-                      <td className="py-3 px-4 text-right">
+                      <td className="py-3 px-4 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         <Link
                           href={`/projects/${project.id}`}
                           className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors inline-flex"
@@ -216,6 +234,15 @@ export default function ProjectsPage() {
                           <Eye size={15} />
                         </Link>
                         <button
+                          type="button"
+                          onClick={() => setEditingProject(project)}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors inline-flex ml-1"
+                          title="Edit Project"
+                        >
+                          <Edit2 size={15} />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => setDeletingProject(project)}
                           className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors inline-flex ml-1"
                           title="Delete Project"
@@ -289,8 +316,17 @@ export default function ProjectsPage() {
                     </Link>
                     <button
                       type="button"
+                      onClick={() => setEditingProject(project)}
+                      className="h-9 w-9 rounded-lg border border-gray-200 bg-white text-gray-500 hover:text-indigo-600 flex items-center justify-center"
+                      title="Edit Project"
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setDeletingProject(project)}
                       className="h-9 w-9 rounded-lg border border-gray-200 bg-white text-gray-400 hover:text-rose-600 flex items-center justify-center"
+                      title="Delete Project"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -301,6 +337,16 @@ export default function ProjectsPage() {
           </div>
         )}
       </div>
+
+      {/* Edit Project Modal */}
+      {editingProject && (
+        <EditProjectModal
+          project={editingProject}
+          isOpen={!!editingProject}
+          onClose={() => setEditingProject(null)}
+          onSuccess={refreshProjects}
+        />
+      )}
 
       {/* Delete Confirmation Modal */}
       <Modal

@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
-import { db } from '@/lib/firebase/config'
+// db import removed
 import { collection, query, where, getDocs, doc, getDoc, updateDoc, increment, serverTimestamp } from 'firebase/firestore'
 import { FieldValue, Timestamp } from 'firebase-admin/firestore'
 
+
+export const dynamic = 'force-dynamic'
+
 export async function POST(req: NextRequest) {
+  const { db, isFirebaseConfigured } = await import('@/lib/firebase/config')
   try {
     const body = await req.json()
     const { token, fileId } = body
@@ -71,7 +75,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Fallback if Admin DB was not used
-    if (!deliveryData || !fileData) {
+    if ((!deliveryData || !fileData) && isFirebaseConfigured) {
       const deliveriesRef = collection(db, COLLECTIONS.DELIVERIES)
       const q = query(deliveriesRef, where('accessToken', '==', token))
       const snap = await getDocs(q)

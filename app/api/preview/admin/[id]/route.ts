@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
-import { db } from '@/lib/firebase/config'
+import { db, isFirebaseConfigured } from '@/lib/firebase/config'
 import { doc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore'
 import { FieldValue } from 'firebase-admin/firestore'
 import type { PreviewStatus } from '@/lib/types'
@@ -24,6 +24,9 @@ export async function GET(
       }
       return NextResponse.json({ success: true, preview: { id: snap.id, ...snap.data() } })
     } catch {
+      if (!isFirebaseConfigured) {
+        return NextResponse.json({ error: 'Preview not found' }, { status: 404 })
+      }
       const docRef = doc(db, COLLECTIONS.CLIENT_PREVIEWS, id)
       const snap = await getDoc(docRef)
       if (!snap.exists()) {
@@ -68,6 +71,9 @@ export async function PATCH(
       const snap = await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).get()
       return NextResponse.json({ success: true, preview: { id: snap.id, ...snap.data() } })
     } catch {
+      if (!isFirebaseConfigured) {
+        return NextResponse.json({ error: 'Firebase database is not configured.' }, { status: 503 })
+      }
       const docRef = doc(db, COLLECTIONS.CLIENT_PREVIEWS, id)
       const clientPayload: any = {}
       if (status) clientPayload.status = status
@@ -93,8 +99,10 @@ export async function DELETE(
       const adminDb = getAdminDb()
       await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).delete()
     } catch {
-      const docRef = doc(db, COLLECTIONS.CLIENT_PREVIEWS, id)
-      await deleteDoc(docRef)
+      if (isFirebaseConfigured) {
+        const docRef = doc(db, COLLECTIONS.CLIENT_PREVIEWS, id)
+        await deleteDoc(docRef)
+      }
     }
 
     return NextResponse.json({ success: true, message: 'Preview deleted' })
