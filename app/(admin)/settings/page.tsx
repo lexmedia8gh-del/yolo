@@ -18,6 +18,7 @@ import {
   Clock,
   RefreshCw,
   ShieldCheck,
+  KeyRound,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card } from '@/components/ui/Card'
@@ -26,11 +27,14 @@ import { Input, Textarea, Select } from '@/components/ui/Input'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { DataResetManager } from '@/components/settings/DataResetManager'
 import { LogoUploadField } from '@/components/branding/LogoUploadField'
+import { PinInput } from '@/components/auth/PinInput'
 import { sanitizeBrandingLogoUrl } from '@/lib/hooks/useInvoiceBranding'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { getDocument, setDocument, COLLECTIONS } from '@/lib/firebase/firestore'
 import {
   changePassword,
+  changePin,
+  resetPinWithGoogle,
   getActiveIdToken,
   initiateAdminEmailChange,
   reauthenticateAdminWithGoogle,
@@ -40,7 +44,7 @@ import { getFirebaseErrorMessage } from '@/lib/utils'
 import type { BusinessSettings, BrandingSettings } from '@/lib/types'
 import toast from 'react-hot-toast'
 
-type SettingsTab = 'business' | 'invoice' | 'payment' | 'messages' | 'sms' | 'account' | 'branding' | 'data_reset'
+type SettingsTab = 'business' | 'invoice' | 'payment' | 'messages' | 'sms' | 'branding' | 'security' | 'account' | 'data_reset'
 
 const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
   { id: 'business', label: 'Business Info', icon: Building2 },
@@ -49,6 +53,7 @@ const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
   { id: 'messages', label: 'Messages & Terms', icon: MessageSquare },
   { id: 'sms', label: 'SMS Settings', icon: MessageSquare },
   { id: 'branding', label: 'Branding', icon: Palette },
+  { id: 'security', label: 'Login & Security', icon: ShieldCheck },
   { id: 'account', label: 'My Account', icon: User },
   { id: 'data_reset', label: 'Data & Reset', icon: RotateCcw },
 ]
@@ -177,6 +182,18 @@ export default function SettingsPage() {
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [passwordLoading, setPasswordLoading] = useState(false)
+
+  // Security 6-Digit PIN State
+  const [pinChangeCurrent, setPinChangeCurrent] = useState('')
+  const [pinChangeNew, setPinChangeNew] = useState('')
+  const [pinChangeConfirm, setPinChangeConfirm] = useState('')
+  const [pinChangeLoading, setPinChangeLoading] = useState(false)
+  const [pinChangeError, setPinChangeError] = useState('')
+
+  const [pinResetNew, setPinResetNew] = useState('')
+  const [pinResetConfirm, setPinResetConfirm] = useState('')
+  const [pinResetLoading, setPinResetLoading] = useState(false)
+  const [pinResetError, setPinResetError] = useState('')
 
   const baselineName = (lexUser?.name || user?.displayName || '').trim()
   const baselineEmail = (user?.email || lexUser?.email || '').trim()
@@ -749,6 +766,59 @@ export default function SettingsPage() {
     } finally { setPasswordLoading(false) }
   }
 
+  const handleChangePinSubmit = async () => {
+    setPinChangeError('')
+    if (pinChangeCurrent.length !== 6) {
+      setPinChangeError('Please enter your current 6-digit PIN.')
+      return
+    }
+    if (pinChangeNew.length !== 6) {
+      setPinChangeError('New PIN must be exactly 6 digits.')
+      return
+    }
+    if (pinChangeNew !== pinChangeConfirm) {
+      setPinChangeError('New PIN and confirmation PIN do not match.')
+      return
+    }
+
+    setPinChangeLoading(true)
+    try {
+      await changePin(pinChangeCurrent, pinChangeNew, pinChangeConfirm)
+      toast.success('6-Digit Security PIN updated successfully!')
+      setPinChangeCurrent('')
+      setPinChangeNew('')
+      setPinChangeConfirm('')
+    } catch (err: any) {
+      setPinChangeError(err?.message || 'Failed to update PIN. Please verify your current PIN.')
+    } finally {
+      setPinChangeLoading(false)
+    }
+  }
+
+  const handleResetPinSubmit = async () => {
+    setPinResetError('')
+    if (pinResetNew.length !== 6) {
+      setPinResetError('New PIN must be exactly 6 digits.')
+      return
+    }
+    if (pinResetNew !== pinResetConfirm) {
+      setPinResetError('New PIN and confirmation PIN do not match.')
+      return
+    }
+
+    setPinResetLoading(true)
+    try {
+      await resetPinWithGoogle(pinResetNew, pinResetConfirm)
+      toast.success('6-Digit Security PIN reset via Google successfully!')
+      setPinResetNew('')
+      setPinResetConfirm('')
+    } catch (err: any) {
+      setPinResetError(err?.message || 'Failed to reset PIN with Google.')
+    } finally {
+      setPinResetLoading(false)
+    }
+  }
+
   const update = (key: keyof BusinessSettings, value: string | number) =>
     setSettings((prev) => ({ ...prev, [key]: value }))
 
@@ -1068,6 +1138,150 @@ export default function SettingsPage() {
                             Pay Now
                           </div>
                         </div>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+              )}
+
+              {activeTab === 'security' && (
+                <div className="space-y-6">
+                  <Card>
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-[#1D63ED] flex items-center justify-center shrink-0">
+                        <KeyRound size={20} />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                          Change 6-Digit PIN
+                        </h3>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Update your master security PIN used to log into LexMedia Ctrl Room.
+                        </p>
+                      </div>
+                    </div>
+
+                    {pinChangeError && (
+                      <div className="mb-4 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
+                        <AlertCircle size={15} className="shrink-0" />
+                        <span>{pinChangeError}</span>
+                      </div>
+                    )}
+
+                    <div className="space-y-5 max-w-md">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          Current 6-Digit PIN
+                        </label>
+                        <PinInput
+                          value={pinChangeCurrent}
+                          onChange={setPinChangeCurrent}
+                          disabled={pinChangeLoading}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          New 6-Digit PIN
+                        </label>
+                        <PinInput
+                          value={pinChangeNew}
+                          onChange={setPinChangeNew}
+                          disabled={pinChangeLoading}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          Confirm New 6-Digit PIN
+                        </label>
+                        <PinInput
+                          value={pinChangeConfirm}
+                          onChange={setPinChangeConfirm}
+                          disabled={pinChangeLoading}
+                        />
+                      </div>
+
+                      <div className="pt-2">
+                        <Button
+                          type="button"
+                          variant="primary"
+                          icon={<Save size={15} />}
+                          loading={pinChangeLoading}
+                          onClick={handleChangePinSubmit}
+                          disabled={
+                            pinChangeCurrent.length !== 6 ||
+                            pinChangeNew.length !== 6 ||
+                            pinChangeConfirm.length !== 6 ||
+                            pinChangeLoading
+                          }
+                        >
+                          Update 6-Digit PIN
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+
+                  <Card>
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                        <ShieldCheck size={20} />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                          Reset PIN with Google Account
+                        </h3>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Forgot your PIN? Verify your identity with your administrator Google account to set a new PIN.
+                        </p>
+                      </div>
+                    </div>
+
+                    {pinResetError && (
+                      <div className="mb-4 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
+                        <AlertCircle size={15} className="shrink-0" />
+                        <span>{pinResetError}</span>
+                      </div>
+                    )}
+
+                    <div className="space-y-5 max-w-md">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          New 6-Digit PIN
+                        </label>
+                        <PinInput
+                          value={pinResetNew}
+                          onChange={setPinResetNew}
+                          disabled={pinResetLoading}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          Confirm New 6-Digit PIN
+                        </label>
+                        <PinInput
+                          value={pinResetConfirm}
+                          onChange={setPinResetConfirm}
+                          disabled={pinResetLoading}
+                        />
+                      </div>
+
+                      <div className="pt-2">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          icon={<ShieldCheck size={15} />}
+                          loading={pinResetLoading}
+                          onClick={handleResetPinSubmit}
+                          disabled={
+                            pinResetNew.length !== 6 ||
+                            pinResetConfirm.length !== 6 ||
+                            pinResetLoading
+                          }
+                        >
+                          Verify with Google &amp; Reset PIN
+                        </Button>
                       </div>
                     </div>
                   </Card>

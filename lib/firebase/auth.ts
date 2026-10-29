@@ -245,6 +245,103 @@ export async function getActiveIdToken(forceRefresh = false): Promise<string | n
   return null
 }
 
+export async function signInWithPin(pin: string): Promise<{ user: User }> {
+  const cleanPin = pin.trim()
+  if (!/^[0-9]{6}$/.test(cleanPin)) {
+    throw createAuthError('auth/invalid-pin', 'Please enter a valid six-digit PIN.')
+  }
+
+  const res = await fetch('/api/auth/pin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'verify', pin: cleanPin }),
+  })
+
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || !data.ok) {
+    throw createAuthError(
+      data.code || (res.status === 429 ? 'auth/too-many-requests' : 'auth/invalid-pin'),
+      data.error || 'Incorrect 6-digit PIN. Please try again.'
+    )
+  }
+
+  setSessionCookie('active-admin-session', 604800)
+  const user = getFallbackAdminUser()
+  notifyListeners(user)
+  return { user }
+}
+
+export async function changePin(currentPin: string, newPin: string, confirmPin: string): Promise<void> {
+  const token = await getActiveIdToken()
+  if (!token) {
+    throw createAuthError('auth/user-token-expired', 'Your session has expired. Please sign in again.')
+  }
+
+  const res = await fetch('/api/auth/pin', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      action: 'change',
+      currentPin,
+      newPin,
+      confirmPin,
+    }),
+  })
+
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || !data.ok) {
+    throw createAuthError(
+      data.code || 'auth/invalid-pin-change',
+      data.error || 'Failed to update 6-digit PIN.'
+    )
+  }
+}
+
+export async function resetPinWithGoogle(newPin: string, confirmPin: string): Promise<void> {
+  const authInstance = getAuthInstance()
+  let googleToken = ''
+
+  if (isFirebaseAuthConfigured && authInstance) {
+    try {
+      const provider = new GoogleAuthProvider()
+      provider.setCustomParameters({ prompt: 'select_account' })
+      const credential = await signInWithPopup(authInstance, provider)
+      googleToken = await credential.user.getIdToken(true)
+    } catch (err: any) {
+      if (err?.code === 'auth/popup-closed-by-user') {
+        throw createAuthError('auth/popup-closed-by-user', 'Google verification window was closed.')
+      }
+      throw err
+    }
+  }
+
+  const sessionToken = await getActiveIdToken()
+  const res = await fetch('/api/auth/pin', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+    },
+    body: JSON.stringify({
+      action: 'reset',
+      googleToken,
+      newPin,
+      confirmPin,
+    }),
+  })
+
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || !data.ok) {
+    throw createAuthError(
+      data.code || 'auth/invalid-pin-reset',
+      data.error || 'Failed to reset 6-digit PIN.'
+    )
+  }
+}
+
 export async function signInWithEmail(email: string, password: string, rememberMe = true) {
   const normalizedEmail = email.trim().toLowerCase()
   const cookieMaxAge = rememberMe ? 604800 : 86400
