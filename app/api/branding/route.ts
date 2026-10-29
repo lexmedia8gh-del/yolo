@@ -1,16 +1,19 @@
-import { NextResponse } from 'next/server'
-import { getAdminDb } from '@/lib/firebase/admin'
+import { NextRequest, NextResponse } from 'next/server'
+import { getAdminDb, hasAdminCredentials, requireAdmin } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 
 export const dynamic = 'force-dynamic'
 
 const DEFAULT_BRANDING = {
-  businessName: 'LexMedia',
-  shortName: 'Lex',
+  businessName: 'LEXMEDIA.GH',
+  shortName: 'LM',
   tagline: 'Professional Digital Services',
   logoUrl: '',
+  logoStoragePath: '',
   logoLightUrl: '',
+  logoLightStoragePath: '',
   faviconUrl: '',
+  faviconStoragePath: '',
   primaryColor: '#0A0A0A',
   secondaryColor: '#6366F1',
   accentColor: '#4F46E5',
@@ -22,21 +25,56 @@ const DEFAULT_BRANDING = {
   buttonTextColor: '#FFFFFF',
 }
 
+function sanitizeStoredLogoUrl(url?: unknown): string {
+  if (typeof url !== 'string') return ''
+  const trimmed = url.trim()
+  // Ignore broken legacy local filesystem paths from pre-Firebase upload code
+  if (!trimmed || trimmed.startsWith('/uploads/')) return ''
+  return trimmed
+}
+
 export async function GET() {
-  try {
-    const adminDb = getAdminDb()
-    const docSnap = await adminDb.collection(COLLECTIONS.SETTINGS).doc('branding').get()
-
-    if (docSnap.exists) {
-      return NextResponse.json({
-        success: true,
-        branding: { ...DEFAULT_BRANDING, ...docSnap.data() },
-      })
-    }
-
+  if (!hasAdminCredentials() && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     return NextResponse.json({
       success: true,
       branding: DEFAULT_BRANDING,
+    })
+  }
+
+  try {
+    const adminDb = getAdminDb()
+    const [brandSnap, bizSnap] = await Promise.all([
+      adminDb.collection(COLLECTIONS.SETTINGS).doc('branding').get(),
+      adminDb.collection(COLLECTIONS.SETTINGS).doc('business').get(),
+    ])
+
+    const brandData = brandSnap.exists ? brandSnap.data() || {} : {}
+    const bizData = bizSnap.exists ? bizSnap.data() || {} : {}
+
+    const resolvedLogoUrl =
+      sanitizeStoredLogoUrl(brandData.logoUrl) || sanitizeStoredLogoUrl(bizData.logoURL)
+    const resolvedLogoStoragePath =
+      (resolvedLogoUrl && (brandData.logoStoragePath || bizData.logoStoragePath)) || ''
+
+    return NextResponse.json({
+      success: true,
+      branding: {
+        ...DEFAULT_BRANDING,
+        ...brandData,
+        businessName: brandData.businessName || bizData.businessName || DEFAULT_BRANDING.businessName,
+        tagline: brandData.tagline || bizData.tagline || DEFAULT_BRANDING.tagline,
+        logoUrl: resolvedLogoUrl,
+        logoStoragePath: resolvedLogoStoragePath,
+        logoLightUrl: sanitizeStoredLogoUrl(brandData.logoLightUrl),
+        faviconUrl: sanitizeStoredLogoUrl(brandData.faviconUrl),
+      },
+      business: bizSnap.exists
+        ? {
+            ...bizData,
+            logoURL: sanitizeStoredLogoUrl(bizData.logoURL) || resolvedLogoUrl,
+            logoStoragePath: bizData.logoStoragePath || resolvedLogoStoragePath,
+          }
+        : null,
     })
   } catch (err) {
     console.warn('[Branding API Warning] Falling back to default branding:', err)
@@ -44,5 +82,54 @@ export async function GET() {
       success: true,
       branding: DEFAULT_BRANDING,
     })
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  const authResult = await requireAdmin(req)
+  if (!authResult.ok) {
+    return NextResponse.json({ error: authResult.error }, { status: authResult.status })
+  }
+
+  if (!hasAdminCredentials() && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    return NextResponse.json(
+      { error: 'Firebase Admin credentials are not configured on server.', code: 'ADMIN_UNCONFIGURED' },
+      { status: 503 }
+    )
+  }
+
+  try {
+    const body = await req.json()
+    const adminDb = getAdminDb()
+    const nowIso = new Date().toISOString()
+
+    const writes: Promise<unknown>[] = []
+
+    if (body?.branding && typeof body.branding === 'object') {
+      writes.push(
+        adminDb
+          .collection(COLLECTIONS.SETTINGS)
+          .doc('branding')
+          .set({ ...body.branding, updatedAt: nowIso, updatedBy: authResult.uid }, { merge: true })
+      )
+    }
+
+    if (body?.business && typeof body.business === 'object') {
+      writes.push(
+        adminDb
+          .collection(COLLECTIONS.SETTINGS)
+          .doc('business')
+          .set({ ...body.business, updatedAt: nowIso, updatedBy: authResult.uid }, { merge: true })
+      )
+    }
+
+    await Promise.all(writes)
+    return NextResponse.json({ success: true })
+  } catch (err: any) {
+    console.error('[Branding API PATCH Error]:', err)
+    return NextResponse.json(
+      { error: err?.message || 'Failed to update branding settings.' },
+      { status: 500 }
+    )
   }
 }

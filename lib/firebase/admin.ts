@@ -13,32 +13,70 @@ function cleanAdminEnv(raw?: string): string | undefined {
   return val || undefined;
 }
 
+export function normalizeBucketName(raw?: string): string | undefined {
+  const val = cleanAdminEnv(raw);
+  if (!val) return undefined;
+  const stripped = val
+    .replace(/^[A-Z0-9_]+\s*=\s*/i, '')
+    .replace(/^gs:\/\//i, '')
+    .replace(/\/+$/, '')
+    .trim();
+  return stripped || undefined;
+}
+
+export function getFirebaseProjectId(): string {
+  return (
+    cleanAdminEnv(process.env.FIREBASE_ADMIN_PROJECT_ID) ||
+    cleanAdminEnv(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) ||
+    'lexmedia-client-system'
+  );
+}
+
+export function getCandidateStorageBuckets(): string[] {
+  const projectId = getFirebaseProjectId();
+  const candidates = [
+    normalizeBucketName(process.env.FIREBASE_STORAGE_BUCKET),
+    normalizeBucketName(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET),
+    projectId ? `${projectId}.firebasestorage.app` : undefined,
+    projectId ? `${projectId}.appspot.com` : undefined,
+  ].filter((b): b is string => Boolean(b));
+  return Array.from(new Set(candidates));
+}
+
+export function hasAdminCredentials(): boolean {
+  const clientEmail = cleanAdminEnv(process.env.FIREBASE_ADMIN_CLIENT_EMAIL);
+  const privateKey = cleanAdminEnv(process.env.FIREBASE_ADMIN_PRIVATE_KEY);
+  return Boolean(clientEmail && privateKey);
+}
+
 export function getAdminDb() {
   if (!admin.apps.length) {
-    const projectId =
-      cleanAdminEnv(process.env.FIREBASE_ADMIN_PROJECT_ID) ||
-      cleanAdminEnv(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) ||
-      'lexmedia-client-system';
+    const projectId = getFirebaseProjectId();
     const clientEmail = cleanAdminEnv(process.env.FIREBASE_ADMIN_CLIENT_EMAIL);
     const privateKey = cleanAdminEnv(process.env.FIREBASE_ADMIN_PRIVATE_KEY)?.replace(/\\n/g, '\n');
+    const storageBucket =
+      normalizeBucketName(process.env.FIREBASE_STORAGE_BUCKET) ||
+      normalizeBucketName(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET) ||
+      `${projectId}.firebasestorage.app`;
 
     if (projectId && clientEmail && privateKey) {
       try {
         admin.initializeApp({
           credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
           projectId,
+          storageBucket,
         });
       } catch (error: any) {
         console.warn('Firebase Admin cert init warning, using projectId fallback:', error?.message);
         try {
           if (!admin.apps.length) {
-            admin.initializeApp({ projectId });
+            admin.initializeApp({ projectId, storageBucket });
           }
         } catch {}
       }
     } else {
       try {
-        admin.initializeApp({ projectId });
+        admin.initializeApp({ projectId, storageBucket });
       } catch (error: any) {
         console.error('Firebase Admin init error:', error?.message);
       }

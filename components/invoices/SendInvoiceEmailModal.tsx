@@ -5,8 +5,9 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input, Textarea } from '@/components/ui/Input'
 import { formatCurrency, formatDate, getPaymentLink } from '@/lib/utils'
+import { useInvoiceBranding, sanitizeBrandingLogoUrl } from '@/lib/hooks/useInvoiceBranding'
 import type { Invoice } from '@/lib/types'
-import { Mail, Send, CheckCircle2, AlertCircle, ShieldCheck } from 'lucide-react'
+import { Send, ShieldCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 interface SendInvoiceEmailModalProps {
@@ -22,6 +23,7 @@ export function SendInvoiceEmailModal({
   invoice,
   onSuccess,
 }: SendInvoiceEmailModalProps) {
+  const { businessDefaults, resolvedLogoUrl } = useInvoiceBranding()
   const [recipientEmail, setRecipientEmail] = useState('')
   const [personalMessage, setPersonalMessage] = useState('')
   const [isSending, setIsSending] = useState(false)
@@ -75,8 +77,9 @@ export function SendInvoiceEmailModal({
             quantity: it.quantity || 1,
             total: it.total || 0,
           })),
-          businessName: invoice.businessInfo?.name || 'LexMedia',
-          businessLogoUrl: invoice.businessInfo?.logo,
+          businessName: invoice.businessInfo?.name || businessDefaults.name || 'LEXMEDIA.GH',
+          businessLogoUrl:
+            sanitizeBrandingLogoUrl(invoice.businessInfo?.logo) || resolvedLogoUrl || undefined,
         }),
       })
 

@@ -5,6 +5,8 @@
 /* ─── Design Tokens ─────────────────────────────────────────── */
 :root {
   --font-inter: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-invoice-sans: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-invoice-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --color-accent: #4F46E5;
   --color-accent-light: #EEF2FF;
   --color-background: #F9FAFB;
@@ -301,14 +303,135 @@
   border-color: var(--color-border) !important;
 }
 
+/* ─── Invoice Paper Sheet Isolation (Light Paper in Both Light & Dark Themes) ─── */
+.invoice-paper-sheet {
+  font-family: var(--font-invoice-sans);
+  background-color: #FFFFFF !important;
+  color: #0F172A !important;
+  color-scheme: light;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.invoice-mono {
+  font-family: var(--font-invoice-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.dark .invoice-paper-sheet,
+.dark .invoice-paper-sheet .bg-white {
+  background-color: #FFFFFF !important;
+}
+
+.dark .invoice-paper-sheet .bg-slate-50,
+.dark .invoice-paper-sheet .bg-gray-50 {
+  background-color: #F8FAFC !important;
+}
+
+.dark .invoice-paper-sheet .bg-slate-50\/80 {
+  background-color: rgba(248, 250, 252, 0.85) !important;
+}
+
+.dark .invoice-paper-sheet .bg-slate-100,
+.dark .invoice-paper-sheet .bg-gray-100 {
+  background-color: #F1F5F9 !important;
+}
+
+.dark .invoice-paper-sheet h1,
+.dark .invoice-paper-sheet h2,
+.dark .invoice-paper-sheet h3,
+.dark .invoice-paper-sheet h4,
+.dark .invoice-paper-sheet .text-slate-900,
+.dark .invoice-paper-sheet .text-gray-900 {
+  color: #0F172A !important;
+}
+
+.dark .invoice-paper-sheet .text-slate-800,
+.dark .invoice-paper-sheet .text-gray-800 {
+  color: #1E293B !important;
+}
+
+.dark .invoice-paper-sheet .text-slate-700,
+.dark .invoice-paper-sheet .text-gray-700 {
+  color: #334155 !important;
+}
+
+.dark .invoice-paper-sheet .text-slate-600,
+.dark .invoice-paper-sheet .text-gray-600 {
+  color: #475569 !important;
+}
+
+.dark .invoice-paper-sheet .text-slate-500,
+.dark .invoice-paper-sheet .text-gray-500 {
+  color: #64748B !important;
+}
+
+.dark .invoice-paper-sheet .text-slate-400,
+.dark .invoice-paper-sheet .text-gray-400 {
+  color: #94A3B8 !important;
+}
+
+.dark .invoice-paper-sheet th {
+  background-color: transparent;
+  color: #475569;
+}
+
+.dark .invoice-paper-sheet td,
+.dark .invoice-paper-sheet th,
+.dark .invoice-paper-sheet .border-slate-200,
+.dark .invoice-paper-sheet .border-gray-200 {
+  border-color: #E2E8F0 !important;
+}
+
+.dark .invoice-paper-sheet .border-slate-100,
+.dark .invoice-paper-sheet .border-gray-100 {
+  border-color: #F1F5F9 !important;
+}
+
 /* ─── Print ──────────────────────────────────────────────────── */
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
   .no-print {
     display: none !important;
   }
 
+  html,
   body {
-    background: white !important;
-    color: black !important;
+    background: #FFFFFF !important;
+    color: #0F172A !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .invoice-paper-sheet {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+  }
+
+  .invoice-paper-sheet thead {
+    display: table-header-group !important;
+  }
+
+  .invoice-paper-sheet tfoot {
+    display: table-footer-group !important;
+  }
+
+  .invoice-paper-sheet tr,
+  .invoice-paper-sheet .invoice-keep-together {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
   }
 }

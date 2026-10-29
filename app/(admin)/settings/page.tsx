@@ -10,11 +10,6 @@ import {
   Save,
   Lock,
   Palette,
-  Upload,
-  X,
-  Image as ImageIcon,
-  CheckCircle2,
-  AlertCircle,
   RotateCcw,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -23,8 +18,9 @@ import { Button } from '@/components/ui/Button'
 import { Input, Textarea, Select } from '@/components/ui/Input'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { DataResetManager } from '@/components/settings/DataResetManager'
+import { LogoUploadField } from '@/components/branding/LogoUploadField'
+import { sanitizeBrandingLogoUrl } from '@/lib/hooks/useInvoiceBranding'
 import { useAuth } from '@/lib/hooks/useAuth'
-import { useTheme } from '@/lib/contexts/ThemeContext'
 import { getDocument, setDocument, COLLECTIONS } from '@/lib/firebase/firestore'
 import { changePassword } from '@/lib/firebase/auth'
 import type { BusinessSettings, BrandingSettings } from '@/lib/types'
@@ -58,12 +54,15 @@ const DEFAULT_SETTINGS: Partial<BusinessSettings> = {
 
 const DEFAULT_BRANDING: BrandingSettings = {
   businessName: 'LEXMEDIA.GH',
-  shortName: 'Lex',
+  shortName: 'LM',
   tagline: 'Professional Digital Services',
   logoUrl: '',
+  logoStoragePath: '',
   logoLightUrl: '',
+  logoLightStoragePath: '',
   faviconUrl: '',
-  primaryColor: '#0A0A0A',
+  faviconStoragePath: '',
+  primaryColor: '#0F172A',
   secondaryColor: '#6366F1',
   accentColor: '#4F46E5',
   backgroundColor: '#F8F9FC',
@@ -75,8 +74,6 @@ const DEFAULT_BRANDING: BrandingSettings = {
 }
 
 const HEX_REGEX = /^#[0-9A-Fa-f]{6}$/
-
-type UploadState = { status: 'idle' | 'uploading' | 'done' | 'error'; progress: number; error?: string }
 
 function ColorField({
   label,
@@ -135,161 +132,6 @@ function ColorField({
   )
 }
 
-function LogoUploader({
-  label,
-  currentUrl,
-  fieldKey,
-  onUploaded,
-  onRemove,
-  maxMB = 5,
-}: {
-  label: string
-  currentUrl: string
-  fieldKey: string
-  onUploaded: (url: string) => void
-  onRemove: () => void
-  maxMB?: number
-}) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [uploadState, setUploadState] = useState<UploadState>({ status: 'idle', progress: 0 })
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    if (!file.type.startsWith('image/')) {
-      toast.error('Only image files are accepted.')
-      return
-    }
-    if (file.size > maxMB * 1024 * 1024) {
-      toast.error(`File must be under ${maxMB}MB.`)
-      return
-    }
-
-    setUploadState({ status: 'uploading', progress: 0 })
-
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('fieldKey', fieldKey)
-
-      const xhr = new XMLHttpRequest()
-      
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
-          const pct = Math.round((e.loaded / e.total) * 100)
-          setUploadState({ status: 'uploading', progress: pct })
-        }
-      })
-
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const res = JSON.parse(xhr.responseText)
-            if (res.downloadUrl) {
-              onUploaded(res.downloadUrl)
-              setUploadState({ status: 'done', progress: 100 })
-              toast.success(`${label} uploaded successfully!`)
-            } else {
-              setUploadState({ status: 'error', progress: 0, error: res.error || 'Server upload failed.' })
-              toast.error(res.error || 'Upload failed.')
-            }
-          } catch (e) {
-            setUploadState({ status: 'error', progress: 0, error: 'Invalid response' })
-            toast.error('Upload failed.')
-          }
-        } else {
-          setUploadState({ status: 'error', progress: 0, error: `HTTP ${xhr.status}` })
-          toast.error(`Upload failed (HTTP ${xhr.status})`)
-        }
-      }
-
-      xhr.onerror = () => {
-        setUploadState({ status: 'error', progress: 0, error: 'Network error' })
-        toast.error('Network error during upload.')
-      }
-
-      xhr.open('POST', '/api/branding/upload')
-      xhr.send(formData)
-
-    } catch (err: any) {
-      setUploadState({ status: 'error', progress: 0, error: err.message })
-      toast.error('Upload failed.')
-    }
-
-    if (inputRef.current) inputRef.current.value = ''
-  }
-
-  return (
-    <div className="space-y-2">
-      <label className="block text-xs font-semibold text-gray-700">{label}</label>
-      <div className="flex flex-col sm:flex-row items-start gap-3">
-        <div className="w-24 h-16 rounded-xl border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden shrink-0">
-          {currentUrl ? (
-            <img src={currentUrl} alt={label} className="w-full h-full object-contain p-1" />
-          ) : (
-            <ImageIcon size={24} className="text-gray-300" />
-          )}
-        </div>
-        <div className="flex-1 space-y-2">
-          <div className="flex flex-wrap gap-2">
-            <input
-              id={`branding-upload-${fieldKey}`}
-              ref={inputRef}
-              type="file"
-              accept="image/*"
-              className="sr-only"
-              onChange={handleFileChange}
-              disabled={uploadState.status === 'uploading'}
-            />
-            <label
-              htmlFor={`branding-upload-${fieldKey}`}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer select-none ${
-                uploadState.status === 'uploading' ? 'opacity-60 pointer-events-none' : ''
-              }`}
-            >
-              <Upload size={13} />
-              {currentUrl ? 'Replace' : 'Upload'}
-            </label>
-            {currentUrl && (
-              <button
-                type="button"
-                onClick={onRemove}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-danger-200 text-xs font-medium text-danger-600 hover:bg-danger-50 transition-colors"
-              >
-                <X size={13} />
-                Remove
-              </button>
-            )}
-          </div>
-          {uploadState.status === 'uploading' && (
-            <div className="space-y-1">
-              <div className="w-full bg-gray-100 rounded-full h-1.5">
-                <div
-                  className="bg-accent-600 h-1.5 rounded-full transition-all"
-                  style={{ width: `${uploadState.progress}%` }}
-                />
-              </div>
-              <p className="text-xs text-gray-500">Uploading {uploadState.progress}%…</p>
-            </div>
-          )}
-          {uploadState.status === 'done' && (
-            <p className="text-xs text-success-600 flex items-center gap-1">
-              <CheckCircle2 size={12} /> Uploaded successfully
-            </p>
-          )}
-          {uploadState.status === 'error' && (
-            <p className="text-xs text-danger-600 flex items-center gap-1">
-              <AlertCircle size={12} /> {uploadState.error || 'Upload failed'}
-            </p>
-          )}
-          <p className="text-[11px] text-gray-400">Max {maxMB}MB · PNG, JPG, SVG, WebP</p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export default function SettingsPage() {
   const { user, lexUser } = useAuth()
   const [activeTab, setActiveTab] = useState<SettingsTab>('business')
@@ -304,41 +146,147 @@ export default function SettingsPage() {
   const [passwordLoading, setPasswordLoading] = useState(false)
 
   useEffect(() => {
-    async function loadSettings() {
+    let active = true
+    async function loadAllSettings() {
       try {
-        const doc = await getDocument<BusinessSettings>(COLLECTIONS.SETTINGS, 'business')
-        if (doc) setSettings({ ...DEFAULT_SETTINGS, ...doc })
-      } catch { /* use defaults */ } finally { setLoading(false) }
+        const [bizDoc, brandDoc] = await Promise.all([
+          getDocument<BusinessSettings>(COLLECTIONS.SETTINGS, 'business').catch(() => null),
+          getDocument<BrandingSettings>(COLLECTIONS.SETTINGS, 'branding').catch(() => null),
+        ])
+
+        let apiBranding: Partial<BrandingSettings> | null = null
+        let apiBusiness: Partial<BusinessSettings> | null = null
+        if (!bizDoc && !brandDoc) {
+          try {
+            const res = await fetch('/api/branding', { cache: 'no-store' })
+            if (res.ok) {
+              const json = await res.json()
+              apiBranding = json.branding || null
+              apiBusiness = json.business || null
+            }
+          } catch {}
+        }
+
+        if (!active) return
+
+        const effectiveBiz = bizDoc || apiBusiness || {}
+        const effectiveBrand = brandDoc || apiBranding || {}
+
+        const cleanLogoUrl =
+          sanitizeBrandingLogoUrl(effectiveBrand.logoUrl) ||
+          sanitizeBrandingLogoUrl(effectiveBiz.logoURL)
+        const cleanLogoPath =
+          (cleanLogoUrl &&
+            (effectiveBrand.logoStoragePath || effectiveBiz.logoStoragePath)) ||
+          ''
+
+        setSettings({
+          ...DEFAULT_SETTINGS,
+          ...effectiveBiz,
+          logoURL: cleanLogoUrl,
+          logoStoragePath: cleanLogoPath,
+        })
+
+        setBranding((prev) => ({
+          ...prev,
+          ...effectiveBrand,
+          logoUrl: cleanLogoUrl,
+          logoStoragePath: cleanLogoPath,
+          logoLightUrl: sanitizeBrandingLogoUrl(effectiveBrand.logoLightUrl),
+          faviconUrl: sanitizeBrandingLogoUrl(effectiveBrand.faviconUrl),
+        }))
+      } finally {
+        if (active) setLoading(false)
+      }
     }
-    loadSettings()
+    loadAllSettings()
+    return () => {
+      active = false
+    }
   }, [])
 
-  useEffect(() => {
-    async function loadBranding() {
-      try {
-        const doc = await getDocument<BrandingSettings>(COLLECTIONS.SETTINGS, 'branding')
-        if (doc) setBranding((prev) => ({ ...prev, ...doc }))
-      } catch { /* use defaults */ }
-    }
-    loadBranding()
-  }, [])
+  const handleMainLogoUploaded = ({
+    downloadUrl,
+    storagePath,
+  }: {
+    downloadUrl: string
+    storagePath: string
+  }) => {
+    setBranding((prev) => ({ ...prev, logoUrl: downloadUrl, logoStoragePath: storagePath }))
+    setSettings((prev) => ({ ...prev, logoURL: downloadUrl, logoStoragePath: storagePath }))
+  }
+
+  const handleMainLogoRemoved = () => {
+    setBranding((prev) => ({ ...prev, logoUrl: '', logoStoragePath: '' }))
+    setSettings((prev) => ({ ...prev, logoURL: '', logoStoragePath: '' }))
+  }
 
   const handleSave = async () => {
     setSaving(true)
     try {
-      await setDocument(COLLECTIONS.SETTINGS, 'business', settings, true)
+      const syncedSettings: Partial<BusinessSettings> = {
+        ...settings,
+        logoURL: sanitizeBrandingLogoUrl(settings.logoURL || branding.logoUrl),
+        logoStoragePath: settings.logoStoragePath || branding.logoStoragePath || '',
+      }
+      await setDocument(COLLECTIONS.SETTINGS, 'business', syncedSettings, true)
+      if (syncedSettings.businessName) {
+        await setDocument(
+          COLLECTIONS.SETTINGS,
+          'branding',
+          {
+            businessName: syncedSettings.businessName,
+            tagline: syncedSettings.tagline ?? branding.tagline,
+            logoUrl: syncedSettings.logoURL || '',
+            logoStoragePath: syncedSettings.logoStoragePath || '',
+          },
+          true
+        )
+      }
+      fetch('/api/branding', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ business: syncedSettings }),
+      }).catch(() => {})
       toast.success('Settings saved successfully!')
-    } catch { toast.error('Failed to save settings. Please try again.') }
-    finally { setSaving(false) }
+    } catch {
+      toast.error('Failed to save settings. Please try again.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleSaveBranding = async () => {
     setSaving(true)
     try {
       await setDocument(COLLECTIONS.SETTINGS, 'branding', branding, true)
+      await setDocument(
+        COLLECTIONS.SETTINGS,
+        'business',
+        {
+          businessName: branding.businessName || settings.businessName,
+          logoURL: branding.logoUrl || '',
+          logoStoragePath: branding.logoStoragePath || '',
+        },
+        true
+      )
+      fetch('/api/branding', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          branding,
+          business: {
+            logoURL: branding.logoUrl || '',
+            logoStoragePath: branding.logoStoragePath || '',
+          },
+        }),
+      }).catch(() => {})
       toast.success('Branding saved successfully!')
-    } catch { toast.error('Failed to save branding. Please try again.') }
-    finally { setSaving(false) }
+    } catch {
+      toast.error('Failed to save branding. Please try again.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handlePasswordChange = async () => {
@@ -443,17 +391,51 @@ export default function SettingsPage() {
               )}
 
               {activeTab === 'invoice' && (
-                <Card>
-                  <h3 className="text-base font-semibold text-gray-900 mb-6">Invoice Settings</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <Input label="Invoice Number Prefix" value={settings.invoicePrefix ?? 'LM-INV'} onChange={(e) => update('invoicePrefix', e.target.value)} helperText="e.g. LM-INV → LM-INV-0001" required />
-                    <Input label="Starting Invoice Number" type="number" min={1} value={String(settings.invoiceStartNumber ?? 1)} onChange={(e) => update('invoiceStartNumber', parseInt(e.target.value) || 1)} helperText="First invoice will use this number" />
-                    <Select label="Currency" value={settings.currency ?? 'GHS'} onChange={(e) => update('currency', e.target.value)} options={[{ value: 'GHS', label: 'Ghana Cedi (GHS)' }, { value: 'USD', label: 'US Dollar (USD)' }, { value: 'EUR', label: 'Euro (EUR)' }, { value: 'GBP', label: 'British Pound (GBP)' }, { value: 'NGN', label: 'Nigerian Naira (NGN)' }]} />
-                    <Input label="Currency Symbol" value={settings.currencySymbol ?? 'GH₵'} onChange={(e) => update('currencySymbol', e.target.value)} />
-                    <Input label="Default Tax Rate (%)" type="number" min={0} max={100} step={0.5} value={String(settings.defaultTaxRate ?? 0)} onChange={(e) => update('defaultTaxRate', parseFloat(e.target.value) || 0)} helperText="Set to 0 for no tax" />
-                    <Input label="Default Payment Terms" value={settings.defaultPaymentTerms ?? ''} onChange={(e) => update('defaultPaymentTerms', e.target.value)} placeholder="e.g. Net 30, Due on receipt" />
-                  </div>
-                </Card>
+                <div className="space-y-6">
+                  <Card>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-5">
+                      <div>
+                        <h3 className="text-base font-semibold text-gray-900">Invoice Brand Logo</h3>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          Displayed in the invoice header, print preview, and downloaded PDFs. Stored persistently in Firebase Storage.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('branding')}
+                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 whitespace-nowrap shrink-0 self-start sm:self-auto"
+                      >
+                        Customize Brand Colors →
+                      </button>
+                    </div>
+                    <LogoUploadField
+                      label="Invoice & Brand Logo"
+                      currentUrl={settings.logoURL || branding.logoUrl}
+                      currentStoragePath={settings.logoStoragePath || branding.logoStoragePath}
+                      fieldKey="logo"
+                      maxMB={5}
+                      persistSettings={true}
+                      adminId={user?.uid}
+                      onUploaded={handleMainLogoUploaded}
+                      onRemoved={handleMainLogoRemoved}
+                    />
+                  </Card>
+
+                  <Card>
+                    <h3 className="text-base font-semibold text-gray-900 mb-6">Invoice Numbering & Defaults</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <Input label="Invoice Number Prefix" value={settings.invoicePrefix ?? 'LM-INV'} onChange={(e) => update('invoicePrefix', e.target.value)} helperText="e.g. LM-INV → LM-INV-0001" required />
+                      <Input label="Starting Invoice Number" type="number" min={1} value={String(settings.invoiceStartNumber ?? 1)} onChange={(e) => update('invoiceStartNumber', parseInt(e.target.value) || 1)} helperText="First invoice will use this number" />
+                      <Select label="Currency" value={settings.currency ?? 'GHS'} onChange={(e) => update('currency', e.target.value)} options={[{ value: 'GHS', label: 'Ghana Cedi (GHS)' }, { value: 'USD', label: 'US Dollar (USD)' }, { value: 'EUR', label: 'Euro (EUR)' }, { value: 'GBP', label: 'British Pound (GBP)' }, { value: 'NGN', label: 'Nigerian Naira (NGN)' }]} />
+                      <Input label="Currency Symbol" value={settings.currencySymbol ?? 'GH₵'} onChange={(e) => update('currencySymbol', e.target.value)} />
+                      <Input label="Default Tax Rate (%)" type="number" min={0} max={100} step={0.5} value={String(settings.defaultTaxRate ?? 0)} onChange={(e) => update('defaultTaxRate', parseFloat(e.target.value) || 0)} helperText="Set to 0 for no tax" />
+                      <Input label="Default Payment Terms" value={settings.defaultPaymentTerms ?? ''} onChange={(e) => update('defaultPaymentTerms', e.target.value)} placeholder="e.g. Net 30, Due on receipt" />
+                      <Textarea label="Default Payment Instructions" value={settings.defaultPaymentInstructions ?? ''} onChange={(e) => update('defaultPaymentInstructions', e.target.value)} rows={3} wrapperClassName="sm:col-span-2" placeholder="Bank transfer or Mobile Money account details shown on invoices..." />
+                      <Textarea label="Default Invoice Notes" value={settings.defaultNotes ?? ''} onChange={(e) => update('defaultNotes', e.target.value)} rows={2} placeholder="Optional default note for clients..." />
+                      <Textarea label="Default Thank You Message" value={settings.defaultThankYouMessage ?? ''} onChange={(e) => update('defaultThankYouMessage', e.target.value)} rows={2} placeholder="Thank you for your business with LEXMEDIA.GH!" />
+                    </div>
+                  </Card>
+                </div>
               )}
 
               {activeTab === 'payment' && (
@@ -520,21 +502,75 @@ export default function SettingsPage() {
 
                   <Card>
                     <h3 className="text-base font-semibold text-gray-900 mb-1">Logo & Favicon</h3>
-                    <p className="text-sm text-muted mb-5">Upload your brand logos. Use the light variant for dark backgrounds.</p>
+                    <p className="text-sm text-muted mb-5">Upload your brand logos to Firebase Storage. Saved immediately and applied across invoices and client portals.</p>
                     <div className="space-y-6">
-                      <LogoUploader label="Main Logo (light backgrounds)" currentUrl={branding.logoUrl} fieldKey="logo" maxMB={5} onUploaded={(url) => updateBranding('logoUrl', url)} onRemove={() => updateBranding('logoUrl', '')} />
+                      <LogoUploadField
+                        label="Main Brand & Invoice Logo (light backgrounds)"
+                        currentUrl={branding.logoUrl}
+                        currentStoragePath={branding.logoStoragePath}
+                        fieldKey="logo"
+                        maxMB={5}
+                        persistSettings={true}
+                        adminId={user?.uid}
+                        onUploaded={handleMainLogoUploaded}
+                        onRemoved={handleMainLogoRemoved}
+                      />
                       <div className="border-t border-gray-100 pt-6">
-                        <LogoUploader label="Light Logo (dark backgrounds)" currentUrl={branding.logoLightUrl} fieldKey="logoLight" maxMB={5} onUploaded={(url) => updateBranding('logoLightUrl', url)} onRemove={() => updateBranding('logoLightUrl', '')} />
+                        <LogoUploadField
+                          label="Light Logo (dark backgrounds)"
+                          currentUrl={branding.logoLightUrl}
+                          currentStoragePath={branding.logoLightStoragePath}
+                          fieldKey="logoLight"
+                          maxMB={5}
+                          persistSettings={true}
+                          adminId={user?.uid}
+                          onUploaded={({ downloadUrl, storagePath }) =>
+                            setBranding((prev) => ({
+                              ...prev,
+                              logoLightUrl: downloadUrl,
+                              logoLightStoragePath: storagePath,
+                            }))
+                          }
+                          onRemoved={() =>
+                            setBranding((prev) => ({
+                              ...prev,
+                              logoLightUrl: '',
+                              logoLightStoragePath: '',
+                            }))
+                          }
+                        />
                       </div>
                       <div className="border-t border-gray-100 pt-6">
-                        <LogoUploader label="Favicon (32x32 recommended)" currentUrl={branding.faviconUrl} fieldKey="favicon" maxMB={2} onUploaded={(url) => updateBranding('faviconUrl', url)} onRemove={() => updateBranding('faviconUrl', '')} />
+                        <LogoUploadField
+                          label="Favicon (32x32 recommended)"
+                          currentUrl={branding.faviconUrl}
+                          currentStoragePath={branding.faviconStoragePath}
+                          fieldKey="favicon"
+                          maxMB={2}
+                          persistSettings={true}
+                          adminId={user?.uid}
+                          onUploaded={({ downloadUrl, storagePath }) =>
+                            setBranding((prev) => ({
+                              ...prev,
+                              faviconUrl: downloadUrl,
+                              faviconStoragePath: storagePath,
+                            }))
+                          }
+                          onRemoved={() =>
+                            setBranding((prev) => ({
+                              ...prev,
+                              faviconUrl: '',
+                              faviconStoragePath: '',
+                            }))
+                          }
+                        />
                       </div>
                     </div>
                   </Card>
 
                   <Card>
                     <h3 className="text-base font-semibold text-gray-900 mb-1">Brand Colors</h3>
-                    <p className="text-sm text-muted mb-5">Applied to all client-facing pages after saving.</p>
+                    <p className="text-sm text-muted mb-5">Applied to invoices and client-facing pages after saving.</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                       <ColorField label="Primary Color" value={branding.primaryColor} onChange={(v) => updateBranding('primaryColor', v)} />
                       <ColorField label="Secondary Color" value={branding.secondaryColor} onChange={(v) => updateBranding('secondaryColor', v)} />
@@ -554,10 +590,10 @@ export default function SettingsPage() {
                     <div className="rounded-2xl p-6 space-y-4 border" style={{ backgroundColor: branding.backgroundColor, borderColor: branding.primaryColor + '20' }}>
                       <div className="flex items-center gap-3">
                         {branding.logoUrl ? (
-                          <img src={branding.logoUrl} alt="Logo" style={{ height: 40, objectFit: 'contain' }} />
+                          <img src={branding.logoUrl} alt="Logo" referrerPolicy="no-referrer" style={{ height: 40, objectFit: 'contain' }} />
                         ) : (
                           <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold" style={{ backgroundColor: branding.buttonColor, color: branding.buttonTextColor }}>
-                            {(branding.shortName || 'LX').slice(0, 2).toUpperCase()}
+                            {(branding.shortName || 'LM').slice(0, 2).toUpperCase()}
                           </div>
                         )}
                         <div>

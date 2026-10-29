@@ -1,23 +1,26 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input, Textarea } from '@/components/ui/Input'
+import { LogoUploadField } from '@/components/branding/LogoUploadField'
 import { InvoiceDocument } from './InvoiceDocument'
+import { InvoiceStage } from './InvoiceStage'
+import { sanitizeBrandingLogoUrl } from '@/lib/hooks/useInvoiceBranding'
+import { useAuth } from '@/lib/hooks/useAuth'
 import { getCustomerUrl } from '@/lib/utils'
 import {
   COLLECTIONS,
   getDocuments,
   addDocument,
   updateDocument,
+  setDocument,
 } from '@/lib/firebase/firestore'
 import type {
   Invoice,
   InvoiceItem,
   InvoiceStatus,
-  InvoiceBusinessInfo,
-  InvoiceClientInfo,
   Client,
   Service,
   Package,
@@ -101,19 +104,20 @@ export function InvoiceBuilderModal({
   onSuccess,
   onSaveAndSend,
 }: InvoiceBuilderModalProps) {
+  const { user } = useAuth()
   const [activeTab, setActiveTab] = useState<'editor' | 'preview'>('editor')
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isUploadingLogo, setIsUploadingLogo] = useState(false)
 
   // ─── Business Info State ───
   const [businessName, setBusinessName] = useState('LEXMEDIA.GH')
   const [businessLogo, setBusinessLogo] = useState('')
+  const [businessLogoStoragePath, setBusinessLogoStoragePath] = useState('')
   const [businessAddress, setBusinessAddress] = useState('East Legon, Accra, Ghana')
   const [businessPhone, setBusinessPhone] = useState('+233 24 123 4567')
   const [businessWhatsapp, setBusinessWhatsapp] = useState('+233 24 123 4567')
   const [businessEmail, setBusinessEmail] = useState('contact@lexmedia.com')
   const [businessWebsite, setBusinessWebsite] = useState(getCustomerUrl())
-  const [saveAsDefaultBrand, setSaveAsDefaultBrand] = useState(false)
+  const [saveAsDefaultBrand, setSaveAsDefaultBrand] = useState(true)
 
   // ─── Client Info State ───
   const [selectedClientId, setSelectedClientId] = useState<string>('')
@@ -169,37 +173,101 @@ export function InvoiceBuilderModal({
     'Thank you for partnering with LEXMEDIA.GH! We appreciate your business.'
   )
 
-  const logoInputRef = useRef<HTMLInputElement>(null)
-
   // Load defaults from Brand Profile / Settings or populate from invoiceToEdit / initialDraft
   useEffect(() => {
     if (!isOpen) return
 
+    const loadSavedBrandingDefaults = async (preferExistingLogo = '') => {
+      try {
+        const settingsDocs = await getDocuments<any>(COLLECTIONS.SETTINGS)
+        let brandDoc = settingsDocs.find((d: any) => d.id === 'branding') as
+          | Partial<BrandingSettings>
+          | undefined
+        let bizDoc = settingsDocs.find((d: any) => d.id === 'business') as
+          | Partial<BusinessSettings>
+          | undefined
+
+        if (!brandDoc && !bizDoc) {
+          try {
+            const res = await fetch('/api/branding', { cache: 'no-store' })
+            if (res.ok) {
+              const payload = await res.json()
+              brandDoc = payload.branding || undefined
+              bizDoc = payload.business || undefined
+            }
+          } catch {}
+        }
+
+        const savedLogo =
+          sanitizeBrandingLogoUrl(brandDoc?.logoUrl) ||
+          sanitizeBrandingLogoUrl(bizDoc?.logoURL)
+        const savedPath =
+          brandDoc?.logoStoragePath || bizDoc?.logoStoragePath || ''
+
+        if (!preferExistingLogo && savedLogo) {
+          setBusinessLogo(savedLogo)
+          setBusinessLogoStoragePath(savedPath)
+        }
+
+        if (!invoiceToEdit) {
+          if (brandDoc?.businessName) setBusinessName(brandDoc.businessName)
+          if (bizDoc) {
+            if (bizDoc.businessName) setBusinessName(bizDoc.businessName)
+            if (bizDoc.address) setBusinessAddress(bizDoc.address)
+            if (bizDoc.phone) setBusinessPhone(bizDoc.phone)
+            if (bizDoc.whatsapp) setBusinessWhatsapp(bizDoc.whatsapp)
+            if (bizDoc.email) setBusinessEmail(bizDoc.email)
+            if (bizDoc.website) setBusinessWebsite(bizDoc.website)
+            if (!initialDraft?.terms && bizDoc.defaultTermsAndConditions) {
+              setTerms(bizDoc.defaultTermsAndConditions)
+            }
+            if (!initialDraft?.notes && bizDoc.defaultNotes) {
+              setNotes(bizDoc.defaultNotes)
+            }
+            if (bizDoc.defaultPaymentInstructions) {
+              setPaymentInstructions(bizDoc.defaultPaymentInstructions)
+            }
+            if (bizDoc.defaultThankYouMessage) {
+              setThankYouMessage(bizDoc.defaultThankYouMessage)
+            }
+            if (bizDoc.defaultPaymentTerms) {
+              setPaymentTerms(bizDoc.defaultPaymentTerms)
+            }
+            if (typeof bizDoc.defaultTaxRate === 'number' && !initialDraft) {
+              setTaxRate(bizDoc.defaultTaxRate)
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Could not load brand settings:', e)
+      }
+    }
+
     if (invoiceToEdit) {
-      // Populating for Edit
       setInvoiceNumber(invoiceToEdit.invoiceNumber || '')
       setInvoiceDate(
         invoiceToEdit.invoiceDate
-          ? (typeof invoiceToEdit.invoiceDate === 'string'
-              ? invoiceToEdit.invoiceDate.split('T')[0]
-              : new Date().toISOString().split('T')[0])
+          ? typeof invoiceToEdit.invoiceDate === 'string'
+            ? invoiceToEdit.invoiceDate.split('T')[0]
+            : new Date().toISOString().split('T')[0]
           : new Date().toISOString().split('T')[0]
       )
       setDueDate(
         invoiceToEdit.dueDate
-          ? (typeof invoiceToEdit.dueDate === 'string'
-              ? invoiceToEdit.dueDate.split('T')[0]
-              : '')
+          ? typeof invoiceToEdit.dueDate === 'string'
+            ? invoiceToEdit.dueDate.split('T')[0]
+            : ''
           : ''
       )
       setPaymentTerms(invoiceToEdit.paymentTerms || 'Due on Receipt')
       setCurrency(invoiceToEdit.currency || 'GHS')
       setStatus(invoiceToEdit.status || 'Draft')
 
-      // Business Info
+      const existingInvoiceLogo = sanitizeBrandingLogoUrl(invoiceToEdit.businessInfo?.logo)
       if (invoiceToEdit.businessInfo) {
-        setBusinessName(invoiceToEdit.businessInfo.name || 'LEXMEDIA')
-        setBusinessLogo(invoiceToEdit.businessInfo.logo || '')
+        setBusinessName(invoiceToEdit.businessInfo.name || 'LEXMEDIA.GH')
+        setBusinessLogo(existingInvoiceLogo)
+        setBusinessLogoStoragePath(invoiceToEdit.businessInfo.logoStoragePath || '')
         setBusinessAddress(invoiceToEdit.businessInfo.address || '')
         setBusinessPhone(invoiceToEdit.businessInfo.phone || '')
         setBusinessWhatsapp(invoiceToEdit.businessInfo.whatsapp || '')
@@ -207,7 +275,8 @@ export function InvoiceBuilderModal({
         setBusinessWebsite(invoiceToEdit.businessInfo.website || '')
       }
 
-      // Client Info
+      loadSavedBrandingDefaults(existingInvoiceLogo)
+
       setSelectedClientId(invoiceToEdit.clientId || '')
       setClientName(invoiceToEdit.clientName || '')
       setClientCompany(invoiceToEdit.clientCompany || '')
@@ -215,37 +284,40 @@ export function InvoiceBuilderModal({
       setClientPhone(invoiceToEdit.clientPhone || '')
       setClientAddress(invoiceToEdit.clientAddress || '')
 
-      // Items
       if (invoiceToEdit.items && invoiceToEdit.items.length > 0) {
         setItems(invoiceToEdit.items)
       }
 
-      // Financials
       setDiscountType(invoiceToEdit.discountType || 'percentage')
       setDiscountValue(invoiceToEdit.discountValue || 0)
       setTaxRate(invoiceToEdit.taxRate || 0)
       setAmountPaid(invoiceToEdit.amountPaid || 0)
 
-      // Payment
       setPaymentMethod(invoiceToEdit.paymentMethod || 'Paystack Online')
       setPaymentReference(invoiceToEdit.paymentReference || '')
       setPaymentNotes(invoiceToEdit.paymentNotes || '')
 
-      // Notes & terms
       setNotes(invoiceToEdit.notes || '')
       setTerms(invoiceToEdit.terms || '')
       setPaymentInstructions(invoiceToEdit.paymentInstructions || '')
       setThankYouMessage(invoiceToEdit.thankYouMessage || '')
     } else {
-      // New Invoice (or Duplicated Draft)
-      const nextInvNumber = initialDraft?.invoiceNumber || generateLxmInvoiceNumber(existingInvoicesCount)
+      const nextInvNumber =
+        initialDraft?.invoiceNumber || generateLxmInvoiceNumber(existingInvoicesCount)
       setInvoiceNumber(nextInvNumber)
       setInvoiceDate(new Date().toISOString().split('T')[0])
-      
-      // Default due date: 7 days out
-      const defaultDue = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+
+      const defaultDue = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split('T')[0]
       setDueDate(defaultDue)
       setStatus(initialDraft?.status || 'Draft')
+
+      const draftLogo = sanitizeBrandingLogoUrl(initialDraft?.businessInfo?.logo)
+      if (draftLogo) {
+        setBusinessLogo(draftLogo)
+        setBusinessLogoStoragePath(initialDraft?.businessInfo?.logoStoragePath || '')
+      }
 
       if (initialDraft) {
         if (initialDraft.clientName) setClientName(initialDraft.clientName)
@@ -255,31 +327,9 @@ export function InvoiceBuilderModal({
         if (initialDraft.items) setItems(initialDraft.items)
         if (initialDraft.notes) setNotes(initialDraft.notes)
         if (initialDraft.terms) setTerms(initialDraft.terms)
-      } else {
-        // Load default brand profile from Firestore settings
-        getDocuments<BrandingSettings>(COLLECTIONS.SETTINGS).then((settingsDocs) => {
-          const brandDoc = settingsDocs.find((d: any) => d.id === 'branding') as BrandingSettings | undefined
-          const bizDoc = settingsDocs.find((d: any) => d.id === 'business') as Partial<BusinessSettings> | undefined
-
-          if (brandDoc) {
-            if (brandDoc.businessName) setBusinessName(brandDoc.businessName)
-            if (brandDoc.logoUrl) setBusinessLogo(brandDoc.logoUrl)
-          }
-          if (bizDoc) {
-            if (bizDoc.businessName) setBusinessName(bizDoc.businessName)
-            if (bizDoc.address) setBusinessAddress(bizDoc.address)
-            if (bizDoc.phone) setBusinessPhone(bizDoc.phone)
-            if (bizDoc.whatsapp) setBusinessWhatsapp(bizDoc.whatsapp)
-            if (bizDoc.email) setBusinessEmail(bizDoc.email)
-            if (bizDoc.website) setBusinessWebsite(bizDoc.website)
-            if (bizDoc.logoURL && !brandDoc?.logoUrl) setBusinessLogo(bizDoc.logoURL)
-            if (bizDoc.defaultTermsAndConditions) setTerms(bizDoc.defaultTermsAndConditions)
-            if (bizDoc.defaultNotes) setNotes(bizDoc.defaultNotes)
-            if (bizDoc.defaultPaymentInstructions) setPaymentInstructions(bizDoc.defaultPaymentInstructions)
-            if (bizDoc.defaultThankYouMessage) setThankYouMessage(bizDoc.defaultThankYouMessage)
-          }
-        }).catch((e) => console.warn('Could not load brand settings:', e))
       }
+
+      loadSavedBrandingDefaults(draftLogo)
     }
   }, [isOpen, invoiceToEdit, initialDraft, existingInvoicesCount])
 
@@ -314,54 +364,20 @@ export function InvoiceBuilderModal({
     }
   }
 
-  // Brand Logo Upload handler
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    setIsUploadingLogo(true)
-    const toastId = toast.loading('Uploading brand logo...')
-
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('fieldKey', 'logo')
-
-      const res = await fetch('/api/branding/upload', {
-        method: 'POST',
-        body: formData,
-      })
-
-      const data = await res.json()
-      if (!res.ok || !data.downloadUrl) {
-        throw new Error(data.error || 'Upload failed')
-      }
-
-      setBusinessLogo(data.downloadUrl)
-      toast.success('Logo uploaded successfully!', { id: toastId })
-
-      // If user selected "Save as default business logo", immediately update Firestore settings
-      if (saveAsDefaultBrand) {
-        try {
-          await updateDocument(COLLECTIONS.SETTINGS, 'branding', { logoUrl: data.downloadUrl })
-          await updateDocument(COLLECTIONS.SETTINGS, 'business', { logoURL: data.downloadUrl })
-          toast.success('Saved as default business logo')
-        } catch (setErr) {
-          console.warn('Could not update default brand settings:', setErr)
-        }
-      }
-    } catch (err: any) {
-      console.error('Logo upload error:', err)
-      toast.error(err.message || 'Failed to upload logo', { id: toastId })
-    } finally {
-      setIsUploadingLogo(false)
-      if (logoInputRef.current) logoInputRef.current.value = ''
-    }
+  const handleLogoUploaded = ({
+    downloadUrl,
+    storagePath,
+  }: {
+    downloadUrl: string
+    storagePath: string
+  }) => {
+    setBusinessLogo(downloadUrl)
+    setBusinessLogoStoragePath(storagePath)
   }
 
   const handleRemoveLogo = () => {
     setBusinessLogo('')
-    toast.success('Logo removed from invoice')
+    setBusinessLogoStoragePath('')
   }
 
   // Dynamic Line Items operations
@@ -464,6 +480,7 @@ export function InvoiceBuilderModal({
     businessInfo: {
       name: businessName,
       logo: businessLogo,
+      logoStoragePath: businessLogoStoragePath,
       address: businessAddress,
       phone: businessPhone,
       whatsapp: businessWhatsapp,
@@ -546,7 +563,7 @@ export function InvoiceBuilderModal({
       // If user opted to save business defaults
       if (saveAsDefaultBrand) {
         try {
-          await updateDocument(COLLECTIONS.SETTINGS, 'business', {
+          const bizDefaults = {
             businessName,
             address: businessAddress,
             phone: businessPhone,
@@ -554,16 +571,25 @@ export function InvoiceBuilderModal({
             email: businessEmail,
             website: businessWebsite,
             logoURL: businessLogo,
+            logoStoragePath: businessLogoStoragePath,
             defaultPaymentTerms: paymentTerms,
             defaultTermsAndConditions: terms,
             defaultNotes: notes,
             defaultPaymentInstructions: paymentInstructions,
             defaultThankYouMessage: thankYouMessage,
-          })
-          await updateDocument(COLLECTIONS.SETTINGS, 'branding', {
+          }
+          const brandDefaults = {
             businessName,
             logoUrl: businessLogo,
-          })
+            logoStoragePath: businessLogoStoragePath,
+          }
+          await setDocument(COLLECTIONS.SETTINGS, 'business', bizDefaults, true)
+          await setDocument(COLLECTIONS.SETTINGS, 'branding', brandDefaults, true)
+          fetch('/api/branding', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ business: bizDefaults, branding: brandDefaults }),
+          }).catch(() => {})
         } catch (bErr) {
           console.warn('Could not persist default business info:', bErr)
         }
@@ -611,6 +637,7 @@ export function InvoiceBuilderModal({
         businessInfo: {
           name: businessName.trim(),
           logo: businessLogo,
+          logoStoragePath: businessLogoStoragePath,
           address: businessAddress.trim(),
           phone: businessPhone.trim(),
           whatsapp: businessWhatsapp.trim(),
@@ -775,14 +802,14 @@ export function InvoiceBuilderModal({
 
         {/* ─── Mode 1: Live Preview Mode ─── */}
         {activeTab === 'preview' && (
-          <div className="bg-slate-100 p-4 sm:p-8 rounded-xl max-h-[75vh] overflow-y-auto">
+          <InvoiceStage mode="desktop">
             <InvoiceDocument
               invoice={currentInvoiceDraft}
               elementId="builder-live-preview-render"
               showPaymentButton={true}
               paymentUrl={currentInvoiceDraft.paymentLinkUrl || ''}
             />
-          </div>
+          </InvoiceStage>
         )}
 
         {/* ─── Mode 2: Editor Mode ─── */}
@@ -802,72 +829,28 @@ export function InvoiceBuilderModal({
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {/* Logo Uploader Column */}
-                <div className="space-y-2">
-                  <label className="block text-xs font-semibold text-gray-700">
-                    Business Logo (PNG, JPG, WebP, SVG)
-                  </label>
-                  <div className="border border-dashed border-gray-300 rounded-xl p-3 bg-gray-50/60 flex flex-col items-center justify-center min-h-[140px] text-center space-y-2">
-                    {businessLogo ? (
-                      <div className="relative group w-full flex flex-col items-center">
-                        <img
-                          src={businessLogo}
-                          alt="Brand Logo"
-                          className="max-h-20 max-w-[180px] object-contain rounded-md"
-                        />
-                        <div className="flex items-center gap-2 mt-2">
-                          <button
-                            type="button"
-                            onClick={() => logoInputRef.current?.click()}
-                            className="text-xs text-blue-600 hover:text-blue-800 font-semibold"
-                          >
-                            Replace
-                          </button>
-                          <span className="text-gray-300">·</span>
-                          <button
-                            type="button"
-                            onClick={handleRemoveLogo}
-                            className="text-xs text-rose-600 hover:text-rose-800 font-semibold"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="w-12 h-12 rounded-lg bg-gray-200 flex items-center justify-center text-gray-400">
-                          <ImageIcon size={22} />
-                        </div>
-                        <div>
-                          <button
-                            type="button"
-                            onClick={() => logoInputRef.current?.click()}
-                            disabled={isUploadingLogo}
-                            className="text-xs font-semibold text-blue-600 hover:text-blue-800 underline"
-                          >
-                            {isUploadingLogo ? 'Uploading...' : 'Click to Upload Logo'}
-                          </button>
-                          <p className="text-[11px] text-gray-400 mt-0.5">PNG, JPG, SVG up to 5MB</p>
-                        </div>
-                      </>
-                    )}
+                <div className="space-y-2.5">
+                  <LogoUploadField
+                    label="Business Logo"
+                    currentUrl={businessLogo}
+                    currentStoragePath={businessLogoStoragePath}
+                    fieldKey="logo"
+                    maxMB={5}
+                    persistSettings={saveAsDefaultBrand}
+                    adminId={user?.uid}
+                    compact
+                    onUploaded={handleLogoUploaded}
+                    onRemoved={handleRemoveLogo}
+                  />
 
-                    <input
-                      ref={logoInputRef}
-                      type="file"
-                      accept="image/png, image/jpeg, image/webp, image/svg+xml"
-                      onChange={handleLogoUpload}
-                      className="hidden"
-                    />
-                  </div>
-
-                  <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer pt-1">
+                  <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer pt-0.5">
                     <input
                       type="checkbox"
                       checked={saveAsDefaultBrand}
                       onChange={(e) => setSaveAsDefaultBrand(e.target.checked)}
                       className="rounded text-blue-600"
                     />
-                    <span>Save profile &amp; logo as default for future invoices</span>
+                    <span>Save profile &amp; logo as default for all invoices</span>
                   </label>
                 </div>
 

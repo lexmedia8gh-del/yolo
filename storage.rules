@@ -1,11 +1,21 @@
-﻿rules_version = '2';
+rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
     // ─── Admin authorization ──────────────────────────────────────────────────
-    // Only the Firebase user with custom claim admin:true can write to storage.
+    // Only the authorized Firebase administrator can write or delete branding/storage objects.
     function isAdmin() {
-      return request.auth != null && request.auth.token.admin == true;
+      return request.auth != null && (
+        request.auth.token.admin == true ||
+        (request.auth.token.email_verified == true && request.auth.token.email == 'lexmedia8gh@gmail.com')
+      );
+    }
+
+    function isValidBrandingImage(maxMB) {
+      return request.resource != null
+        && request.resource.size > 0
+        && request.resource.size <= maxMB * 1024 * 1024
+        && request.resource.contentType.matches('image/(png|jpeg|webp|x-icon|vnd\\.microsoft\\.icon)');
     }
 
     // ─── Delivery files ───────────────────────────────────────────────────────
@@ -13,21 +23,30 @@ service firebase.storage {
     // validates the access token server-side. Firebase Storage direct reads are
     // only used as a fallback; write is admin-only.
     match /deliveries/{allPaths=**} {
-      allow read: if true;      // Direct URL reads OK; real gate is the API token check
-      allow write: if isAdmin();
-    }
-
-    // ─── Branding assets (logos, favicon) ─────────────────────────────────────
-    // Admin-only upload. Public read so logos can be served to client portal pages.
-    match /branding/{allPaths=**} {
       allow read: if true;
       allow write: if isAdmin();
     }
 
-    // ─── Default: deny everything else ────────────────────────────────────────
+    // ─── Invoice Branding assets (invoice-branding/{adminId}/{uniqueFileName}) ─
+    // Admin-only upload/delete with image type & size enforcement.
+    // Read allowed for rendering saved invoice logos in views, print, PDF, and emails.
+    match /invoice-branding/{adminId}/{fileName} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidBrandingImage(5);
+      allow delete: if isAdmin();
+    }
+
+    // ─── Legacy Branding assets (logos, favicon) ──────────────────────────────
+    match /branding/{allPaths=**} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidBrandingImage(5);
+      allow delete: if isAdmin();
+    }
+
+    // ─── Default: deny everything else (keep bucket private) ──────────────────
     match /{allPaths=**} {
       allow read: if false;
-      allow write: if isAdmin();
+      allow write: if false;
     }
   }
 }

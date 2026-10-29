@@ -56,6 +56,30 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    let cleanLogoUrl =
+      typeof businessLogoUrl === 'string' && !businessLogoUrl.trim().startsWith('/uploads/')
+        ? businessLogoUrl.trim()
+        : ''
+
+    if (!cleanLogoUrl) {
+      try {
+        const adminDb = getAdminDb()
+        const [brandSnap, bizSnap] = await Promise.all([
+          adminDb.collection(COLLECTIONS.SETTINGS).doc('branding').get(),
+          adminDb.collection(COLLECTIONS.SETTINGS).doc('business').get(),
+        ])
+        const fromBrand = brandSnap.exists ? brandSnap.data()?.logoUrl : ''
+        const fromBiz = bizSnap.exists ? bizSnap.data()?.logoURL : ''
+        const candidate =
+          (typeof fromBrand === 'string' && !fromBrand.startsWith('/uploads/') && fromBrand) ||
+          (typeof fromBiz === 'string' && !fromBiz.startsWith('/uploads/') && fromBiz) ||
+          ''
+        if (candidate) cleanLogoUrl = candidate
+      } catch {
+        // Ignore fallback lookup errors when Admin credentials are unset locally
+      }
+    }
+
     const result = await sendInvoiceEmail({
       toEmail,
       clientName: clientName || 'Valued Client',
@@ -68,7 +92,7 @@ export async function POST(req: NextRequest) {
       personalMessage,
       items,
       businessName,
-      businessLogoUrl,
+      businessLogoUrl: cleanLogoUrl || undefined,
     })
 
     if (!result.success) {

@@ -192,7 +192,9 @@ export type InvoiceStatus =
 
 export interface InvoiceBusinessInfo {
   name: string
+  tagline?: string
   logo?: string
+  logoStoragePath?: string
   address?: string
   phone?: string
   whatsapp?: string
@@ -241,6 +243,7 @@ export interface Invoice {
   discountAmount: number
   taxRate?: number
   taxAmount?: number
+  shippingAmount?: number
   total: number
   amountPaid?: number
   balanceDue?: number
@@ -577,6 +580,7 @@ export interface BusinessSettings {
   businessName: string
   tagline?: string
   logoURL?: string
+  logoStoragePath?: string
   email: string
   phone?: string
   whatsapp?: string
@@ -603,8 +607,11 @@ export interface BrandingSettings {
   shortName: string
   tagline: string
   logoUrl: string
+  logoStoragePath?: string
   logoLightUrl: string
+  logoLightStoragePath?: string
   faviconUrl: string
+  faviconStoragePath?: string
   primaryColor: string
   secondaryColor: string
   accentColor: string

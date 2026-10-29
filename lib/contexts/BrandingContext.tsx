@@ -32,6 +32,26 @@ const BrandingContext = createContext<BrandingContextValue>({
   loading: true,
 })
 
+function sanitizeBrandingFields(
+  raw: Partial<BrandingSettings>,
+  fallbackLogoUrl?: string
+): Partial<BrandingSettings> {
+  const cleanUrl = (val?: string) =>
+    val && typeof val === 'string' && !val.trim().startsWith('/uploads/') ? val.trim() : ''
+
+  const cleaned: Partial<BrandingSettings> = { ...raw }
+  if ('logoUrl' in raw || fallbackLogoUrl) {
+    cleaned.logoUrl = cleanUrl(raw.logoUrl) || cleanUrl(fallbackLogoUrl)
+  }
+  if ('logoLightUrl' in raw) {
+    cleaned.logoLightUrl = cleanUrl(raw.logoLightUrl)
+  }
+  if ('faviconUrl' in raw) {
+    cleaned.faviconUrl = cleanUrl(raw.faviconUrl)
+  }
+  return cleaned
+}
+
 export function BrandingProvider({ children }: { children: React.ReactNode }) {
   const [branding, setBranding] = useState<BrandingSettings>(DEFAULT_BRANDING)
   const [loading, setLoading] = useState(true)
@@ -40,11 +60,12 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
     let mounted = true
 
     // 1. Fetch from server API immediately for fast, reliable initialization
-    fetch('/api/branding')
+    fetch('/api/branding', { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         if (mounted && data?.success && data?.branding) {
-          setBranding((prev) => ({ ...prev, ...data.branding }))
+          const sanitized = sanitizeBrandingFields(data.branding, data?.business?.logoURL)
+          setBranding((prev) => ({ ...prev, ...sanitized }))
           setLoading(false)
         }
       })
@@ -59,7 +80,10 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
       'branding',
       (data) => {
         if (mounted && data) {
-          setBranding((prev) => ({ ...prev, ...data }))
+          setBranding((prev) => {
+            const sanitized = sanitizeBrandingFields(data, prev.logoUrl)
+            return { ...prev, ...sanitized }
+          })
           setLoading(false)
         }
       }
