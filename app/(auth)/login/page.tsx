@@ -112,34 +112,14 @@ function LoginFormContent() {
     })()
   }, [authLoading, activeUser, safeRedirectTo, isPinLoading, isGoogleLoading])
 
-  // Resolve colors from Branding Settings while enforcing LexMedia Blue & light contrast
-  const legacyAccents = new Set([
-    '#0a0a0a',
-    '#0f172a',
-    '#111827',
-    '#4f46e5',
-    '#6366f1',
-    '',
-  ])
-  const rawButtonLower = (branding.buttonColor || '').trim().toLowerCase()
-  const rawAccentLower = (branding.accentColor || '').trim().toLowerCase()
-  const rawSecondaryLower = (branding.secondaryColor || '').trim().toLowerCase()
-
-  const resolvedBrandBlue = !legacyAccents.has(rawButtonLower)
-    ? normalizeHexColor(branding.buttonColor, '#1D63ED')
-    : !legacyAccents.has(rawAccentLower)
-    ? normalizeHexColor(branding.accentColor, '#1D63ED')
-    : !legacyAccents.has(rawSecondaryLower)
-    ? normalizeHexColor(branding.secondaryColor, '#1D63ED')
-    : '#1D63ED'
-
-  const resolvedBrandBlueHover = darkenHex(resolvedBrandBlue, 0.88)
-  const isLightAccent = getRelativeLuminance(resolvedBrandBlue) > 0.45
-  const resolvedBrandBlueFg = isLightAccent ? '#0F172A' : '#FFFFFF'
-  const resolvedBrandBlueRing = hexToRgba(resolvedBrandBlue, 0.16)
-  const resolvedBrandBlueShadow = hexToRgba(resolvedBrandBlue, 0.2)
-  const resolvedBrandBlueWash = hexToRgba(resolvedBrandBlue, 0.045)
-  const resolvedBrandBlueRule = hexToRgba(resolvedBrandBlue, 0.28)
+  // Enforce pure LexMedia Blue (#1D63ED) for login button & accent elements
+  const resolvedBrandBlue = '#1D63ED'
+  const resolvedBrandBlueHover = '#1550C7'
+  const resolvedBrandBlueFg = '#FFFFFF'
+  const resolvedBrandBlueRing = 'rgba(29, 99, 237, 0.20)'
+  const resolvedBrandBlueShadow = 'rgba(29, 99, 237, 0.30)'
+  const resolvedBrandBlueWash = 'rgba(29, 99, 237, 0.05)'
+  const resolvedBrandBlueRule = 'rgba(29, 99, 237, 0.25)'
 
   const candidateBg = normalizeHexColor(branding.backgroundColor, '#F8FAFC')
   const resolvedCanvasBg =
@@ -172,9 +152,9 @@ function LoginFormContent() {
       --login-muted: #64748B;
       --login-border: #E2E8F0;
       --login-border-hover: #CBD5E1;
-      --login-accent: ${resolvedBrandBlue};
-      --login-accent-hover: ${resolvedBrandBlueHover};
-      --login-accent-fg: ${resolvedBrandBlueFg};
+      --login-accent: #1D63ED;
+      --login-accent-hover: #1550C7;
+      --login-accent-fg: #FFFFFF;
       --login-accent-ring: ${resolvedBrandBlueRing};
       --login-accent-shadow: ${resolvedBrandBlueShadow};
       --login-accent-wash: ${resolvedBrandBlueWash};
@@ -197,7 +177,7 @@ function LoginFormContent() {
 
     try {
       await signInWithPin(targetPin)
-      window.location.assign(safeRedirectTo)
+      window.location.replace(safeRedirectTo)
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code ?? ''
       const message = (err as { message?: string })?.message ?? ''
@@ -238,9 +218,7 @@ function LoginFormContent() {
     }
   }
 
-  const primarySpinnerBorder = isLightAccent
-    ? 'border-slate-900/30 border-t-slate-900'
-    : 'border-white/30 border-t-white'
+  const primarySpinnerBorder = 'border-white/30 border-t-white'
 
   return (
     <main className="login-light-surface login-theme-vars font-sans min-h-[100dvh] w-full overflow-x-hidden text-[var(--login-heading)] flex flex-col relative selection:bg-[#1D63ED] selection:text-white">
@@ -339,7 +317,7 @@ function LoginFormContent() {
                   id="pin-submit-button"
                   type="submit"
                   disabled={isPinLoading || isGoogleLoading || pin.length !== 6}
-                  className="w-full h-12 px-5 rounded-xl bg-[var(--login-accent)] hover:bg-[var(--login-accent-hover)] text-[var(--login-accent-fg)] font-semibold text-sm shadow-[0_6px_18px_-4px_var(--login-accent-shadow)] transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)] focus-visible:ring-offset-2"
+                  className="w-full h-12 px-5 rounded-xl bg-[#1D63ED] hover:bg-[#1550C7] text-white font-semibold text-sm shadow-[0_6px_18px_-4px_rgba(29,99,237,0.30)] transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D63ED] focus-visible:ring-offset-2"
                 >
                   {isPinLoading ? (
                     <span className="flex items-center gap-2">

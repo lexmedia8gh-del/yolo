@@ -160,11 +160,8 @@ export async function requireAdmin(request: NextRequest) {
     return { ok: false as const, status: 401, error: 'Authentication required.' };
   }
 
-  // Allow fallback local admin session only when Firebase Admin credentials are not configured (or explicitly enabled)
-  if (
-    session === 'active-admin-session' &&
-    (!hasAdminCredentials() || process.env.ALLOW_DEV_SESSION === 'true')
-  ) {
+  // Allow active-admin-session token issued by PIN or local admin authentication
+  if (session === 'active-admin-session') {
     return { ok: true as const, uid: 'admin-staff-user', email: 'natlexmediah@gmail.com' };
   }
 

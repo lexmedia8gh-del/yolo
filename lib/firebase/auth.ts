@@ -266,6 +266,7 @@ export async function signInWithPin(pin: string): Promise<{ user: User }> {
   }
 
   setSessionCookie('active-admin-session', 604800)
+  await syncServerSessionCookie('active-admin-session', 604800)
   const user = getFallbackAdminUser()
   notifyListeners(user)
   return { user }

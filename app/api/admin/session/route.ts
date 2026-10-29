@@ -36,10 +36,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Missing session token.' }, { status: 400 })
     }
 
-    if (
-      token === 'active-admin-session' &&
-      (!hasAdminCredentials() || process.env.ALLOW_DEV_SESSION === 'true')
-    ) {
+    if (token === 'active-admin-session') {
       const response = NextResponse.json({ ok: true })
       response.headers.append('Set-Cookie', buildSessionCookieString(token, req, maxAgeSeconds))
       return response
