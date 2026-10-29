@@ -5,7 +5,8 @@ import { FieldValue } from 'firebase-admin/firestore'
 import { sendDeliveryPaymentRequiredEmail } from '@/lib/services/brevo'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 import { isSupabaseConfigured } from '@/lib/supabase/client'
-import { appUrl, getPaymentLink, getDeliveryLink } from '@/lib/utils'
+import { resolveExternalBrandingLogoUrl } from '@/lib/supabase/storage'
+import { appUrl, getPaymentLink, getDeliveryLink, getProductionUrl } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -200,12 +201,18 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // Fetch brand logo
+          // Fetch brand logo (resolve external Supabase signed or absolute URL for email client)
           let lexmediaLogoUrl = ''
           const brandingSnap = await adminDb.collection(COLLECTIONS.SETTINGS).doc('branding').get()
           if (brandingSnap.exists) {
             const bData = brandingSnap.data()!
-            if (bData.logoUrl) lexmediaLogoUrl = bData.logoUrl
+            const rawBrandUrl = typeof bData.logoUrl === 'string' ? bData.logoUrl : ''
+            const rawBrandPath = typeof bData.logoStoragePath === 'string' ? bData.logoStoragePath : ''
+            lexmediaLogoUrl = await resolveExternalBrandingLogoUrl(
+              rawBrandUrl,
+              rawBrandPath,
+              rawBrandUrl ? getProductionUrl(rawBrandUrl, req) : ''
+            )
           }
 
           // Fetch invoice / balance due

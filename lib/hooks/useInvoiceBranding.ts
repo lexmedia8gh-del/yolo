@@ -28,12 +28,39 @@ export const DEFAULT_INVOICE_BRANDING: BrandingSettings = {
 
 const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/
 
-export function sanitizeBrandingLogoUrl(raw?: string | null): string {
-  if (!raw || typeof raw !== 'string') return ''
-  const trimmed = raw.trim()
-  // Reject broken legacy local filesystem paths (/uploads/...) from read-only FS deployments
-  if (!trimmed || trimmed.startsWith('/uploads/')) return ''
-  return trimmed
+export function sanitizeBrandingLogoUrl(raw?: string | null, storagePath?: string | null): string {
+  const cleanPath =
+    storagePath &&
+    typeof storagePath === 'string' &&
+    !storagePath.includes('..') &&
+    (storagePath.trim().startsWith('invoice-branding/') ||
+      storagePath.trim().startsWith('branding/'))
+      ? storagePath.trim()
+      : ''
+
+  if (raw && typeof raw === 'string') {
+    const trimmed = raw.trim()
+    // Reject broken legacy local filesystem paths (/uploads/...) from read-only FS deployments
+    if (trimmed && !trimmed.startsWith('/uploads/')) {
+      // Normalize raw Supabase public URLs on private 'Delivery files' bucket to our permanent server stream route
+      if (trimmed.includes('.supabase.co/storage/v1/object/public/')) {
+        const parts = trimmed.split(/\/storage\/v1\/object\/public\/[^/]+\//i)
+        if (parts.length > 1) {
+          const extracted = decodeURIComponent(parts[1].split('?')[0])
+          if (extracted.startsWith('invoice-branding/') || extracted.startsWith('branding/')) {
+            return `/api/branding/image?path=${encodeURIComponent(extracted)}`
+          }
+        }
+      }
+      return trimmed
+    }
+  }
+
+  if (cleanPath) {
+    return `/api/branding/image?path=${encodeURIComponent(cleanPath)}`
+  }
+
+  return ''
 }
 
 export function normalizeHexColor(raw: string | undefined, fallback: string): string {
@@ -109,8 +136,14 @@ export function useInvoiceBranding() {
       ...(brandingDoc || {}),
     }
 
-    const logoFromBranding = sanitizeBrandingLogoUrl(brandingDoc?.logoUrl)
-    const logoFromBusiness = sanitizeBrandingLogoUrl(businessDoc?.logoURL)
+    const logoFromBranding = sanitizeBrandingLogoUrl(
+      brandingDoc?.logoUrl,
+      brandingDoc?.logoStoragePath
+    )
+    const logoFromBusiness = sanitizeBrandingLogoUrl(
+      businessDoc?.logoURL,
+      businessDoc?.logoStoragePath
+    )
     const resolvedLogoUrl = logoFromBranding || logoFromBusiness || ''
     const resolvedLogoStoragePath =
       (logoFromBranding ? brandingDoc?.logoStoragePath : businessDoc?.logoStoragePath) ||

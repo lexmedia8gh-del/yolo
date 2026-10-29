@@ -266,3 +266,277 @@ export async function listDeliveryFiles(
   }
 }
 
+/**
+ * Validates that a storage path belongs strictly to the invoice/company branding prefix
+ * so delivery or preview assets in 'Delivery files' can never be accessed or deleted via branding routes.
+ */
+export function isSafeBrandingStoragePath(storagePath?: string | null): storagePath is string {
+  if (!storagePath || typeof storagePath !== 'string') return false
+  const cleaned = cleanStoragePath(storagePath)
+  if (!cleaned || cleaned.includes('..') || cleaned.startsWith('/')) return false
+  return cleaned.startsWith('invoice-branding/') || cleaned.startsWith('branding/')
+}
+
+/**
+ * Resolves the exact bucket name in Supabase Storage matching 'Delivery files'
+ * (defaults to STORAGE_BUCKETS.DELIVERY_FILES = 'Delivery files').
+ */
+async function resolveDeliveryFilesBucketName(): Promise<string> {
+  try {
+    const supabase = typeof window === 'undefined' ? getSupabaseServerClient() : getSupabaseClient()
+    const { data: buckets } = await supabase.storage.listBuckets()
+    if (Array.isArray(buckets) && buckets.length > 0) {
+      const exact = buckets.find(
+        (b) => b.name === STORAGE_BUCKETS.DELIVERY_FILES || b.id === STORAGE_BUCKETS.DELIVERY_FILES
+      )
+      if (exact) return exact.name
+
+      const caseInsensitive = buckets.find((b) =>
+        /^delivery[\s_-]*files$/i.test(b.name || b.id || '')
+      )
+      if (caseInsensitive) return caseInsensitive.name
+    }
+  } catch {
+    // Ignore listBuckets permission restrictions (e.g., when using anon key instead of service role)
+  }
+  return STORAGE_BUCKETS.DELIVERY_FILES
+}
+
+/**
+ * Uploads an invoice/company branding logo to the 'Delivery files' bucket in Supabase Storage.
+ */
+export async function uploadBrandingAssetToSupabase({
+  storagePath,
+  file,
+  contentType,
+}: {
+  storagePath: string
+  file: Buffer | Blob | File | ArrayBuffer
+  contentType: string
+}): Promise<StorageOperationResult<{ storagePath: string; bucket: string }>> {
+  const status = getSupabaseConfigStatus()
+  if (!status.configured) {
+    return {
+      data: null,
+      error: new Error(status.error || 'Supabase Storage is not configured.'),
+    }
+  }
+
+  const cleanPath = cleanStoragePath(storagePath)
+  if (!isSafeBrandingStoragePath(cleanPath)) {
+    return {
+      data: null,
+      error: new Error('Invalid branding storage path.'),
+    }
+  }
+
+  try {
+    const supabase = typeof window === 'undefined' ? getSupabaseServerClient() : getSupabaseClient()
+    let targetBucket: string = STORAGE_BUCKETS.DELIVERY_FILES
+
+    let { data, error } = await supabase.storage
+      .from(targetBucket)
+      .upload(cleanPath, file, {
+        contentType,
+        cacheControl: '31536000',
+        upsert: true,
+      })
+
+    if (
+      error &&
+      (error.message.toLowerCase().includes('bucket not found') ||
+        error.message.toLowerCase().includes('does not exist') ||
+        error.message.toLowerCase().includes('nosuchbucket'))
+    ) {
+      const discovered = await resolveDeliveryFilesBucketName()
+      if (discovered && discovered !== targetBucket) {
+        targetBucket = discovered
+        const retryDiscovered = await supabase.storage
+          .from(targetBucket)
+          .upload(cleanPath, file, {
+            contentType,
+            cacheControl: '31536000',
+            upsert: true,
+          })
+        data = retryDiscovered.data
+        error = retryDiscovered.error
+      }
+
+      if (
+        error &&
+        (error.message.toLowerCase().includes('bucket not found') ||
+          error.message.toLowerCase().includes('does not exist') ||
+          error.message.toLowerCase().includes('nosuchbucket'))
+      ) {
+        try {
+          await supabase.storage.createBucket(STORAGE_BUCKETS.DELIVERY_FILES, { public: false })
+          targetBucket = STORAGE_BUCKETS.DELIVERY_FILES
+          const retryCreated = await supabase.storage
+            .from(targetBucket)
+            .upload(cleanPath, file, {
+              contentType,
+              cacheControl: '31536000',
+              upsert: true,
+            })
+          data = retryCreated.data
+          error = retryCreated.error
+        } catch {}
+      }
+    }
+
+    if (error) {
+      const msgLower = error.message.toLowerCase()
+      const friendly =
+        (error as any).statusCode === '403' ||
+        msgLower.includes('row-level security') ||
+        msgLower.includes('permission')
+          ? `Supabase Storage upload blocked by RLS policy on '${targetBucket}'. Ensure SUPABASE_SERVICE_ROLE_KEY is configured on the server or allow uploads to 'invoice-branding/*' on '${targetBucket}'.`
+          : `Supabase Storage upload failed on bucket '${targetBucket}': ${error.message}`
+      return { data: null, error: new Error(friendly) }
+    }
+
+    return {
+      data: {
+        storagePath: data?.path || cleanPath,
+        bucket: targetBucket,
+      },
+      error: null,
+    }
+  } catch (err: any) {
+    return {
+      data: null,
+      error: err instanceof Error ? err : new Error(String(err?.message || err)),
+    }
+  }
+}
+
+/**
+ * Downloads a branding image from the 'Delivery files' bucket in Supabase Storage (server-side).
+ */
+export async function downloadBrandingAssetFromSupabase(
+  rawStoragePath: string
+): Promise<{ buffer: Buffer; contentType: string } | null> {
+  if (!isSupabaseConfigured()) return null
+  const cleanPath = cleanStoragePath(rawStoragePath)
+  if (!isSafeBrandingStoragePath(cleanPath)) return null
+
+  const inferType = (p: string, headerType?: string | null): string => {
+    if (headerType && headerType.startsWith('image/')) return headerType
+    const ext = p.split('.').pop()?.toLowerCase()
+    if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
+    if (ext === 'webp') return 'image/webp'
+    if (ext === 'ico') return 'image/x-icon'
+    return 'image/png'
+  }
+
+  const supabase = getSupabaseServerClient()
+  const resolvedPrimary = await resolveDeliveryFilesBucketName()
+  const candidateBuckets = Array.from(
+    new Set([STORAGE_BUCKETS.DELIVERY_FILES, resolvedPrimary, ...KNOWN_STORAGE_BUCKETS])
+  )
+
+  for (const bucketName of candidateBuckets) {
+    try {
+      const { data: blob, error } = await supabase.storage.from(bucketName).download(cleanPath)
+      if (!error && blob) {
+        const buffer = Buffer.from(await blob.arrayBuffer())
+        return {
+          buffer,
+          contentType: inferType(cleanPath, blob.type),
+        }
+      }
+
+      const { data: signed } = await supabase.storage
+        .from(bucketName)
+        .createSignedUrl(cleanPath, 3600)
+      if (signed?.signedUrl) {
+        const res = await fetch(signed.signedUrl, { cache: 'no-store' })
+        const cType = res.headers.get('content-type') || ''
+        if (res.ok && !cType.includes('application/json')) {
+          const buffer = Buffer.from(await res.arrayBuffer())
+          return {
+            buffer,
+            contentType: inferType(cleanPath, cType),
+          }
+        }
+      }
+
+      const { data: pub } = supabase.storage.from(bucketName).getPublicUrl(cleanPath)
+      if (pub?.publicUrl) {
+        const res = await fetch(pub.publicUrl, { cache: 'no-store' })
+        const cType = res.headers.get('content-type') || ''
+        if (res.ok && cType.startsWith('image/')) {
+          const buffer = Buffer.from(await res.arrayBuffer())
+          return {
+            buffer,
+            contentType: inferType(cleanPath, cType),
+          }
+        }
+      }
+    } catch {
+      // Try next bucket candidate
+    }
+  }
+
+  return null
+}
+
+/**
+ * Deletes a stored branding object from the 'Delivery files' bucket in Supabase Storage.
+ */
+export async function deleteBrandingAssetFromSupabase(rawStoragePath: string): Promise<void> {
+  if (!isSupabaseConfigured()) return
+  const cleanPath = cleanStoragePath(rawStoragePath)
+  if (!isSafeBrandingStoragePath(cleanPath)) return
+
+  try {
+    const supabase = typeof window === 'undefined' ? getSupabaseServerClient() : getSupabaseClient()
+    const resolvedBucket = await resolveDeliveryFilesBucketName()
+    const buckets = Array.from(new Set([STORAGE_BUCKETS.DELIVERY_FILES, resolvedBucket]))
+    for (const bucket of buckets) {
+      try {
+        await supabase.storage.from(bucket).remove([cleanPath])
+      } catch {}
+    }
+  } catch (err: any) {
+    console.warn('[Branding Supabase Cleanup Warning]:', err?.message)
+  }
+}
+
+/**
+ * Resolves an absolute, externally reachable logo URL (e.g. for outgoing Brevo emails)
+ * by creating a 30-day signed URL from Supabase 'Delivery files' when a branding storage path exists.
+ */
+export async function resolveExternalBrandingLogoUrl(
+  rawLogoUrl?: string | null,
+  explicitStoragePath?: string | null,
+  fallbackAbsoluteUrl?: string
+): Promise<string> {
+  let extractedPath = explicitStoragePath ? cleanStoragePath(explicitStoragePath) : ''
+
+  if (!extractedPath && rawLogoUrl && typeof rawLogoUrl === 'string') {
+    const trimmed = rawLogoUrl.trim()
+    if (trimmed.includes('/api/branding/image')) {
+      try {
+        const u = new URL(trimmed, 'https://placeholder.local')
+        const p = u.searchParams.get('path')
+        if (p) extractedPath = cleanStoragePath(p)
+      } catch {}
+    } else if (trimmed.includes('/storage/v1/object/')) {
+      extractedPath = cleanStoragePath(trimmed)
+    }
+  }
+
+  if (extractedPath && isSafeBrandingStoragePath(extractedPath) && isSupabaseConfigured()) {
+    const signedRes = await createDeliveryFileSignedUrl(extractedPath, 60 * 60 * 24 * 30) // 30 days
+    if (signedRes.data?.signedUrl) {
+      return signedRes.data.signedUrl
+    }
+  }
+
+  if (fallbackAbsoluteUrl) return fallbackAbsoluteUrl
+  if (rawLogoUrl && rawLogoUrl.startsWith('https://')) return rawLogoUrl
+  return ''
+}
+
+

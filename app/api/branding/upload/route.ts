@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
-import {
-  getAdminDb,
-  getAdminStorage,
-  getCandidateStorageBuckets,
-  hasAdminCredentials,
-  requireAdmin,
-} from '@/lib/firebase/admin'
+import { getAdminDb, hasAdminCredentials, requireAdmin } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
+import { isSupabaseConfigured, getSupabaseConfigStatus } from '@/lib/supabase/client'
+import {
+  STORAGE_BUCKETS,
+  deleteBrandingAssetFromSupabase,
+  isSafeBrandingStoragePath,
+  uploadBrandingAssetToSupabase,
+} from '@/lib/supabase/storage'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,7 +52,6 @@ function verifyMagicBytes(buffer: Buffer, mimeType: string): boolean {
   if (buffer.length < 12) return false
 
   if (mimeType === 'image/png') {
-    // 89 50 4E 47 0D 0A 1A 0A
     return (
       buffer[0] === 0x89 &&
       buffer[1] === 0x50 &&
@@ -65,12 +65,10 @@ function verifyMagicBytes(buffer: Buffer, mimeType: string): boolean {
   }
 
   if (mimeType === 'image/jpeg') {
-    // FF D8 FF
     return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff
   }
 
   if (mimeType === 'image/webp') {
-    // "RIFF" .... "WEBP"
     return (
       buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
       buffer.subarray(8, 12).toString('ascii') === 'WEBP'
@@ -78,35 +76,15 @@ function verifyMagicBytes(buffer: Buffer, mimeType: string): boolean {
   }
 
   if (mimeType === 'image/x-icon' || mimeType === 'image/vnd.microsoft.icon') {
-    return buffer[0] === 0x00 && buffer[1] === 0x00 && (buffer[2] === 0x01 || buffer[2] === 0x02) && buffer[3] === 0x00
+    return (
+      buffer[0] === 0x00 &&
+      buffer[1] === 0x00 &&
+      (buffer[2] === 0x01 || buffer[2] === 0x02) &&
+      buffer[3] === 0x00
+    )
   }
 
   return false
-}
-
-function isSafeBrandingStoragePath(storagePath?: string | null): storagePath is string {
-  if (!storagePath || typeof storagePath !== 'string') return false
-  const normalized = storagePath.trim()
-  if (!normalized || normalized.includes('..') || normalized.startsWith('/')) return false
-  return normalized.startsWith('invoice-branding/') || normalized.startsWith('branding/')
-}
-
-async function deleteStoredBrandingObject(storagePath: string): Promise<void> {
-  if (!isSafeBrandingStoragePath(storagePath)) return
-  const adminStorage = getAdminStorage()
-  const buckets = getCandidateStorageBuckets()
-  for (const bucketName of buckets) {
-    try {
-      const fileRef = adminStorage.bucket(bucketName).file(storagePath)
-      const [exists] = await fileRef.exists()
-      if (exists) {
-        await fileRef.delete()
-        return
-      }
-    } catch (err: any) {
-      console.warn(`[Branding Storage Cleanup] Could not remove ${storagePath} from ${bucketName}:`, err?.message)
-    }
-  }
 }
 
 export async function POST(req: NextRequest) {
@@ -124,7 +102,10 @@ export async function POST(req: NextRequest) {
     const previousStoragePathParam = (formData.get('previousStoragePath') as string | null) || ''
 
     if (!file || typeof file.arrayBuffer !== 'function') {
-      return NextResponse.json({ error: 'Please select an image file to upload.' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Please select an image file to upload.' },
+        { status: 400 }
+      )
     }
 
     const allowedMap = fieldKey === 'favicon' ? ALLOWED_FAVICON_TYPES : ALLOWED_LOGO_TYPES
@@ -157,168 +138,149 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(await file.arrayBuffer())
     if (!verifyMagicBytes(buffer, normalizedType)) {
       return NextResponse.json(
-        { error: 'Invalid or corrupted image file. Please upload a valid PNG, JPEG, or WebP image.' },
+        {
+          error:
+            'Invalid or corrupted image file. Please upload a valid PNG, JPEG, or WebP image.',
+        },
         { status: 400 }
       )
     }
 
-    if (!hasAdminCredentials() && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    // 2. Verify Supabase Storage ('Delivery files' bucket) configuration
+    if (!isSupabaseConfigured()) {
+      const status = getSupabaseConfigStatus()
       return NextResponse.json(
         {
           error:
-            'Server Firebase Storage credentials are not configured. Ensure FIREBASE_ADMIN_PROJECT_ID, FIREBASE_ADMIN_CLIENT_EMAIL, FIREBASE_ADMIN_PRIVATE_KEY, and NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET are set.',
+            status.error ||
+            `Supabase Storage is not configured for bucket '${STORAGE_BUCKETS.DELIVERY_FILES}'.`,
           code: 'STORAGE_UNCONFIGURED',
         },
         { status: 503 }
       )
     }
 
-    // 2. Construct dedicated Firebase Storage path: invoice-branding/{adminId}/{uniqueFileName}
-    const safeAdminId = (authResult.uid || 'admin').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'admin'
+    // 3. Construct dedicated path inside Supabase 'Delivery files' bucket:
+    //    invoice-branding/{adminId}/{uniqueFileName}
+    const safeAdminId =
+      (authResult.uid || 'admin').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'admin'
     const ext = allowedMap[normalizedType]
-    const rawStem = (file.name || 'logo')
-      .replace(/\.[^/.]+$/, '')
-      .replace(/[^a-zA-Z0-9_-]/g, '_')
-      .replace(/_+/g, '_')
-      .replace(/^_+|_+$/g, '')
-      .slice(0, 48) || 'logo'
+    const rawStem =
+      (file.name || 'logo')
+        .replace(/\.[^/.]+$/, '')
+        .replace(/[^a-zA-Z0-9_-]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 48) || 'logo'
     const timestamp = Date.now()
     const randomSuffix = crypto.randomBytes(6).toString('hex')
     const uniqueFileName = `${fieldKey}_${timestamp}_${randomSuffix}_${rawStem}.${ext}`
-    const storagePath = `invoice-branding/${safeAdminId}/${uniqueFileName}`
-    const downloadToken = crypto.randomUUID()
+    const requestedStoragePath = `invoice-branding/${safeAdminId}/${uniqueFileName}`
 
-    // 3. Upload to existing Firebase Storage bucket (never write to local filesystem)
-    const adminStorage = getAdminStorage()
-    const candidateBuckets = getCandidateStorageBuckets()
-    if (candidateBuckets.length === 0) {
-      return NextResponse.json(
-        { error: 'Firebase Storage bucket is not configured.', code: 'STORAGE_UNCONFIGURED' },
-        { status: 503 }
-      )
-    }
+    // 4. Upload to Supabase Storage bucket 'Delivery files' (never write to read-only local disk)
+    const uploadResult = await uploadBrandingAssetToSupabase({
+      storagePath: requestedStoragePath,
+      file: buffer,
+      contentType: normalizedType,
+    })
 
-    let uploadedBucket = ''
-    let lastStorageError: any = null
-
-    for (const bucketName of candidateBuckets) {
-      try {
-        const bucket = adminStorage.bucket(bucketName)
-        const storageFile = bucket.file(storagePath)
-
-        await storageFile.save(buffer, {
-          resumable: false,
-          contentType: normalizedType,
-          metadata: {
-            contentType: normalizedType,
-            cacheControl: 'public, max-age=31536000, immutable',
-            metadata: {
-              firebaseStorageDownloadTokens: downloadToken,
-              uploadedBy: authResult.uid,
-              uploadedByEmail: authResult.email || '',
-              fieldKey,
-            },
-          },
-        })
-
-        uploadedBucket = bucket.name
-        break
-      } catch (err: any) {
-        lastStorageError = err
-        const msg = String(err?.message || '').toLowerCase()
-        const isMissingBucket =
-          err?.code === 404 ||
-          msg.includes('not found') ||
-          msg.includes('no such bucket') ||
-          msg.includes('does not exist')
-        if (!isMissingBucket) {
-          break
-        }
-      }
-    }
-
-    if (!uploadedBucket) {
-      console.error('[Branding Upload] Firebase Storage upload failed:', lastStorageError)
+    if (uploadResult.error || !uploadResult.data) {
+      console.error('[Branding Upload] Supabase Storage upload failed:', uploadResult.error)
       return NextResponse.json(
         {
           error:
-            lastStorageError?.message ||
-            'Failed to upload logo to Firebase Storage. Please verify your Firebase Storage bucket configuration.',
+            uploadResult.error?.message ||
+            `Failed to upload logo to Supabase bucket '${STORAGE_BUCKETS.DELIVERY_FILES}'.`,
         },
         { status: 500 }
       )
     }
 
-    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(
-      uploadedBucket
-    )}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`
+    const storagePath = uploadResult.data.storagePath
+    // Permanent same-origin URL backed by Supabase 'Delivery files' bucket:
+    // works even when 'Delivery files' is private, never expires, and prevents CORS tainting in PDF generation.
+    const downloadUrl = `/api/branding/image?path=${encodeURIComponent(storagePath)}`
 
-    // 4. Persist downloadUrl and storagePath in Firestore settings & clean up old stored file AFTER confirmation
+    // 5. Persist downloadUrl and storagePath in Firestore settings & remove replaced logo AFTER confirmation
     const { urlField, pathField } = getFirestoreFieldPair(fieldKey)
     let confirmedSettingsPersistence = false
     const oldPathsToCleanup = new Set<string>()
-    if (isSafeBrandingStoragePath(previousStoragePathParam) && previousStoragePathParam !== storagePath) {
+    if (
+      isSafeBrandingStoragePath(previousStoragePathParam) &&
+      previousStoragePathParam !== storagePath
+    ) {
       oldPathsToCleanup.add(previousStoragePathParam)
     }
 
-    if (persistSettings) {
-      const adminDb = getAdminDb()
-      const brandingRef = adminDb.collection(COLLECTIONS.SETTINGS).doc('branding')
-      const businessRef = adminDb.collection(COLLECTIONS.SETTINGS).doc('business')
+    if (
+      persistSettings &&
+      (hasAdminCredentials() || Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS))
+    ) {
+      try {
+        const adminDb = getAdminDb()
+        const brandingRef = adminDb.collection(COLLECTIONS.SETTINGS).doc('branding')
+        const businessRef = adminDb.collection(COLLECTIONS.SETTINGS).doc('business')
 
-      // Capture existing storagePath(s) prior to updating Firestore
-      const [existingBrandingSnap, existingBusinessSnap] = await Promise.all([
-        brandingRef.get(),
-        fieldKey === 'logo' ? businessRef.get() : Promise.resolve(null),
-      ])
+        const [existingBrandingSnap, existingBusinessSnap] = await Promise.all([
+          brandingRef.get(),
+          fieldKey === 'logo' ? businessRef.get() : Promise.resolve(null),
+        ])
 
-      const prevBrandingPath = existingBrandingSnap.exists
-        ? (existingBrandingSnap.data()?.[pathField] as string | undefined)
-        : undefined
-      if (isSafeBrandingStoragePath(prevBrandingPath) && prevBrandingPath !== storagePath) {
-        oldPathsToCleanup.add(prevBrandingPath)
-      }
-
-      if (existingBusinessSnap && existingBusinessSnap.exists) {
-        const prevBusinessPath = existingBusinessSnap.data()?.logoStoragePath as string | undefined
-        if (isSafeBrandingStoragePath(prevBusinessPath) && prevBusinessPath !== storagePath) {
-          oldPathsToCleanup.add(prevBusinessPath)
+        const prevBrandingPath = existingBrandingSnap.exists
+          ? (existingBrandingSnap.data()?.[pathField] as string | undefined)
+          : undefined
+        if (isSafeBrandingStoragePath(prevBrandingPath) && prevBrandingPath !== storagePath) {
+          oldPathsToCleanup.add(prevBrandingPath)
         }
-      }
 
-      const nowIso = new Date().toISOString()
-      const writes: Promise<unknown>[] = [
-        brandingRef.set(
-          {
-            [urlField]: downloadUrl,
-            [pathField]: storagePath,
-            updatedAt: nowIso,
-            updatedBy: authResult.uid,
-          },
-          { merge: true }
-        ),
-      ]
+        if (existingBusinessSnap && existingBusinessSnap.exists) {
+          const prevBusinessPath = existingBusinessSnap.data()?.logoStoragePath as
+            | string
+            | undefined
+          if (isSafeBrandingStoragePath(prevBusinessPath) && prevBusinessPath !== storagePath) {
+            oldPathsToCleanup.add(prevBusinessPath)
+          }
+        }
 
-      if (fieldKey === 'logo') {
-        writes.push(
-          businessRef.set(
+        const nowIso = new Date().toISOString()
+        const writes: Promise<unknown>[] = [
+          brandingRef.set(
             {
-              logoURL: downloadUrl,
-              logoStoragePath: storagePath,
+              [urlField]: downloadUrl,
+              [pathField]: storagePath,
               updatedAt: nowIso,
               updatedBy: authResult.uid,
             },
             { merge: true }
+          ),
+        ]
+
+        if (fieldKey === 'logo') {
+          writes.push(
+            businessRef.set(
+              {
+                logoURL: downloadUrl,
+                logoStoragePath: storagePath,
+                updatedAt: nowIso,
+                updatedBy: authResult.uid,
+              },
+              { merge: true }
+            )
           )
+        }
+
+        await Promise.all(writes)
+        confirmedSettingsPersistence = true
+
+        // Delete old stored logo(s) from Supabase 'Delivery files' ONLY after new upload + Firestore update succeeded
+        for (const oldPath of Array.from(oldPathsToCleanup)) {
+          await deleteBrandingAssetFromSupabase(oldPath)
+        }
+      } catch (dbErr: any) {
+        console.warn(
+          '[Branding Upload] Server Firestore sync warning (client SDK will sync):',
+          dbErr?.message
         )
-      }
-
-      await Promise.all(writes)
-      confirmedSettingsPersistence = true
-
-      // Remove replaced stored logo(s) ONLY AFTER new upload and Firestore update both succeeded
-      for (const oldPath of Array.from(oldPathsToCleanup)) {
-        await deleteStoredBrandingObject(oldPath)
       }
     }
 
@@ -326,6 +288,7 @@ export async function POST(req: NextRequest) {
       success: true,
       downloadUrl,
       storagePath,
+      bucket: uploadResult.data.bucket,
       persisted: confirmedSettingsPersistence,
     })
   } catch (error: any) {
@@ -354,7 +317,10 @@ export async function DELETE(req: NextRequest) {
       pathsToDelete.add(requestedPath)
     }
 
-    if (persistSettings && (hasAdminCredentials() || process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
+    if (
+      persistSettings &&
+      (hasAdminCredentials() || Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS))
+    ) {
       const adminDb = getAdminDb()
       const { urlField, pathField } = getFirestoreFieldPair(fieldKey)
       const brandingRef = adminDb.collection(COLLECTIONS.SETTINGS).doc('branding')
@@ -407,9 +373,9 @@ export async function DELETE(req: NextRequest) {
       await Promise.all(updates)
     }
 
-    if (hasAdminCredentials() || process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    if (isSupabaseConfigured()) {
       for (const p of Array.from(pathsToDelete)) {
-        await deleteStoredBrandingObject(p)
+        await deleteBrandingAssetFromSupabase(p)
       }
     }
 

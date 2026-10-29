@@ -1,14 +1,13 @@
-import {
-  ref,
-  uploadBytesResumable,
-  getDownloadURL,
-  deleteObject,
-  type UploadTask,
-} from 'firebase/storage'
+import { ref, deleteObject } from 'firebase/storage'
 import { storage, isFirebaseStorageConfigured, getAuthInstance } from './config'
 import { COLLECTIONS, setDocument } from './firestore'
 import { isSupabaseConfigured, getSupabaseClient } from '../supabase/client'
-import { STORAGE_BUCKETS } from '../supabase/storage'
+import {
+  STORAGE_BUCKETS,
+  deleteBrandingAssetFromSupabase,
+  isSafeBrandingStoragePath,
+  uploadBrandingAssetToSupabase,
+} from '../supabase/storage'
 import { ResumableUploadTask, UploadTaskProgress } from '../supabase/resumable'
 
 export interface UploadProgressCallback {
@@ -84,17 +83,10 @@ function getFieldPair(fieldKey: BrandingFieldKey) {
   }
 }
 
-function isSafeBrandingPath(p?: string | null): p is string {
-  if (!p || typeof p !== 'string') return false
-  const t = p.trim()
-  if (!t || t.includes('..') || t.startsWith('/')) return false
-  return t.startsWith('invoice-branding/') || t.startsWith('branding/')
-}
-
 /**
- * Starts an authenticated invoice/branding logo upload to Firebase Storage (`invoice-branding/{adminId}/{uniqueFileName}`).
- * Uses server-side Firebase Admin Storage (avoiding cross-origin bucket CORS blocks) with real XHR progress and cancellation,
- * and falls back cleanly to client-side Firebase Storage SDK if server Admin credentials are unconfigured.
+ * Starts an authenticated invoice/branding logo upload to the Supabase Storage 'Delivery files' bucket
+ * (`invoice-branding/{adminId}/{uniqueFileName}`) via `/api/branding/upload` with real XHR progress and cancellation.
+ * Falls back cleanly to client-side Supabase Storage ('Delivery files') if server env vars are unconfigured.
  */
 export function startBrandingLogoUpload(options: StartBrandingUploadOptions): {
   promise: Promise<BrandingLogoUploadResult>
@@ -112,7 +104,6 @@ export function startBrandingLogoUpload(options: StartBrandingUploadOptions): {
 
   let cancelled = false
   let activeXhr: XMLHttpRequest | null = null
-  let activeClientTask: UploadTask | null = null
 
   const cancel = () => {
     cancelled = true
@@ -121,17 +112,12 @@ export function startBrandingLogoUpload(options: StartBrandingUploadOptions): {
         activeXhr.abort()
       } catch {}
     }
-    if (activeClientTask) {
-      try {
-        activeClientTask.cancel()
-      } catch {}
-    }
   }
 
-  const uploadViaClientFirebaseSdk = async (): Promise<BrandingLogoUploadResult> => {
-    if (!isFirebaseStorageConfigured) {
+  const uploadViaClientSupabase = async (): Promise<BrandingLogoUploadResult> => {
+    if (!isSupabaseConfigured()) {
       throw new Error(
-        'Firebase Storage is not configured. Please ensure Firebase Storage environment variables are set.'
+        `Supabase Storage is not configured for bucket '${STORAGE_BUCKETS.DELIVERY_FILES}'.`
       )
     }
 
@@ -154,36 +140,30 @@ export function startBrandingLogoUpload(options: StartBrandingUploadOptions): {
         .slice(0, 48) || 'logo'
     const randomPart = Math.random().toString(36).slice(2, 10)
     const uniqueFileName = `${fieldKey}_${Date.now()}_${randomPart}_${rawStem}.${ext}`
-    const storagePath = `invoice-branding/${safeAdminId}/${uniqueFileName}`
+    const requestedPath = `invoice-branding/${safeAdminId}/${uniqueFileName}`
 
-    const storageRef = ref(storage, storagePath)
-    activeClientTask = uploadBytesResumable(storageRef, file, {
+    if (onProgress) onProgress(35)
+    const uploadRes = await uploadBrandingAssetToSupabase({
+      storagePath: requestedPath,
+      file,
       contentType: file.type,
-      cacheControl: 'public, max-age=31536000, immutable',
     })
 
-    await new Promise<void>((resolve, reject) => {
-      activeClientTask!.on(
-        'state_changed',
-        (snapshot) => {
-          if (snapshot.totalBytes > 0 && onProgress) {
-            onProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100))
-          }
-        },
-        (err) => {
-          if (err?.code === 'storage/canceled' || cancelled) {
-            const cancelErr = new Error('Upload cancelled')
-            ;(cancelErr as any).cancelled = true
-            reject(cancelErr)
-          } else {
-            reject(err)
-          }
-        },
-        () => resolve()
-      )
-    })
+    if (cancelled) {
+      if (uploadRes.data?.storagePath) {
+        await deleteBrandingAssetFromSupabase(uploadRes.data.storagePath)
+      }
+      const cancelErr = new Error('Upload cancelled')
+      ;(cancelErr as any).cancelled = true
+      throw cancelErr
+    }
 
-    const downloadUrl = await getDownloadURL(storageRef)
+    if (uploadRes.error || !uploadRes.data) {
+      throw uploadRes.error || new Error(`Upload to '${STORAGE_BUCKETS.DELIVERY_FILES}' failed.`)
+    }
+
+    const storagePath = uploadRes.data.storagePath
+    const downloadUrl = `/api/branding/image?path=${encodeURIComponent(storagePath)}`
     let persisted = false
 
     if (persistSettings) {
@@ -210,16 +190,13 @@ export function startBrandingLogoUpload(options: StartBrandingUploadOptions): {
       }
       persisted = true
 
-      // Only remove previous stored file AFTER new upload and Firestore settings update succeeded
-      if (isSafeBrandingPath(previousStoragePath) && previousStoragePath !== storagePath) {
-        try {
-          await deleteObject(ref(storage, previousStoragePath))
-        } catch (cleanupErr) {
-          console.warn('[Branding Storage Cleanup Warning]:', cleanupErr)
-        }
+      // Remove previous stored file from Supabase 'Delivery files' ONLY after upload + Firestore update succeeded
+      if (isSafeBrandingStoragePath(previousStoragePath) && previousStoragePath !== storagePath) {
+        await deleteBrandingAssetFromSupabase(previousStoragePath)
       }
     }
 
+    if (onProgress) onProgress(100)
     return { downloadUrl, storagePath, persisted }
   }
 
@@ -261,10 +238,12 @@ export function startBrandingLogoUpload(options: StartBrandingUploadOptions): {
         reject(abortErr)
         return
       }
-      if (isFirebaseStorageConfigured) {
-        uploadViaClientFirebaseSdk().then(resolve).catch(reject)
+      if (isSupabaseConfigured()) {
+        uploadViaClientSupabase().then(resolve).catch(reject)
       } else {
-        reject(new Error('Network error during logo upload. Please check your connection and try again.'))
+        reject(
+          new Error('Network error during logo upload. Please check your connection and try again.')
+        )
       }
     }
 
@@ -278,7 +257,7 @@ export function startBrandingLogoUpload(options: StartBrandingUploadOptions): {
 
       if (xhr.status >= 200 && xhr.status < 300 && payload?.downloadUrl) {
         if (onProgress) onProgress(100)
-        // Mirror into client Firestore cache/listeners when persistSettings is true
+        // Mirror into client Firestore listeners/documents when persistSettings is true
         if (persistSettings) {
           try {
             const { urlField, pathField } = getFieldPair(fieldKey)
@@ -312,10 +291,9 @@ export function startBrandingLogoUpload(options: StartBrandingUploadOptions): {
         return
       }
 
-      // If server Firebase Admin credentials aren't set (503) and client Firebase Storage SDK is configured, fallback cleanly
-      if (xhr.status === 503 && payload?.code === 'STORAGE_UNCONFIGURED' && isFirebaseStorageConfigured) {
+      if (xhr.status === 503 && payload?.code === 'STORAGE_UNCONFIGURED' && isSupabaseConfigured()) {
         try {
-          const clientRes = await uploadViaClientFirebaseSdk()
+          const clientRes = await uploadViaClientSupabase()
           resolve(clientRes)
           return
         } catch (fallbackErr) {
@@ -335,7 +313,7 @@ export function startBrandingLogoUpload(options: StartBrandingUploadOptions): {
 }
 
 /**
- * Removes a stored branding logo from Firestore settings first, then deletes the stored Firebase Storage object.
+ * Removes a stored branding logo from Firestore settings first, then deletes the object from Supabase 'Delivery files'.
  */
 export async function removeBrandingLogo(options: {
   fieldKey?: BrandingFieldKey
@@ -379,14 +357,12 @@ export async function removeBrandingLogo(options: {
       }),
     })
 
-    if (!res.ok && isFirebaseStorageConfigured && isSafeBrandingPath(storagePath)) {
-      await deleteObject(ref(storage, storagePath))
+    if (!res.ok && isSupabaseConfigured() && isSafeBrandingStoragePath(storagePath)) {
+      await deleteBrandingAssetFromSupabase(storagePath)
     }
   } catch {
-    if (isFirebaseStorageConfigured && isSafeBrandingPath(storagePath)) {
-      try {
-        await deleteObject(ref(storage, storagePath))
-      } catch {}
+    if (isSupabaseConfigured() && isSafeBrandingStoragePath(storagePath)) {
+      await deleteBrandingAssetFromSupabase(storagePath)
     }
   }
 }
@@ -448,7 +424,6 @@ export async function deleteDeliveryFile(storagePath: string): Promise<void> {
     const fileRef = ref(storage, storagePath)
     await deleteObject(fileRef)
   } catch (error: any) {
-    // Log but don't throw — Firestore metadata should still be removed even if storage delete fails
     console.warn('Storage delete warning:', error?.code, error?.message)
   }
 }

@@ -3,6 +3,7 @@ import { sendInvoiceEmail } from '@/lib/services/brevo'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 import { getProductionUrl, getPaymentLink } from '@/lib/utils'
+import { resolveExternalBrandingLogoUrl } from '@/lib/supabase/storage'
 
 export const dynamic = 'force-dynamic'
 
@@ -56,29 +57,46 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    let cleanLogoUrl =
+    let rawLogoCandidate =
       typeof businessLogoUrl === 'string' && !businessLogoUrl.trim().startsWith('/uploads/')
         ? businessLogoUrl.trim()
         : ''
+    let storedLogoPath = ''
 
-    if (!cleanLogoUrl) {
-      try {
-        const adminDb = getAdminDb()
-        const [brandSnap, bizSnap] = await Promise.all([
-          adminDb.collection(COLLECTIONS.SETTINGS).doc('branding').get(),
-          adminDb.collection(COLLECTIONS.SETTINGS).doc('business').get(),
-        ])
-        const fromBrand = brandSnap.exists ? brandSnap.data()?.logoUrl : ''
-        const fromBiz = bizSnap.exists ? bizSnap.data()?.logoURL : ''
-        const candidate =
+    try {
+      const adminDb = getAdminDb()
+      const [brandSnap, bizSnap] = await Promise.all([
+        adminDb.collection(COLLECTIONS.SETTINGS).doc('branding').get(),
+        adminDb.collection(COLLECTIONS.SETTINGS).doc('business').get(),
+      ])
+      const brandData = brandSnap.exists ? brandSnap.data() : null
+      const bizData = bizSnap.exists ? bizSnap.data() : null
+
+      storedLogoPath =
+        (typeof brandData?.logoStoragePath === 'string' && brandData.logoStoragePath) ||
+        (typeof bizData?.logoStoragePath === 'string' && bizData.logoStoragePath) ||
+        ''
+
+      if (!rawLogoCandidate) {
+        const fromBrand = brandData?.logoUrl
+        const fromBiz = bizData?.logoURL
+        rawLogoCandidate =
           (typeof fromBrand === 'string' && !fromBrand.startsWith('/uploads/') && fromBrand) ||
           (typeof fromBiz === 'string' && !fromBiz.startsWith('/uploads/') && fromBiz) ||
           ''
-        if (candidate) cleanLogoUrl = candidate
-      } catch {
-        // Ignore fallback lookup errors when Admin credentials are unset locally
       }
+    } catch {
+      // Ignore fallback lookup errors when Admin credentials are unset locally
     }
+
+    const fallbackAbsoluteLogo = rawLogoCandidate
+      ? getProductionUrl(rawLogoCandidate, req)
+      : ''
+    const cleanLogoUrl = await resolveExternalBrandingLogoUrl(
+      rawLogoCandidate,
+      storedLogoPath,
+      fallbackAbsoluteLogo
+    )
 
     const result = await sendInvoiceEmail({
       toEmail,

@@ -104,7 +104,10 @@ export function InvoiceDocument({
       ? '£'
       : businessDefaults.currencySymbol || 'GH₵')
 
-  const rawInvoiceLogo = sanitizeBrandingLogoUrl(invoice.businessInfo?.logo)
+  const rawInvoiceLogo = sanitizeBrandingLogoUrl(
+    invoice.businessInfo?.logo,
+    invoice.businessInfo?.logoStoragePath
+  )
   const activeLogoUrl = rawInvoiceLogo || resolvedLogoUrl
   const showLogoImage = Boolean(activeLogoUrl && failedLogoSrc !== activeLogoUrl)
 

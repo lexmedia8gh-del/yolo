@@ -47,7 +47,7 @@ export function LogoUploadField({
   const [isRemoving, setIsRemoving] = useState(false)
   const [imageBroken, setImageBroken] = useState(false)
 
-  const cleanUrl = sanitizeBrandingLogoUrl(currentUrl)
+  const cleanUrl = sanitizeBrandingLogoUrl(currentUrl, currentStoragePath)
 
   useEffect(() => {
     setImageBroken(false)
@@ -233,14 +233,13 @@ export function LogoUploadField({
 
           {status === 'uploading' && (
             <div className="space-y-1 max-w-xs">
-              <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
-                <div
-                  className="bg-indigo-600 h-1.5 rounded-full transition-all duration-150"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
+              <progress
+                value={progress}
+                max={100}
+                className="w-full h-1.5 rounded-full overflow-hidden [&::-webkit-progress-bar]:bg-gray-200 [&::-webkit-progress-value]:bg-indigo-600 [&::-moz-progress-bar]:bg-indigo-600"
+              />
               <p className="text-[11px] text-gray-600 tabular-nums">
-                Uploading to Firebase Storage ({progress}%)…
+                Uploading logo ({progress}%)…
               </p>
             </div>
           )}
@@ -248,7 +247,7 @@ export function LogoUploadField({
           {status === 'done' && (
             <p className="text-xs text-emerald-700 flex items-center gap-1.5 font-medium">
               <CheckCircle2 size={13} className="shrink-0" />
-              <span>Saved to Firebase Storage</span>
+              <span>Saved to cloud storage</span>
             </p>
           )}
 

@@ -1,15 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAdminStorage, getCandidateStorageBuckets, hasAdminCredentials } from '@/lib/firebase/admin'
+import { getCandidateStorageBuckets } from '@/lib/firebase/admin'
+import { getSupabaseUrl } from '@/lib/supabase/client'
+import {
+  cleanStoragePath,
+  downloadBrandingAssetFromSupabase,
+  isSafeBrandingStoragePath,
+} from '@/lib/supabase/storage'
 
 export const dynamic = 'force-dynamic'
 
-function isAllowedFirebaseStorageUrl(rawUrl: string, allowedBuckets: string[]): boolean {
+function extractSafeSupabaseBrandingPath(rawUrl: string): string | null {
+  try {
+    const parsed = new URL(rawUrl)
+    if (parsed.protocol !== 'https:') return null
+
+    const configuredSupabaseUrl = getSupabaseUrl()
+    const configuredHost = configuredSupabaseUrl ? new URL(configuredSupabaseUrl).hostname : ''
+    const isSupabaseHost =
+      (configuredHost && parsed.hostname === configuredHost) ||
+      parsed.hostname.endsWith('.supabase.co')
+
+    if (!isSupabaseHost) return null
+    if (!parsed.pathname.includes('/storage/v1/object/')) return null
+
+    const extracted = cleanStoragePath(rawUrl)
+    return isSafeBrandingStoragePath(extracted) ? extracted : null
+  } catch {
+    return null
+  }
+}
+
+function isAllowedLegacyFirebaseBrandingUrl(rawUrl: string, allowedBuckets: string[]): boolean {
   try {
     const parsed = new URL(rawUrl)
     if (parsed.protocol !== 'https:') return false
 
     if (parsed.hostname === 'firebasestorage.googleapis.com') {
-      // Expected format: /v0/b/{bucket}/o/{encodedObjectPath}
       const match = parsed.pathname.match(/^\/v0\/b\/([^/]+)\/o\/(.+)$/)
       if (!match) return false
       const bucket = decodeURIComponent(match[1])
@@ -17,7 +43,7 @@ function isAllowedFirebaseStorageUrl(rawUrl: string, allowedBuckets: string[]): 
       if (allowedBuckets.length > 0 && !allowedBuckets.includes(bucket)) {
         return false
       }
-      return objPath.startsWith('invoice-branding/') || objPath.startsWith('branding/')
+      return isSafeBrandingStoragePath(objPath)
     }
 
     if (parsed.hostname === 'storage.googleapis.com') {
@@ -27,7 +53,7 @@ function isAllowedFirebaseStorageUrl(rawUrl: string, allowedBuckets: string[]): 
       if (allowedBuckets.length > 0 && !allowedBuckets.includes(bucket)) {
         return false
       }
-      return objPath.startsWith('invoice-branding/') || objPath.startsWith('branding/')
+      return isSafeBrandingStoragePath(objPath)
     }
 
     return false
@@ -39,54 +65,72 @@ function isAllowedFirebaseStorageUrl(rawUrl: string, allowedBuckets: string[]): 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const targetUrl = searchParams.get('url') || ''
-  const storagePath = searchParams.get('path') || ''
-
-  const allowedBuckets = getCandidateStorageBuckets()
+  const storagePathParam = searchParams.get('path') || ''
 
   try {
-    // 1. Fetch via validated Firebase Storage download URL
-    if (targetUrl && isAllowedFirebaseStorageUrl(targetUrl, allowedBuckets)) {
-      const upstream = await fetch(targetUrl, { cache: 'no-store' })
-      if (upstream.ok) {
+    // 1. Primary: Stream directly from Supabase Storage 'Delivery files' bucket by storagePath
+    if (storagePathParam && isSafeBrandingStoragePath(storagePathParam)) {
+      const asset = await downloadBrandingAssetFromSupabase(storagePathParam)
+      if (asset) {
+        return new NextResponse(new Uint8Array(asset.buffer), {
+          status: 200,
+          headers: {
+            'Content-Type': asset.contentType,
+            'Cache-Control': 'public, max-age=31536000, immutable',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        })
+      }
+    }
+
+    // 2. If ?url= points to Supabase Storage ('Delivery files' -> invoice-branding/* or branding/*), stream it
+    if (targetUrl) {
+      const supabasePath = extractSafeSupabaseBrandingPath(targetUrl)
+      if (supabasePath) {
+        const asset = await downloadBrandingAssetFromSupabase(supabasePath)
+        if (asset) {
+          return new NextResponse(new Uint8Array(asset.buffer), {
+            status: 200,
+            headers: {
+              'Content-Type': asset.contentType,
+              'Cache-Control': 'public, max-age=31536000, immutable',
+              'X-Content-Type-Options': 'nosniff',
+            },
+          })
+        }
+
+        // Direct fetch fallback if URL already carries a valid Supabase token
+        const upstream = await fetch(targetUrl, { cache: 'no-store' })
         const contentType = upstream.headers.get('content-type') || 'image/png'
-        if (contentType.startsWith('image/')) {
+        if (upstream.ok && contentType.startsWith('image/')) {
           const bytes = Buffer.from(await upstream.arrayBuffer())
           return new NextResponse(new Uint8Array(bytes), {
             status: 200,
             headers: {
               'Content-Type': contentType,
               'Cache-Control': 'public, max-age=3600',
+              'X-Content-Type-Options': 'nosniff',
             },
           })
         }
       }
-    }
 
-    // 2. Fallback: stream directly from Firebase Admin Storage by storagePath
-    if (
-      storagePath &&
-      !storagePath.includes('..') &&
-      (storagePath.startsWith('invoice-branding/') || storagePath.startsWith('branding/')) &&
-      (hasAdminCredentials() || process.env.GOOGLE_APPLICATION_CREDENTIALS)
-    ) {
-      const adminStorage = getAdminStorage()
-      for (const bucketName of allowedBuckets) {
-        try {
-          const fileRef = adminStorage.bucket(bucketName).file(storagePath)
-          const [exists] = await fileRef.exists()
-          if (exists) {
-            const [metadata] = await fileRef.getMetadata()
-            const [fileBuffer] = await fileRef.download()
-            const contentType = metadata.contentType || 'image/png'
-            return new NextResponse(new Uint8Array(fileBuffer), {
-              status: 200,
-              headers: {
-                'Content-Type': contentType,
-                'Cache-Control': 'public, max-age=3600',
-              },
-            })
-          }
-        } catch {}
+      // 3. Legacy Firebase Storage branding URL support (SSRF-restricted to project buckets & branding prefix)
+      const allowedBuckets = getCandidateStorageBuckets()
+      if (isAllowedLegacyFirebaseBrandingUrl(targetUrl, allowedBuckets)) {
+        const upstream = await fetch(targetUrl, { cache: 'no-store' })
+        const contentType = upstream.headers.get('content-type') || 'image/png'
+        if (upstream.ok && contentType.startsWith('image/')) {
+          const bytes = Buffer.from(await upstream.arrayBuffer())
+          return new NextResponse(new Uint8Array(bytes), {
+            status: 200,
+            headers: {
+              'Content-Type': contentType,
+              'Cache-Control': 'public, max-age=3600',
+              'X-Content-Type-Options': 'nosniff',
+            },
+          })
+        }
       }
     }
 

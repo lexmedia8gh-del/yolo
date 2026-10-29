@@ -41,7 +41,11 @@ function resolveProxyOrDirectUrl(rawSrc: string): string {
   }
   try {
     const parsed = new URL(rawSrc, window.location.origin)
+    if (parsed.origin === window.location.origin) {
+      return parsed.toString()
+    }
     if (
+      parsed.hostname.endsWith('.supabase.co') ||
       parsed.hostname === 'firebasestorage.googleapis.com' ||
       parsed.hostname === 'storage.googleapis.com'
     ) {

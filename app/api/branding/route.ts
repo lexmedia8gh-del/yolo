@@ -25,12 +25,29 @@ const DEFAULT_BRANDING = {
   buttonTextColor: '#FFFFFF',
 }
 
-function sanitizeStoredLogoUrl(url?: unknown): string {
-  if (typeof url !== 'string') return ''
-  const trimmed = url.trim()
-  // Ignore broken legacy local filesystem paths from pre-Firebase upload code
-  if (!trimmed || trimmed.startsWith('/uploads/')) return ''
-  return trimmed
+function sanitizeStoredLogoUrl(url?: unknown, storagePath?: unknown): string {
+  const cleanPath =
+    typeof storagePath === 'string' &&
+    !storagePath.includes('..') &&
+    (storagePath.trim().startsWith('invoice-branding/') ||
+      storagePath.trim().startsWith('branding/'))
+      ? storagePath.trim()
+      : ''
+
+  if (typeof url === 'string') {
+    const trimmed = url.trim()
+    if (trimmed && !trimmed.startsWith('/uploads/')) {
+      if (trimmed.includes('.supabase.co/storage/v1/object/public/') && cleanPath) {
+        return `/api/branding/image?path=${encodeURIComponent(cleanPath)}`
+      }
+      return trimmed
+    }
+  }
+
+  if (cleanPath) {
+    return `/api/branding/image?path=${encodeURIComponent(cleanPath)}`
+  }
+  return ''
 }
 
 export async function GET() {
@@ -52,7 +69,8 @@ export async function GET() {
     const bizData = bizSnap.exists ? bizSnap.data() || {} : {}
 
     const resolvedLogoUrl =
-      sanitizeStoredLogoUrl(brandData.logoUrl) || sanitizeStoredLogoUrl(bizData.logoURL)
+      sanitizeStoredLogoUrl(brandData.logoUrl, brandData.logoStoragePath) ||
+      sanitizeStoredLogoUrl(bizData.logoURL, bizData.logoStoragePath)
     const resolvedLogoStoragePath =
       (resolvedLogoUrl && (brandData.logoStoragePath || bizData.logoStoragePath)) || ''
 
@@ -65,13 +83,14 @@ export async function GET() {
         tagline: brandData.tagline || bizData.tagline || DEFAULT_BRANDING.tagline,
         logoUrl: resolvedLogoUrl,
         logoStoragePath: resolvedLogoStoragePath,
-        logoLightUrl: sanitizeStoredLogoUrl(brandData.logoLightUrl),
-        faviconUrl: sanitizeStoredLogoUrl(brandData.faviconUrl),
+        logoLightUrl: sanitizeStoredLogoUrl(brandData.logoLightUrl, brandData.logoLightStoragePath),
+        faviconUrl: sanitizeStoredLogoUrl(brandData.faviconUrl, brandData.faviconStoragePath),
       },
       business: bizSnap.exists
         ? {
             ...bizData,
-            logoURL: sanitizeStoredLogoUrl(bizData.logoURL) || resolvedLogoUrl,
+            logoURL:
+              sanitizeStoredLogoUrl(bizData.logoURL, bizData.logoStoragePath) || resolvedLogoUrl,
             logoStoragePath: bizData.logoStoragePath || resolvedLogoStoragePath,
           }
         : null,
