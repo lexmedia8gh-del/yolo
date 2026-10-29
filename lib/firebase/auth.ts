@@ -12,6 +12,9 @@ import {
   GoogleAuthProvider,
   onAuthStateChanged,
   signInWithPopup,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
   type User as FirebaseUser,
 } from 'firebase/auth'
 import { getAuthInstance, isFirebaseAuthConfigured } from './config'
@@ -164,8 +167,9 @@ export async function getActiveIdToken(forceRefresh = false): Promise<string | n
   return null
 }
 
-export async function signInWithEmail(email: string, password: string) {
+export async function signInWithEmail(email: string, password: string, rememberMe = true) {
   const normalizedEmail = email.trim().toLowerCase()
+  const cookieMaxAge = rememberMe ? 604800 : 86400
   const authInstance = getAuthInstance()
 
   if (!isFirebaseAuthConfigured || !authInstance) {
@@ -187,7 +191,7 @@ export async function signInWithEmail(email: string, password: string) {
       lastAuthenticatedAt: Date.now(),
     }
     writeLocalAuthRecord(updatedRecord)
-    setSessionCookie('active-admin-session', 604800)
+    setSessionCookie('active-admin-session', cookieMaxAge)
 
     const user: User = {
       uid: updatedRecord.uid,
@@ -201,11 +205,20 @@ export async function signInWithEmail(email: string, password: string) {
   }
 
   try {
+    try {
+      await setPersistence(
+        authInstance,
+        rememberMe ? browserLocalPersistence : browserSessionPersistence
+      )
+    } catch {
+      // Ignore storage persistence restrictions in restricted iframes / private browsing
+    }
+
     const credential = await signInWithEmailAndPassword(authInstance, normalizedEmail, password)
     const fbUser = credential.user
     const token = await fbUser.getIdToken()
 
-    setSessionCookie(token, 604800)
+    setSessionCookie(token, cookieMaxAge)
     try {
       if (typeof window !== 'undefined' && fbUser.email) {
         sessionStorage.setItem(SESSION_STORAGE_KEY, fbUser.email)

@@ -27,6 +27,15 @@ export const DEFAULT_INVOICE_BRANDING: BrandingSettings = {
 
 const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/
 
+const COMMITTED_BRANDING_UPLOADS = new Set([
+  '/uploads/branding/logo/1788575175476_dk.png',
+  '/uploads/branding/logo/1788576626544_Untitled-1.png',
+  '/uploads/branding/logoLight/1788575187709_wh.png',
+  '/uploads/branding/logoLight/1788577475794_Asset 132_4x.png',
+  '/uploads/branding/favicon/1788572036349_Asset 132_4x.png',
+  '/uploads/branding/favicon/1788575199367_faj.png',
+])
+
 export function sanitizeBrandingLogoUrl(raw?: string | null, storagePath?: string | null): string {
   const cleanPath =
     storagePath &&
@@ -39,8 +48,8 @@ export function sanitizeBrandingLogoUrl(raw?: string | null, storagePath?: strin
 
   if (raw && typeof raw === 'string') {
     const trimmed = raw.trim()
-    // Reject broken legacy local filesystem paths (/uploads/...) from read-only FS deployments
-    if (trimmed && !trimmed.startsWith('/uploads/')) {
+    // Reject broken ephemeral local filesystem paths (/uploads/...) except committed static assets
+    if (trimmed && (!trimmed.startsWith('/uploads/') || COMMITTED_BRANDING_UPLOADS.has(trimmed))) {
       // Normalize raw Supabase public URLs on private 'Delivery files' bucket to our permanent server stream route
       if (trimmed.includes('.supabase.co/storage/v1/object/public/')) {
         const parts = trimmed.split(/\/storage\/v1\/object\/public\/[^/]+\//i)

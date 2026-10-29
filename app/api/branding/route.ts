@@ -25,6 +25,15 @@ const DEFAULT_BRANDING = {
   buttonTextColor: '#FFFFFF',
 }
 
+const COMMITTED_BRANDING_UPLOADS = new Set([
+  '/uploads/branding/logo/1788575175476_dk.png',
+  '/uploads/branding/logo/1788576626544_Untitled-1.png',
+  '/uploads/branding/logoLight/1788575187709_wh.png',
+  '/uploads/branding/logoLight/1788577475794_Asset 132_4x.png',
+  '/uploads/branding/favicon/1788572036349_Asset 132_4x.png',
+  '/uploads/branding/favicon/1788575199367_faj.png',
+])
+
 function sanitizeStoredLogoUrl(url?: unknown, storagePath?: unknown): string {
   const cleanPath =
     typeof storagePath === 'string' &&
@@ -36,7 +45,7 @@ function sanitizeStoredLogoUrl(url?: unknown, storagePath?: unknown): string {
 
   if (typeof url === 'string') {
     const trimmed = url.trim()
-    if (trimmed && !trimmed.startsWith('/uploads/')) {
+    if (trimmed && (!trimmed.startsWith('/uploads/') || COMMITTED_BRANDING_UPLOADS.has(trimmed))) {
       if (trimmed.includes('.supabase.co/storage/v1/object/public/') && cleanPath) {
         return `/api/branding/image?path=${encodeURIComponent(cleanPath)}`
       }

@@ -406,6 +406,29 @@
   color: var(--inv-dark-fg) !important;
 }
 
+/* ─── Login Light Surface Isolation (Always Clean Light Mode) ── */
+.login-light-surface {
+  font-family: var(--font-invoice-sans);
+  color-scheme: light;
+  color: #0F172A;
+}
+
+.dark .login-light-surface .bg-white {
+  background-color: #FFFFFF !important;
+}
+
+.dark .login-light-surface h1,
+.dark .login-light-surface h2,
+.dark .login-light-surface h3 {
+  color: #0F172A;
+}
+
+@media (max-width: 639px) {
+  .login-light-surface input {
+    font-size: 1rem !important; /* Prevents iOS Safari viewport zoom when focusing inputs */
+  }
+}
+
 /* ─── Print ──────────────────────────────────────────────────── */
 @media print {
   @page {

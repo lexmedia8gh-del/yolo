@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Sign In',
+  title: 'Sign In — Ctrl Room',
 }
 
 export default function AuthLayout({
@@ -9,5 +9,5 @@ export default function AuthLayout({
 }: {
   children: React.ReactNode
 }) {
-  return <main className="min-h-screen w-full">{children}</main>
+  return <div className="min-h-[100dvh] w-full">{children}</div>
 }

@@ -1,11 +1,10 @@
 'use client'
 
-import React, { useState, Suspense } from 'react'
+import React, { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { motion } from 'framer-motion'
 import {
   Eye,
   EyeOff,
@@ -13,29 +12,77 @@ import {
   Lock,
   ArrowRight,
   AlertCircle,
-  ShieldCheck,
   CheckCircle2,
   ArrowLeft,
+  Check,
 } from 'lucide-react'
-import { signInWithEmail, signInWithGoogle, sendPasswordReset, setSessionCookie } from '@/lib/firebase/auth'
+import {
+  signInWithEmail,
+  signInWithGoogle,
+  sendPasswordReset,
+  setSessionCookie,
+} from '@/lib/firebase/auth'
+import { useBranding } from '@/lib/contexts/BrandingContext'
+import { hexToRgba, normalizeHexColor } from '@/lib/hooks/useInvoiceBranding'
 import { getFirebaseErrorMessage } from '@/lib/utils'
-import { PageLoader } from '@/components/ui/Spinner'
 import { BrandLogoLockup } from '@/components/branding/BrandLogoLockup'
 import toast from 'react-hot-toast'
 
+const REMEMBERED_EMAIL_KEY = 'lexmedia_remembered_email'
+
 // Form validation schema
 const loginSchema = z.object({
-  email: z.string().email('Please enter a valid email address'),
+  email: z.string().trim().email('Please enter a valid email address'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
   rememberMe: z.boolean().optional(),
 })
 
 type LoginFormData = z.infer<typeof loginSchema>
 
+function getRelativeLuminance(hex: string): number {
+  const clean = normalizeHexColor(hex, '#1D63ED').slice(1)
+  const r = parseInt(clean.slice(0, 2), 16) / 255
+  const g = parseInt(clean.slice(2, 4), 16) / 255
+  const b = parseInt(clean.slice(4, 6), 16) / 255
+  const toLinear = (c: number) =>
+    c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b)
+}
+
+function darkenHex(hex: string, factor = 0.88): string {
+  const clean = normalizeHexColor(hex, '#1D63ED').slice(1)
+  const r = Math.max(0, Math.min(255, Math.round(parseInt(clean.slice(0, 2), 16) * factor)))
+  const g = Math.max(0, Math.min(255, Math.round(parseInt(clean.slice(2, 4), 16) * factor)))
+  const b = Math.max(0, Math.min(255, Math.round(parseInt(clean.slice(4, 6), 16) * factor)))
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b
+    .toString(16)
+    .padStart(2, '0')}`
+}
+
+function LoginPageSkeleton() {
+  return (
+    <div className="login-light-surface min-h-[100dvh] w-full bg-[#F6F8FC] flex items-center justify-center p-5">
+      <div className="w-full max-w-[440px] rounded-2xl bg-white border border-[#E2E8F0] p-8 shadow-xs space-y-5">
+        <div className="h-9 w-36 bg-[#F1F5F9] rounded-lg mx-auto animate-pulse" />
+        <div className="space-y-3 pt-2">
+          <div className="h-4 w-24 bg-[#F1F5F9] rounded animate-pulse" />
+          <div className="h-12 w-full bg-[#F8FAFC] rounded-xl border border-[#E2E8F0] animate-pulse" />
+        </div>
+        <div className="space-y-3">
+          <div className="h-4 w-20 bg-[#F1F5F9] rounded animate-pulse" />
+          <div className="h-12 w-full bg-[#F8FAFC] rounded-xl border border-[#E2E8F0] animate-pulse" />
+        </div>
+        <div className="h-12 w-full bg-[#E2E8F0] rounded-xl animate-pulse" />
+      </div>
+    </div>
+  )
+}
+
 function LoginFormContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const redirectTo = searchParams?.get('redirect') ?? '/dashboard'
+  const { branding } = useBranding()
 
   const [showPassword, setShowPassword] = useState(false)
   const [authError, setAuthError] = useState('')
@@ -50,23 +97,112 @@ function LoginFormContent() {
   const {
     register,
     handleSubmit,
+    getValues,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
       email: '',
       password: '',
-      rememberMe: false,
+      rememberMe: true,
     },
   })
+
+  // Pre-fill remembered email when previously saved
+  useEffect(() => {
+    try {
+      const remembered = localStorage.getItem(REMEMBERED_EMAIL_KEY)
+      if (remembered && !getValues('email')) {
+        setValue('email', remembered)
+      }
+    } catch {}
+  }, [getValues, setValue])
+
+  // Resolve colors from Branding Settings while preserving light readability & LexMedia blue defaults
+  const untouchedAccents = new Set([
+    '#0a0a0a',
+    '#0f172a',
+    '#111827',
+    '#4f46e5',
+    '#6366f1',
+    '',
+  ])
+  const rawButtonLower = (branding.buttonColor || '').trim().toLowerCase()
+  const rawAccentLower = (branding.accentColor || '').trim().toLowerCase()
+  const rawSecondaryLower = (branding.secondaryColor || '').trim().toLowerCase()
+
+  const resolvedBrandBlue = !untouchedAccents.has(rawButtonLower)
+    ? normalizeHexColor(branding.buttonColor, '#1D63ED')
+    : !untouchedAccents.has(rawAccentLower)
+    ? normalizeHexColor(branding.accentColor, '#1D63ED')
+    : !untouchedAccents.has(rawSecondaryLower)
+    ? normalizeHexColor(branding.secondaryColor, '#1D63ED')
+    : '#1D63ED'
+
+  const resolvedBrandBlueHover = darkenHex(resolvedBrandBlue, 0.88)
+  const resolvedBrandBlueFg =
+    getRelativeLuminance(resolvedBrandBlue) > 0.45 ? '#0F172A' : '#FFFFFF'
+  const resolvedBrandBlueRing = hexToRgba(resolvedBrandBlue, 0.16)
+  const resolvedBrandBlueShadow = hexToRgba(resolvedBrandBlue, 0.22)
+
+  const candidateBg = normalizeHexColor(branding.backgroundColor, '#F6F8FC')
+  const resolvedCanvasBg =
+    getRelativeLuminance(candidateBg) > 0.78 ? candidateBg : '#F6F8FC'
+
+  const candidateSurface = normalizeHexColor(branding.surfaceColor, '#FFFFFF')
+  const resolvedSurfaceBg =
+    getRelativeLuminance(candidateSurface) > 0.85 ? candidateSurface : '#FFFFFF'
+
+  const untouchedTextDefaults = new Set(['#111827', '#0a0a0a', ''])
+  const rawTextLower = (branding.textColor || '').trim().toLowerCase()
+  const candidateHeading = !untouchedTextDefaults.has(rawTextLower)
+    ? normalizeHexColor(branding.textColor, '#0F172A')
+    : '#0F172A'
+  const resolvedHeadingText =
+    getRelativeLuminance(candidateHeading) < 0.25 ? candidateHeading : '#0F172A'
+
+  const candidateMuted = normalizeHexColor(branding.mutedTextColor, '#64748B')
+  const resolvedMutedText =
+    getRelativeLuminance(candidateMuted) < 0.45 ? candidateMuted : '#64748B'
+
+  const rawBrandName = (branding.businessName || '').trim()
+  const footerBrandName =
+    rawBrandName && rawBrandName.toLowerCase() !== 'lexmedia'
+      ? rawBrandName
+      : 'lexmedia.gh'
+
+  const scopedThemeCss = `
+    .login-theme-vars {
+      --login-bg: ${resolvedCanvasBg};
+      --login-surface: ${resolvedSurfaceBg};
+      --login-heading: ${resolvedHeadingText};
+      --login-muted: ${resolvedMutedText};
+      --login-accent: ${resolvedBrandBlue};
+      --login-accent-hover: ${resolvedBrandBlueHover};
+      --login-accent-fg: ${resolvedBrandBlueFg};
+      --login-accent-ring: ${resolvedBrandBlueRing};
+      --login-accent-shadow: ${resolvedBrandBlueShadow};
+    }
+  `
 
   // Sign In submit
   const onSubmit = async (data: LoginFormData) => {
     setAuthError('')
     try {
-      const userCredential = await signInWithEmail(data.email, data.password)
+      const remember = Boolean(data.rememberMe)
+      const userCredential = await signInWithEmail(data.email, data.password, remember)
       const idToken = await userCredential.user.getIdToken()
-      setSessionCookie(idToken, data.rememberMe ? 604800 : 86400)
+      setSessionCookie(idToken, remember ? 604800 : 86400)
+
+      try {
+        if (remember) {
+          localStorage.setItem(REMEMBERED_EMAIL_KEY, data.email.trim().toLowerCase())
+        } else {
+          localStorage.removeItem(REMEMBERED_EMAIL_KEY)
+        }
+      } catch {}
+
       router.push(redirectTo)
     } catch (err: unknown) {
       const code = (err as { code?: string }).code ?? ''
@@ -87,10 +223,12 @@ function LoginFormContent() {
       const message = (err as { message?: string }).message ?? ''
 
       if (code === 'auth/popup-closed-by-user') {
-        // User cancelled — do nothing
-      } else if (code === 'auth/unauthorized-admin') {
-        // Custom error — show the server message directly
-        setAuthError(message)
+        // User cancelled popup — no error banner needed
+      } else if (
+        code === 'auth/unauthorized-admin' ||
+        code === 'auth/configuration-not-found'
+      ) {
+        setAuthError(message || 'Google Sign-In is not available right now.')
       } else {
         setAuthError(getFirebaseErrorMessage(code) || 'Failed to sign in with Google.')
       }
@@ -102,16 +240,17 @@ function LoginFormContent() {
   // Password reset action
   const handlePasswordReset = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!resetEmail) {
+    const trimmedEmail = resetEmail.trim()
+    if (!trimmedEmail) {
       toast.error('Please enter your email address.')
       return
     }
     setAuthError('')
     setIsResetLoading(true)
     try {
-      await sendPasswordReset(resetEmail)
+      await sendPasswordReset(trimmedEmail)
       setResetSuccess(true)
-      toast.success('Password reset link dispatched!')
+      toast.success('Password reset link sent!')
     } catch (err: unknown) {
       const code = (err as { code?: string }).code ?? ''
       setAuthError(getFirebaseErrorMessage(code) || 'Failed to send password reset email.')
@@ -120,354 +259,425 @@ function LoginFormContent() {
     }
   }
 
+  const headingTitle = isResetMode ? 'Reset password' : 'Welcome back'
+  const supportingCopy = isResetMode
+    ? 'Enter your email address to receive a password reset link.'
+    : 'Sign in to continue to your workspace.'
+
   return (
-    <main className="min-h-screen w-full bg-[#06080E] text-slate-100 flex flex-col justify-between items-center p-4 sm:p-6 lg:p-8 relative overflow-hidden selection:bg-blue-600 selection:text-white">
-      {/* Subtle Background Lighting & Radial Glows */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full bg-blue-600/15 blur-[140px]" />
-        <div className="absolute -bottom-40 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full bg-indigo-600/10 blur-[130px]" />
-        <div className="absolute inset-0 opacity-[0.025] bg-[radial-gradient(circle_at_1px_1px,#ffffff_1px,transparent_0)] [background-size:24px_24px]" />
-      </div>
+    <main className="login-light-surface login-theme-vars min-h-[100dvh] w-full overflow-x-hidden bg-white sm:bg-[var(--login-bg)] text-[var(--login-heading)] flex flex-col relative selection:bg-[var(--login-accent)] selection:text-white">
+      <style dangerouslySetInnerHTML={{ __html: scopedThemeCss }} />
 
-      {/* Top Header Bar */}
-      <header className="w-full max-w-md pt-2 pb-4 flex items-center justify-between z-10">
-        <BrandLogoLockup subtitle="Ctrl Room" variant="dark" />
-        <span className="text-[11px] font-medium text-slate-500 whitespace-nowrap shrink-0">
-          Operations Portal
-        </span>
-      </header>
+      {/* Subtle desktop-only soft corner accent wash */}
+      <div
+        aria-hidden="true"
+        className="hidden lg:block pointer-events-none fixed -bottom-28 -left-28 w-[420px] h-[420px] rounded-[72px] rotate-12 bg-[var(--login-accent)]/[0.05]"
+      />
 
-      {/* Main Centered Login Card */}
-      <div className="my-auto py-4 w-full max-w-[420px] z-10">
-        <motion.div
-          initial={{ opacity: 0, y: 16, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-          className="w-full"
-        >
-          <div
-            id="login-card"
-            className="w-full bg-[#0D121F]/80 backdrop-blur-xl rounded-2xl border border-slate-800/80 p-6 sm:p-9 shadow-[0_0_50px_-12px_rgba(37,99,235,0.2),0_10px_30px_-10px_rgba(0,0,0,0.5)] relative overflow-hidden"
-          >
-            {/* Subtle top ambient accent line */}
-            <div className="absolute top-0 inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-blue-500/40 to-transparent" />
+      <div className="w-full max-w-[1040px] mx-auto flex-1 flex flex-col justify-between px-5 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-9 relative z-10">
+        {/* Minimal Brand Header */}
+        <header className="w-full max-w-[440px] mx-auto lg:max-w-none lg:mx-0 flex items-center justify-center lg:justify-start pt-1 pb-4 sm:pb-6 lg:pb-2 shrink-0">
+          <BrandLogoLockup subtitle="Ctrl Room" variant="light" size="md" />
+        </header>
 
-            {/* Branding Header Inside Card */}
-            <div className="text-center space-y-1.5 mb-6">
-              <p className="text-[11px] font-semibold tracking-wider uppercase text-blue-400 mb-1">
-                Ctrl Room
-              </p>
+        {/* Main Responsive Content Container */}
+        <div className="w-full my-auto py-1 sm:py-4 lg:grid lg:grid-cols-[1fr_440px] lg:items-center lg:gap-12 xl:gap-16">
+          {/* Desktop Left Welcome Column (Subtle, hidden on mobile & tablet) */}
+          <div className="hidden lg:flex flex-col items-start max-w-[400px] pr-4">
+            <h1 className="text-[38px] font-bold tracking-[-0.025em] leading-[1.15] text-[var(--login-heading)]">
+              {headingTitle}
+            </h1>
+            <p className="mt-3 text-[16px] leading-relaxed text-[var(--login-muted)] font-normal">
+              {supportingCopy}
+            </p>
+            <div
+              aria-hidden="true"
+              className="mt-5 w-9 h-[2.5px] rounded-full bg-[var(--login-accent)]"
+            />
+          </div>
 
-              <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
-                {isResetMode ? 'Reset Password' : 'Welcome back'}
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-400 font-normal leading-relaxed">
-                {isResetMode
-                  ? 'Enter your account email to receive recovery instructions.'
-                  : 'Sign in to your operations workspace.'}
-              </p>
-            </div>
+          {/* Centered Form Column (Full-width single column on mobile, 440px card on sm+/desktop) */}
+          <div className="w-full max-w-[440px] mx-auto lg:mx-0">
+            <div
+              id="login-card"
+              className="w-full bg-white sm:bg-[var(--login-surface)] sm:rounded-2xl sm:border sm:border-[#E2E8F0] sm:p-8 lg:p-9 sm:shadow-[0_14px_40px_-12px_rgba(15,23,42,0.08),0_2px_6px_-1px_rgba(15,23,42,0.03)]"
+            >
+              {/* Desktop Card Brand Lockup */}
+              <div className="hidden lg:flex justify-center mb-7">
+                <BrandLogoLockup subtitle="Ctrl Room" variant="light" size="lg" />
+              </div>
 
-            {/* Error Banner */}
-            {authError && (
-              <motion.div
-                initial={{ opacity: 0, y: -6 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-start gap-2.5 p-3.5 rounded-xl bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs mb-5"
-              >
-                <AlertCircle size={15} className="text-rose-400 shrink-0 mt-0.5" />
-                <span className="font-medium leading-relaxed">{authError}</span>
-              </motion.div>
-            )}
+              {/* Mobile & Tablet Heading Block */}
+              <div className="lg:hidden mb-6">
+                <h1 className="text-[26px] sm:text-[28px] font-bold tracking-[-0.025em] leading-[1.2] text-[var(--login-heading)]">
+                  {headingTitle}
+                </h1>
+                <p className="mt-1.5 text-sm leading-relaxed text-[var(--login-muted)] font-normal">
+                  {supportingCopy}
+                </p>
+                <div
+                  aria-hidden="true"
+                  className="mt-3.5 w-8 h-[2px] rounded-full bg-[var(--login-accent)]/30"
+                />
+              </div>
 
-            {/* Password Reset Form */}
-            {isResetMode ? (
-              <form id="reset-password-form" onSubmit={handlePasswordReset} className="space-y-4">
-                {resetSuccess ? (
-                  <div className="space-y-4">
-                    <div className="p-4 rounded-xl bg-emerald-950/50 border border-emerald-800/60 text-emerald-300 text-xs font-normal space-y-1.5">
-                      <div className="flex items-center gap-2 text-emerald-400 font-semibold">
-                        <CheckCircle2 size={15} />
-                        <span>Recovery Link Dispatched</span>
-                      </div>
-                      <p className="text-slate-300">
-                        We sent a password reset link to{' '}
-                        <strong className="text-white font-medium">{resetEmail}</strong>.
-                      </p>
-                      <p className="text-slate-400 text-[11px]">Please check your inbox and spam folder.</p>
-                    </div>
+              {/* Concise Error Banner */}
+              {authError && (
+                <div
+                  role="alert"
+                  aria-live="polite"
+                  className="flex items-start gap-2.5 p-3.5 rounded-xl bg-[#FEF2F2] border border-[#FECACA] text-[#B91C1C] text-[13px] mb-5"
+                >
+                  <AlertCircle size={16} className="text-[#DC2626] shrink-0 mt-0.5" />
+                  <span className="font-medium leading-snug">{authError}</span>
+                </div>
+              )}
 
-                    <button
-                      id="reset-return-button"
-                      type="button"
-                      onClick={() => {
-                        setIsResetMode(false)
-                        setResetSuccess(false)
-                        setResetEmail('')
-                        setAuthError('')
-                      }}
-                      className="w-full h-11 rounded-xl border border-slate-800 hover:bg-slate-900 text-slate-300 font-medium text-xs transition-colors flex items-center justify-center gap-2"
-                    >
-                      <ArrowLeft size={14} />
-                      <span>Return to Sign In</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="space-y-1.5">
-                      <label
-                        htmlFor="reset-email-input"
-                        className="block text-xs font-medium text-slate-300"
+              {/* Forgot Password Flow */}
+              {isResetMode ? (
+                <form
+                  id="reset-password-form"
+                  onSubmit={handlePasswordReset}
+                  noValidate
+                  className="space-y-4"
+                >
+                  {resetSuccess ? (
+                    <div className="space-y-4">
+                      <div
+                        role="status"
+                        className="p-4 rounded-xl bg-[#F0FDF4] border border-[#BBF7D0] text-[#166534] text-[13px] space-y-1.5"
                       >
-                        Email Address <span className="text-rose-400">*</span>
-                      </label>
-                      <div className="relative">
-                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                          <Mail size={16} />
+                        <div className="flex items-center gap-2 font-semibold text-[#15803D]">
+                          <CheckCircle2 size={16} className="shrink-0" />
+                          <span>Reset link sent</span>
                         </div>
-                        <input
-                          id="reset-email-input"
-                          type="email"
-                          required
-                          autoComplete="email"
-                          placeholder="staff@lexmedia.com"
-                          value={resetEmail}
-                          onChange={(e) => setResetEmail(e.target.value)}
-                          className="w-full h-11 pl-10 pr-4 rounded-xl bg-slate-900/90 border border-slate-800 text-slate-100 text-xs sm:text-sm placeholder-slate-500 transition-all focus:outline-none focus:border-blue-500/80 focus:ring-2 focus:ring-blue-500/20"
-                        />
+                        <p className="text-[#166534] leading-relaxed">
+                          If an account exists for{' '}
+                          <strong className="font-semibold">{resetEmail.trim()}</strong>, you will
+                          receive password reset instructions shortly.
+                        </p>
                       </div>
+
+                      <button
+                        id="reset-return-button"
+                        type="button"
+                        onClick={() => {
+                          setIsResetMode(false)
+                          setResetSuccess(false)
+                          setResetEmail('')
+                          setAuthError('')
+                        }}
+                        className="w-full h-12 rounded-xl bg-white border border-[#E2E8F0] hover:bg-[#F8FAFC] hover:border-[#CBD5E1] text-[#0F172A] font-semibold text-sm transition-colors flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)] focus-visible:ring-offset-2"
+                      >
+                        <ArrowLeft size={16} />
+                        <span>Back to Sign In</span>
+                      </button>
                     </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="space-y-1.5">
+                        <label
+                          htmlFor="reset-email-input"
+                          className="block text-[13px] font-semibold text-[var(--login-heading)]"
+                        >
+                          Email address
+                        </label>
+                        <div className="relative">
+                          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#64748B]">
+                            <Mail size={18} strokeWidth={1.8} />
+                          </div>
+                          <input
+                            id="reset-email-input"
+                            type="email"
+                            inputMode="email"
+                            required
+                            autoComplete="email"
+                            placeholder="you@lexmedia.gh"
+                            value={resetEmail}
+                            onChange={(e) => setResetEmail(e.target.value)}
+                            disabled={isResetLoading}
+                            className="w-full h-12 pl-11 pr-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] text-sm placeholder:text-[#94A3B8] transition-colors focus:bg-white focus:outline-none focus:border-[var(--login-accent)] focus:ring-4 focus:ring-[var(--login-accent-ring)] disabled:opacity-60"
+                          />
+                        </div>
+                      </div>
 
-                    <button
-                      id="reset-submit-button"
-                      type="submit"
-                      disabled={isResetLoading}
-                      className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs tracking-wide shadow-[0_4px_16px_rgba(37,99,235,0.3)] transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none active:scale-[0.99]"
+                      <button
+                        id="reset-submit-button"
+                        type="submit"
+                        disabled={isResetLoading}
+                        className="w-full h-12 rounded-xl bg-[var(--login-accent)] hover:bg-[var(--login-accent-hover)] text-[var(--login-accent-fg)] font-semibold text-sm shadow-[0_6px_18px_-4px_var(--login-accent-shadow)] transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)] focus-visible:ring-offset-2"
+                      >
+                        {isResetLoading ? (
+                          <span className="flex items-center gap-2">
+                            <span className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+                            <span>Sending link...</span>
+                          </span>
+                        ) : (
+                          <>
+                            <span>Send Reset Link</span>
+                            <ArrowRight size={16} />
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        id="reset-back-button"
+                        type="button"
+                        onClick={() => {
+                          setIsResetMode(false)
+                          setAuthError('')
+                        }}
+                        className="w-full min-h-[44px] rounded-xl text-[13px] font-semibold text-[#475569] hover:text-[#0F172A] hover:bg-[#F8FAFC] transition-colors flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)]"
+                      >
+                        <ArrowLeft size={15} />
+                        <span>Back to Sign In</span>
+                      </button>
+                    </div>
+                  )}
+                </form>
+              ) : (
+                /* Primary Email & Password Sign-In Form */
+                <form
+                  id="primary-login-form"
+                  onSubmit={handleSubmit(onSubmit)}
+                  noValidate
+                  className="space-y-4"
+                >
+                  {/* 1. Email Address Input */}
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="login-email-input"
+                      className="block text-[13px] font-semibold text-[var(--login-heading)]"
                     >
-                      {isResetLoading ? (
-                        <span className="flex items-center gap-2">
-                          <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          <span>Sending link...</span>
-                        </span>
-                      ) : (
-                        <>
-                          <span>Send Reset Link</span>
-                          <ArrowRight size={14} />
-                        </>
-                      )}
-                    </button>
+                      Email address
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#64748B]">
+                        <Mail size={18} strokeWidth={1.8} />
+                      </div>
+                      <input
+                        id="login-email-input"
+                        type="email"
+                        inputMode="email"
+                        autoComplete="email"
+                        placeholder="you@lexmedia.gh"
+                        aria-invalid={Boolean(errors.email)}
+                        aria-describedby={errors.email ? 'login-email-error' : undefined}
+                        disabled={isSubmitting || isGoogleLoading}
+                        className={`w-full h-12 pl-11 pr-4 rounded-xl bg-[#F8FAFC] border text-[#0F172A] text-sm placeholder:text-[#94A3B8] transition-colors focus:bg-white focus:outline-none focus:ring-4 disabled:opacity-60 ${
+                          errors.email
+                            ? 'border-[#DC2626] focus:border-[#DC2626] focus:ring-[#DC2626]/15'
+                            : 'border-[#E2E8F0] focus:border-[var(--login-accent)] focus:ring-[var(--login-accent-ring)]'
+                        }`}
+                        {...register('email')}
+                      />
+                    </div>
+                    {errors.email && (
+                      <p
+                        id="login-email-error"
+                        role="alert"
+                        className="text-xs text-[#DC2626] font-medium pt-0.5"
+                      >
+                        {errors.email.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* 2. Password Input & Visibility Toggle */}
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="login-password-input"
+                      className="block text-[13px] font-semibold text-[var(--login-heading)]"
+                    >
+                      Password
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#64748B]">
+                        <Lock size={18} strokeWidth={1.8} />
+                      </div>
+                      <input
+                        id="login-password-input"
+                        type={showPassword ? 'text' : 'password'}
+                        autoComplete="current-password"
+                        placeholder="Enter your password"
+                        aria-invalid={Boolean(errors.password)}
+                        aria-describedby={errors.password ? 'login-password-error' : undefined}
+                        disabled={isSubmitting || isGoogleLoading}
+                        className={`w-full h-12 pl-11 pr-12 rounded-xl bg-[#F8FAFC] border text-[#0F172A] text-sm placeholder:text-[#94A3B8] transition-colors focus:bg-white focus:outline-none focus:ring-4 disabled:opacity-60 ${
+                          errors.password
+                            ? 'border-[#DC2626] focus:border-[#DC2626] focus:ring-[#DC2626]/15'
+                            : 'border-[#E2E8F0] focus:border-[var(--login-accent)] focus:ring-[var(--login-accent-ring)]'
+                        }`}
+                        {...register('password')}
+                      />
+                      <button
+                        id="login-password-toggle"
+                        type="button"
+                        onClick={() => setShowPassword((prev) => !prev)}
+                        disabled={isSubmitting || isGoogleLoading}
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        aria-pressed={showPassword}
+                        className="absolute inset-y-0 right-0 w-11 h-12 flex items-center justify-center rounded-r-xl text-[#64748B] hover:text-[#0F172A] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--login-accent)]"
+                      >
+                        {showPassword ? (
+                          <EyeOff size={18} strokeWidth={1.8} />
+                        ) : (
+                          <Eye size={18} strokeWidth={1.8} />
+                        )}
+                      </button>
+                    </div>
+                    {errors.password && (
+                      <p
+                        id="login-password-error"
+                        role="alert"
+                        className="text-xs text-[#DC2626] font-medium pt-0.5"
+                      >
+                        {errors.password.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* 4 & 5. Remember Me & Forgot Password Row (44px+ touch targets) */}
+                  <div className="flex items-center justify-between gap-3 select-none">
+                    <label
+                      htmlFor="remember-me-checkbox"
+                      className="min-h-[44px] inline-flex items-center gap-2.5 cursor-pointer group"
+                    >
+                      <span className="relative inline-flex items-center justify-center w-[18px] h-[18px] shrink-0">
+                        <input
+                          id="remember-me-checkbox"
+                          type="checkbox"
+                          disabled={isSubmitting || isGoogleLoading}
+                          className="peer sr-only"
+                          {...register('rememberMe')}
+                        />
+                        <span className="w-[18px] h-[18px] rounded-[5px] border border-[#CBD5E1] bg-white transition-colors peer-checked:bg-[var(--login-accent)] peer-checked:border-[var(--login-accent)] peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--login-accent)] peer-focus-visible:ring-offset-2 group-hover:border-[#94A3B8]" />
+                        <Check
+                          size={12}
+                          strokeWidth={3}
+                          className="absolute text-[var(--login-accent-fg)] opacity-0 peer-checked:opacity-100 transition-opacity pointer-events-none"
+                        />
+                      </span>
+                      <span className="text-[13px] font-medium text-[#334155] group-hover:text-[#0F172A] transition-colors whitespace-nowrap">
+                        Remember me
+                      </span>
+                    </label>
 
                     <button
-                      id="reset-back-button"
+                      id="forgot-password-toggle"
                       type="button"
+                      disabled={isSubmitting || isGoogleLoading}
                       onClick={() => {
-                        setIsResetMode(false)
+                        const currentEmail = getValues('email')?.trim() || ''
+                        if (currentEmail && !resetEmail) {
+                          setResetEmail(currentEmail)
+                        }
+                        setIsResetMode(true)
+                        setResetSuccess(false)
                         setAuthError('')
                       }}
-                      className="w-full text-center text-xs text-slate-400 hover:text-slate-200 font-medium py-1 transition-colors flex items-center justify-center gap-1.5"
+                      className="min-h-[44px] inline-flex items-center px-1 rounded-lg text-[13px] font-semibold text-[var(--login-accent)] hover:text-[var(--login-accent-hover)] hover:underline transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)]"
                     >
-                      <ArrowLeft size={13} />
-                      <span>Back to Sign In</span>
+                      Forgot password?
                     </button>
                   </div>
-                )}
-              </form>
-            ) : (
-              /* Primary Credential Form */
-              <form
-                id="primary-login-form"
-                onSubmit={handleSubmit(onSubmit)}
-                className="space-y-4"
-              >
-                {/* Email Input */}
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="login-email-input"
-                    className="block text-xs font-medium text-slate-300"
-                  >
-                    Email Address <span className="text-rose-400">*</span>
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                      <Mail size={16} />
-                    </div>
-                    <input
-                      id="login-email-input"
-                      type="email"
-                      autoComplete="email"
-                      placeholder="staff@lexmedia.com"
-                      required
-                      className={`w-full h-11 pl-10 pr-4 rounded-xl bg-slate-900/90 border text-slate-100 text-xs sm:text-sm placeholder-slate-500 transition-all focus:outline-none focus:border-blue-500/80 focus:ring-2 focus:ring-blue-500/20 ${
-                        errors.email ? 'border-rose-500/80 focus:border-rose-500 focus:ring-rose-500/20' : 'border-slate-800'
-                      }`}
-                      {...register('email')}
-                    />
-                  </div>
-                  {errors.email && (
-                    <p className="text-[11px] text-rose-400 font-medium">{errors.email.message}</p>
-                  )}
-                </div>
 
-                {/* Password Input */}
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="login-password-input"
-                    className="block text-xs font-medium text-slate-300"
+                  {/* 6. Primary Sign In Button */}
+                  <button
+                    id="login-submit-button"
+                    type="submit"
+                    disabled={isSubmitting || isGoogleLoading}
+                    className="w-full h-12 rounded-xl bg-[var(--login-accent)] hover:bg-[var(--login-accent-hover)] text-[var(--login-accent-fg)] font-semibold text-sm shadow-[0_6px_18px_-4px_var(--login-accent-shadow)] transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)] focus-visible:ring-offset-2"
                   >
-                    Password <span className="text-rose-400">*</span>
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                      <Lock size={16} />
-                    </div>
-                    <input
-                      id="login-password-input"
-                      type={showPassword ? 'text' : 'password'}
-                      autoComplete="current-password"
-                      placeholder="••••••••••••"
-                      required
-                      className={`w-full h-11 pl-10 pr-11 rounded-xl bg-slate-900/90 border text-slate-100 text-xs sm:text-sm placeholder-slate-500 transition-all focus:outline-none focus:border-blue-500/80 focus:ring-2 focus:ring-blue-500/20 ${
-                        errors.password ? 'border-rose-500/80 focus:border-rose-500 focus:ring-rose-500/20' : 'border-slate-800'
-                      }`}
-                      {...register('password')}
-                    />
-                    <button
-                      id="login-password-toggle"
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition-colors"
-                      tabIndex={-1}
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
-                    >
-                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  </div>
-                  {errors.password && (
-                    <p className="text-[11px] text-rose-400 font-medium">{errors.password.message}</p>
-                  )}
-                </div>
+                    {isSubmitting ? (
+                      <span className="flex items-center gap-2">
+                        <span className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+                        <span>Signing in...</span>
+                      </span>
+                    ) : (
+                      <>
+                        <span>Sign In</span>
+                        <ArrowRight size={16} strokeWidth={2.2} />
+                      </>
+                    )}
+                  </button>
+                </form>
+              )}
 
-                {/* Remember Me & Forgot Password Row */}
-                <div className="flex items-center justify-between pt-1 select-none text-xs">
-                  <label className="flex items-center gap-2 cursor-pointer group">
-                    <input
-                      id="remember-me-checkbox"
-                      type="checkbox"
-                      className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
-                      {...register('rememberMe')}
-                    />
-                    <span className="text-slate-400 group-hover:text-slate-200 font-normal transition-colors">
-                      Remember me
+              {/* 7 & 8. Subtle OR Divider + Continue with Google */}
+              {!isResetMode && (
+                <>
+                  <div className="relative my-5 flex items-center" role="separator">
+                    <div className="flex-1 border-t border-[#E2E8F0]" />
+                    <span className="px-3 text-[11px] uppercase tracking-wider text-[#94A3B8] font-semibold select-none">
+                      OR
                     </span>
-                  </label>
+                    <div className="flex-1 border-t border-[#E2E8F0]" />
+                  </div>
 
                   <button
-                    id="forgot-password-toggle"
+                    id="google-login-button"
                     type="button"
-                    onClick={() => {
-                      setIsResetMode(true)
-                      setAuthError('')
-                    }}
-                    className="font-medium text-blue-400 hover:text-blue-300 transition-colors hover:underline"
+                    disabled={isSubmitting || isGoogleLoading}
+                    onClick={handleGoogleLogin}
+                    className="w-full h-12 rounded-xl bg-white border border-[#E2E8F0] hover:bg-[#F8FAFC] hover:border-[#CBD5E1] text-[#0F172A] font-semibold text-sm transition-colors flex items-center justify-center gap-2.5 disabled:opacity-60 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)] focus-visible:ring-offset-2"
                   >
-                    Forgot password?
+                    {isGoogleLoading ? (
+                      <span className="flex items-center gap-2">
+                        <span className="w-4 h-4 border-2 border-[#94A3B8]/40 border-t-[#0F172A] rounded-full animate-spin" />
+                        <span>Connecting...</span>
+                      </span>
+                    ) : (
+                      <>
+                        <svg
+                          className="w-[18px] h-[18px] shrink-0"
+                          viewBox="0 0 24 24"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                            fill="#4285F4"
+                          />
+                          <path
+                            d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                            fill="#34A853"
+                          />
+                          <path
+                            d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                            fill="#FBBC05"
+                          />
+                          <path
+                            d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                            fill="#EA4335"
+                          />
+                        </svg>
+                        <span>Continue with Google</span>
+                      </>
+                    )}
                   </button>
-                </div>
+                </>
+              )}
 
-                {/* Primary Submit Button */}
-                <button
-                  id="login-submit-button"
-                  type="submit"
-                  disabled={isSubmitting || isGoogleLoading}
-                  className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs tracking-wide shadow-[0_4px_16px_rgba(37,99,235,0.3)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.4)] transition-all flex items-center justify-center gap-2 mt-2 disabled:opacity-60 disabled:pointer-events-none active:scale-[0.99]"
-                >
-                  {isSubmitting ? (
-                    <span className="flex items-center gap-2">
-                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      <span>Signing in...</span>
-                    </span>
-                  ) : (
-                    <>
-                      <span>Sign In</span>
-                      <ArrowRight size={14} />
-                    </>
-                  )}
-                </button>
-              </form>
-            )}
-
-            {/* Single Sign-On Divider */}
-            {!isResetMode && (
-              <>
-                <div className="relative my-5 flex items-center justify-center">
-                  <div className="border-t border-slate-800 w-full" />
-                  <span className="absolute bg-[#0D121F] px-3 text-[10px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap">
-                    OR
-                  </span>
-                  <div className="border-t border-slate-800 w-full" />
-                </div>
-
-                {/* Google SSO Button */}
-                <button
-                  id="google-login-button"
-                  type="button"
-                  disabled={isSubmitting || isGoogleLoading}
-                  onClick={handleGoogleLogin}
-                  className="w-full h-11 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 hover:bg-slate-800/80 text-slate-200 font-medium text-xs transition-all flex items-center justify-center gap-2.5 disabled:opacity-60 disabled:pointer-events-none"
-                >
-                  {isGoogleLoading ? (
-                    <span className="flex items-center gap-2">
-                      <span className="w-3.5 h-3.5 border-2 border-slate-400/30 border-t-slate-200 rounded-full animate-spin" />
-                      <span>Connecting...</span>
-                    </span>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                        <path
-                          d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                          fill="#4285F4"
-                        />
-                        <path
-                          d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                          fill="#34A853"
-                        />
-                        <path
-                          d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                          fill="#FBBC05"
-                        />
-                        <path
-                          d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                          fill="#EA4335"
-                        />
-                      </svg>
-                      <span>Continue with Google</span>
-                    </>
-                  )}
-                </button>
-              </>
-            )}
-
-            {/* Private Security Footnote inside card */}
-            <div className="mt-6 pt-4 border-t border-slate-800/60 flex items-center justify-center gap-1.5 text-center text-[11px] text-slate-500 font-normal">
-              <ShieldCheck size={14} className="text-blue-500/80 shrink-0" />
-              <span>Authorized lexmedia.gh access only</span>
+              {/* Desktop Card Footer */}
+              <p className="hidden lg:block mt-7 text-center text-xs text-[#94A3B8] font-normal">
+                © 2026 {footerBrandName}
+              </p>
             </div>
           </div>
-        </motion.div>
-      </div>
+        </div>
 
-      {/* Footer Security Message */}
-      <footer className="w-full max-w-md pb-3 pt-2 text-center z-10 flex flex-col items-center gap-1 text-[11px] text-slate-500 font-normal">
-        <span>lexmedia.gh • Ctrl Room</span>
-        <span className="text-slate-600">© {new Date().getFullYear()} All rights reserved.</span>
-      </footer>
+        {/* Mobile & Tablet Subtle Footer */}
+        <footer className="lg:hidden w-full max-w-[440px] mx-auto pt-6 pb-1 text-center">
+          <p className="text-xs text-[#94A3B8] font-normal">© 2026 {footerBrandName}</p>
+        </footer>
+      </div>
     </main>
   )
 }
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<PageLoader />}>
+    <Suspense fallback={<LoginPageSkeleton />}>
       <LoginFormContent />
     </Suspense>
   )
