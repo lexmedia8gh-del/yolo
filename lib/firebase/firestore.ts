@@ -24,6 +24,7 @@ import {
 } from 'firebase/firestore'
 import { onAuthStateChanged } from 'firebase/auth'
 import { db, getAuthInstance, isFirebaseConfigured } from './config'
+import { getAdminAuthHeaders } from './auth'
 
 // ─── Collection Names (centralized) ──────────────────────────
 export const COLLECTIONS = {
@@ -154,9 +155,13 @@ function sanitizeForJsonMirror(input: any): any {
 async function postToServerLocalStore(payload: Record<string, any>): Promise<void> {
   if (typeof window === 'undefined') return
   try {
+    const authHeaders = await getAdminAuthHeaders()
     await fetch('/api/admin/local-store', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
       body: JSON.stringify(payload),
     })
   } catch {}
@@ -186,9 +191,13 @@ export async function syncBatchToServerLocalStore(
 async function fetchServerLocalCollection<T extends { id?: string }>(collectionName: string): Promise<T[] | null> {
   if (typeof window === 'undefined') return null
   try {
+    const authHeaders = await getAdminAuthHeaders()
     const res = await fetch(
       `/api/admin/local-store?collection=${encodeURIComponent(collectionName)}`,
-      { cache: 'no-store' }
+      {
+        cache: 'no-store',
+        headers: authHeaders,
+      }
     )
     if (!res.ok) return null
     const json = await res.json()
@@ -202,9 +211,13 @@ async function fetchServerLocalCollection<T extends { id?: string }>(collectionN
 async function fetchServerLocalDoc<T>(collectionName: string, docId: string): Promise<T | null> {
   if (typeof window === 'undefined') return null
   try {
+    const authHeaders = await getAdminAuthHeaders()
     const res = await fetch(
       `/api/admin/local-store?collection=${encodeURIComponent(collectionName)}&id=${encodeURIComponent(docId)}`,
-      { cache: 'no-store' }
+      {
+        cache: 'no-store',
+        headers: authHeaders,
+      }
     )
     if (!res.ok) return null
     const json = await res.json()
@@ -281,28 +294,88 @@ function generateLocalId(prefix = 'doc'): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`
 }
 
+/**
+ * Guarantees that `doc.id` is always the canonical Firestore document ID,
+ * even if the stored document data contains an internal `id` property.
+ */
+function withCanonicalDocId<T>(docId: string, rawData: DocumentData | undefined): T {
+  const data: Record<string, any> = rawData ? { ...rawData } : {}
+  if (typeof data.id === 'string' && data.id.trim() && data.id !== docId && !data.legacyId) {
+    data.legacyId = data.id.trim()
+  }
+  data.id = docId
+  return data as T
+}
+
+function applyLocalQueryConstraints<T>(items: T[], constraints: QueryConstraint[]): T[] {
+  if (!constraints || constraints.length === 0 || items.length === 0) return items
+  let result = [...items]
+
+  for (const c of constraints) {
+    const anyC = c as any
+    if (anyC?.type === 'where') {
+      const segments: string[] | undefined = anyC._field?.segments
+      const field = Array.isArray(segments) && segments.length > 0 ? segments.join('.') : ''
+      const op = anyC._op
+      const target = anyC._value
+      if (field && op === '==') {
+        result = result.filter((item: any) => {
+          const val = field.includes('.')
+            ? field.split('.').reduce((acc, part) => (acc != null ? acc[part] : undefined), item)
+            : item?.[field]
+          return val === target
+        })
+      }
+    }
+  }
+
+  return result
+}
+
+function mirrorMissingBrowserDocsToServer<T extends { id?: string }>(
+  collectionName: string,
+  serverDocs: T[] | null,
+  browserDocs: T[]
+) {
+  if (!browserDocs || browserDocs.length === 0) return
+  const serverIds = new Set((serverDocs || []).map((d) => d?.id).filter(Boolean))
+  const missingOnServer = browserDocs.filter((b) => b?.id && !serverIds.has(b.id))
+  if (missingOnServer.length > 0) {
+    void postToServerLocalStore({
+      action: 'syncCollection',
+      collection: collectionName,
+      cloudSynced: false,
+      docs: missingOnServer.map((d) => sanitizeForJsonMirror(d)),
+    })
+  }
+}
+
 // ─── Generic Get Document ────────────────────────────────────
 export async function getDocument<T>(
   collectionName: string,
   docId: string
 ): Promise<T | null> {
+  const cleanId = typeof docId === 'string' ? docId.trim() : ''
+  if (!cleanId) return null
+
   if (!canReadCloudFirestore(collectionName)) {
-    const serverDoc = await fetchServerLocalDoc<T & { id: string }>(collectionName, docId)
+    const serverDoc = await fetchServerLocalDoc<T & { id: string }>(collectionName, cleanId)
     if (serverDoc) {
+      const canonical = withCanonicalDocId<T & { id: string }>(cleanId, serverDoc as any)
       const local = getLocalCollection<any>(collectionName)
-      const idx = local.findIndex((i) => i.id === docId)
-      if (idx >= 0) local[idx] = serverDoc
-      else local.push(serverDoc)
+      const idx = local.findIndex((i) => i.id === cleanId)
+      if (idx >= 0) local[idx] = canonical
+      else local.push(canonical)
       setLocalCollection(collectionName, local, false)
-      return serverDoc
+      return canonical
     }
     const local = getLocalCollection<T & { id: string }>(collectionName)
-    const matched = local.find((item) => item.id === docId) || null
+    const matched = local.find((item) => item.id === cleanId) || null
     if (matched) {
       void postToServerLocalStore({
         action: 'set',
         collection: collectionName,
-        id: docId,
+        id: cleanId,
         data: sanitizeForJsonMirror(matched),
         merge: true,
         cloudSynced: false,
@@ -312,25 +385,33 @@ export async function getDocument<T>(
   }
 
   try {
-    const docRef = doc(db, collectionName, docId)
+    const docRef = doc(db, collectionName, cleanId)
     const snap = await getDoc(docRef)
     if (snap.exists()) {
-      const resolved = { id: snap.id, ...snap.data() } as T
+      const resolved = withCanonicalDocId<T>(snap.id, snap.data())
+      void postToServerLocalStore({
+        action: 'set',
+        collection: collectionName,
+        id: snap.id,
+        data: sanitizeForJsonMirror(resolved),
+        merge: true,
+        cloudSynced: true,
+      })
       return resolved
     }
     // Also check server local store in case created via PIN mode earlier
-    const serverDoc = await fetchServerLocalDoc<T>(collectionName, docId)
-    if (serverDoc) return serverDoc
+    const serverDoc = await fetchServerLocalDoc<T>(collectionName, cleanId)
+    if (serverDoc) return withCanonicalDocId<T>(cleanId, serverDoc as any)
     return null
   } catch (err: any) {
     console.warn(
-      `[Cloud Firestore] Offline or permission fallback fetching ${collectionName}/${docId}:`,
+      `[Cloud Firestore] Offline or permission fallback fetching ${collectionName}/${cleanId}:`,
       err?.message || err
     )
-    const serverDoc = await fetchServerLocalDoc<T>(collectionName, docId)
-    if (serverDoc) return serverDoc
+    const serverDoc = await fetchServerLocalDoc<T>(collectionName, cleanId)
+    if (serverDoc) return withCanonicalDocId<T>(cleanId, serverDoc as any)
     const local = getLocalCollection<T & { id: string }>(collectionName)
-    return local.find((item) => item.id === docId) || null
+    return local.find((item) => item.id === cleanId) || null
   }
 }
 
@@ -342,24 +423,26 @@ export async function getDocuments<T>(
   if (!canReadCloudFirestore(collectionName)) {
     const browserDocs = getLocalCollection<T & { id?: string }>(collectionName)
     const serverDocs = await fetchServerLocalCollection<T & { id?: string }>(collectionName)
+    mirrorMissingBrowserDocsToServer(collectionName, serverDocs, browserDocs)
     const merged = mergeServerAndBrowserDocs(serverDocs, browserDocs)
     if (serverDocs && serverDocs.length > 0) {
       setLocalCollection(collectionName, merged, false)
     }
-    return merged as T[]
+    return applyLocalQueryConstraints(merged as T[], constraints)
   }
 
   try {
     const colRef = collection(db, collectionName)
     const q = query(colRef, ...constraints)
     const snap = await getDocs(q)
-    const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() } as T))
+    const docs = snap.docs.map((d) => withCanonicalDocId<T>(d.id, d.data()))
     if (constraints.length === 0) {
       setLocalCollection(collectionName, docs, false)
       if (docs.length > 0) {
         void postToServerLocalStore({
           action: 'syncCollection',
           collection: collectionName,
+          cloudSynced: true,
           docs: docs.map((d) => sanitizeForJsonMirror(d)),
         })
       }
@@ -369,7 +452,9 @@ export async function getDocuments<T>(
     console.warn(`[Cloud Firestore] Fallback fetching collection '${collectionName}':`, err?.message || err)
     const browserDocs = getLocalCollection<T & { id?: string }>(collectionName)
     const serverDocs = await fetchServerLocalCollection<T & { id?: string }>(collectionName)
-    return mergeServerAndBrowserDocs(serverDocs, browserDocs) as T[]
+    mirrorMissingBrowserDocsToServer(collectionName, serverDocs, browserDocs)
+    const merged = mergeServerAndBrowserDocs(serverDocs, browserDocs)
+    return applyLocalQueryConstraints(merged as T[], constraints)
   }
 }
 
@@ -683,7 +768,7 @@ export function subscribeToDocument<T>(
         (snap: DocumentSnapshot) => {
           if (disposed) return
           if (snap.exists()) {
-            callback({ id: snap.id, ...snap.data() } as T)
+            callback(withCanonicalDocId<T>(snap.id, snap.data()))
           } else {
             emitLocal()
           }
@@ -703,12 +788,13 @@ export function subscribeToDocument<T>(
     emitLocal()
     void fetchServerLocalDoc<T & { id: string }>(collectionName, docId).then((serverDoc) => {
       if (disposed || !serverDoc) return
+      const canonical = withCanonicalDocId<T & { id: string }>(docId, serverDoc as any)
       const local = getLocalCollection<any>(collectionName)
       const idx = local.findIndex((i) => i.id === docId)
-      if (idx >= 0) local[idx] = serverDoc
-      else local.push(serverDoc)
+      if (idx >= 0) local[idx] = canonical
+      else local.push(canonical)
       setLocalCollection(collectionName, local, false)
-      callback(serverDoc)
+      callback(canonical)
     })
   }
 
@@ -753,7 +839,8 @@ export function subscribeToCollection<T>(
 
   const emitLocal = () => {
     if (disposed) return
-    callback(getLocalCollection<T>(collectionName))
+    const allLocal = getLocalCollection<T>(collectionName)
+    callback(applyLocalQueryConstraints(allLocal, constraints))
   }
 
   const localUnsub = subscribeLocal(collectionName, emitLocal)
@@ -767,9 +854,17 @@ export function subscribeToCollection<T>(
         q,
         (snap: QuerySnapshot) => {
           if (disposed) return
-          const data = snap.docs.map((d) => ({ id: d.id, ...d.data() } as T))
+          const data = snap.docs.map((d) => withCanonicalDocId<T>(d.id, d.data()))
           if (constraints.length === 0) {
             setLocalCollection(collectionName, data, false)
+            if (data.length > 0) {
+              void postToServerLocalStore({
+                action: 'syncCollection',
+                collection: collectionName,
+                cloudSynced: true,
+                docs: data.map((d) => sanitizeForJsonMirror(d)),
+              })
+            }
           }
           callback(data)
         },
@@ -789,13 +884,13 @@ export function subscribeToCollection<T>(
   } else {
     emitLocal()
     void fetchServerLocalCollection<T & { id?: string }>(collectionName).then((serverDocs) => {
-      if (disposed || !serverDocs) return
-      const merged = mergeServerAndBrowserDocs(
-        serverDocs,
-        getLocalCollection<T & { id?: string }>(collectionName)
-      )
+      if (disposed) return
+      const browserDocs = getLocalCollection<T & { id?: string }>(collectionName)
+      mirrorMissingBrowserDocsToServer(collectionName, serverDocs, browserDocs)
+      if (!serverDocs) return
+      const merged = mergeServerAndBrowserDocs(serverDocs, browserDocs)
       setLocalCollection(collectionName, merged, false)
-      callback(merged as T[])
+      callback(applyLocalQueryConstraints(merged as T[], constraints))
     })
   }
 
@@ -871,6 +966,50 @@ export async function incrementField(
     })
   } catch (err) {
     console.warn('Firestore incrementField warning:', err)
+  }
+}
+
+// ─── Sync Server Payment Mutation to Local Browser Cache ─────
+export function syncRecordedPaymentToLocalCache(payload: {
+  payment?: Record<string, any> | null
+  deletedPaymentId?: string | null
+  updatedClient?: Record<string, any> | null
+  updatedInvoice?: Record<string, any> | null
+  updatedProject?: Record<string, any> | null
+}): void {
+  if (typeof window === 'undefined' || !payload) return
+
+  const upsertInLocal = (colName: string, item: Record<string, any> | null | undefined, prepend = false) => {
+    if (!item || typeof item.id !== 'string' || !item.id.trim()) return
+    const list = getLocalCollection<any>(colName)
+    const idx = list.findIndex((entry) => entry?.id === item.id)
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...item, id: item.id }
+    } else if (prepend) {
+      list.unshift({ ...item, id: item.id })
+    } else {
+      list.push({ ...item, id: item.id })
+    }
+    setLocalCollection(colName, list, true)
+  }
+
+  if (payload.deletedPaymentId) {
+    const list = getLocalCollection<any>(COLLECTIONS.PAYMENTS)
+    const next = list.filter((p) => p?.id !== payload.deletedPaymentId)
+    setLocalCollection(COLLECTIONS.PAYMENTS, next, true)
+  }
+
+  if (payload.payment) {
+    upsertInLocal(COLLECTIONS.PAYMENTS, payload.payment, true)
+  }
+  if (payload.updatedClient) {
+    upsertInLocal(COLLECTIONS.CLIENTS, payload.updatedClient)
+  }
+  if (payload.updatedInvoice) {
+    upsertInLocal(COLLECTIONS.INVOICES, payload.updatedInvoice)
+  }
+  if (payload.updatedProject) {
+    upsertInLocal(COLLECTIONS.PROJECTS, payload.updatedProject)
   }
 }
 

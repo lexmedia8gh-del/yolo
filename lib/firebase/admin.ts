@@ -32,26 +32,49 @@ export function getFirebaseProjectId(): string {
   const validAppletProject =
     appletProject && appletProject !== 'remixed-project-id' ? appletProject : undefined;
 
+  const adminProject = cleanAdminEnv(process.env.FIREBASE_ADMIN_PROJECT_ID);
+  if (adminProject && (hasAdminCredentials() || Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS))) {
+    return adminProject;
+  }
+
+  const envApiKey = cleanAdminEnv(
+    process.env.NEXT_PUBLIC_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY
+  );
+  const envProjectId = cleanAdminEnv(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID);
+  const useClientEnvOverride = Boolean(
+    envApiKey &&
+      envProjectId &&
+      envApiKey.length >= 10 &&
+      !envApiKey.includes('placeholder') &&
+      envApiKey !== 'demo-api-key'
+  );
+
+  if (useClientEnvOverride && envProjectId) {
+    return envProjectId;
+  }
+
   return (
-    cleanAdminEnv(process.env.FIREBASE_ADMIN_PROJECT_ID) ||
-    cleanAdminEnv(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) ||
     validAppletProject ||
+    adminProject ||
+    envProjectId ||
     'lexmedia-client-system'
   );
 }
 
 export function getFirebaseDatabaseId(): string | undefined {
+  const appletProject = cleanAdminEnv(firebaseAppletConfig?.projectId);
+  const appletDb = cleanAdminEnv(firebaseAppletConfig?.firestoreDatabaseId);
+  const activeProject = getFirebaseProjectId();
+
   const explicitDb =
     cleanAdminEnv(process.env.FIREBASE_DATABASE_ID) ||
     cleanAdminEnv(process.env.NEXT_PUBLIC_FIREBASE_DATABASE_ID);
-  if (explicitDb) return explicitDb;
 
-  const appletProject = cleanAdminEnv(firebaseAppletConfig?.projectId);
-  const appletDb = cleanAdminEnv(firebaseAppletConfig?.firestoreDatabaseId);
-  if (appletProject && getFirebaseProjectId() === appletProject && appletDb) {
-    return appletDb;
+  if (appletProject && activeProject === appletProject && appletDb) {
+    return explicitDb || appletDb;
   }
-  return undefined;
+
+  return explicitDb;
 }
 
 export function getAuthorizedAdminEmails(): string[] {

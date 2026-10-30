@@ -19,6 +19,8 @@ import {
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
+import { getAdminAuthHeaders } from '@/lib/firebase/auth'
+import { syncRecordedPaymentToLocalCache } from '@/lib/firebase/firestore'
 import type { Payment } from '@/lib/types'
 import { formatCurrency, formatDate, copyToClipboard } from '@/lib/utils'
 import toast from 'react-hot-toast'
@@ -77,13 +79,25 @@ export function PaymentDetailsModal({
   }
 
   const handleDelete = async () => {
+    if (deleting) return
     setDeleting(true)
     try {
+      const authHeaders = await getAdminAuthHeaders(true)
       const res = await fetch(`/api/payments/record?paymentId=${encodeURIComponent(payment.id)}&revertBalances=true`, {
         method: 'DELETE',
+        headers: {
+          ...authHeaders,
+        },
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || 'Failed to remove payment')
+
+      syncRecordedPaymentToLocalCache({
+        deletedPaymentId: payment.id,
+        updatedClient: data.updatedClient,
+        updatedInvoice: data.updatedInvoice,
+        updatedProject: data.updatedProject,
+      })
 
       toast.success('Payment record removed and balances updated.')
       setShowConfirmDelete(false)

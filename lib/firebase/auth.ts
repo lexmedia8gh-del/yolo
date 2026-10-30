@@ -250,12 +250,31 @@ export function hasActiveFirebaseUser(): boolean {
 export async function getActiveIdToken(forceRefresh = false): Promise<string | null> {
   const authInstance = getAuthInstance()
   if (isFirebaseAuthConfigured && authInstance?.currentUser) {
-    return authInstance.currentUser.getIdToken(forceRefresh)
+    const token = await authInstance.currentUser.getIdToken(forceRefresh)
+    if (token) {
+      setSessionCookie(token, 604800)
+    }
+    return token
   }
   if (hasLocalAdminSessionCookie() || hasSessionCookie()) {
     return 'active-admin-session'
   }
   return null
+}
+
+export async function getAdminAuthHeaders(forceRefresh = false): Promise<Record<string, string>> {
+  try {
+    const token = await getActiveIdToken(forceRefresh)
+    if (token) {
+      return { Authorization: `Bearer ${token}` }
+    }
+  } catch (err) {
+    console.warn('[Auth] Token refresh warning, checking fallback session:', err)
+    if (hasLocalAdminSessionCookie() || hasSessionCookie()) {
+      return { Authorization: 'Bearer active-admin-session' }
+    }
+  }
+  return {}
 }
 
 export async function signInWithPin(pin: string): Promise<{ user: User }> {

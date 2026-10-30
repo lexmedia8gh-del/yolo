@@ -1,12 +1,19 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input, Textarea } from '@/components/ui/Input'
 import { formatCurrency } from '@/lib/utils'
-import { updateDocument, addDocument, COLLECTIONS } from '@/lib/firebase/firestore'
-import type { Invoice, InvoiceStatus } from '@/lib/types'
+import {
+  updateDocument,
+  addDocument,
+  getDocuments,
+  syncRecordedPaymentToLocalCache,
+  COLLECTIONS,
+} from '@/lib/firebase/firestore'
+import { getAdminAuthHeaders } from '@/lib/firebase/auth'
+import type { Client, Invoice, InvoiceStatus } from '@/lib/types'
 import { DollarSign, CreditCard, CheckCircle2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -27,6 +34,16 @@ const PAYMENT_METHODS = [
   'Other',
 ]
 
+function buildInvoicePaymentRef(): string {
+  const randomSuffix = Math.random().toString(36).substring(2, 7).toUpperCase()
+  const datePart = new Date().toISOString().slice(2, 10).replace(/-/g, '')
+  return `PAY-${datePart}-${randomSuffix}`
+}
+
+function buildIdempotencyKey(): string {
+  return `idem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+}
+
 export function RecordPaymentModal({
   isOpen,
   onClose,
@@ -37,17 +54,33 @@ export function RecordPaymentModal({
   const [paymentMethod, setPaymentMethod] = useState<string>(PAYMENT_METHODS[0])
   const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0])
   const [reference, setReference] = useState<string>('')
+  const [idempotencyKey, setIdempotencyKey] = useState<string>(() => buildIdempotencyKey())
   const [notes, setNotes] = useState<string>('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const submittingRef = useRef(false)
 
   useEffect(() => {
-    if (invoice) {
-      const remainingBalance = Number(invoice.balanceDue) !== undefined ? Number(invoice.balanceDue) : Number(invoice.total) || 0
-      setPaymentAmount(remainingBalance > 0 ? remainingBalance : 0)
-      setReference(`PAY-${Date.now().toString(36).toUpperCase()}`)
-      setPaymentDate(new Date().toISOString().split('T')[0])
+    if (!isOpen) {
+      submittingRef.current = false
+      return
     }
-  }, [invoice])
+    if (invoice) {
+      const remainingBalance =
+        invoice.balanceDue !== undefined && invoice.balanceDue !== null
+          ? Number(invoice.balanceDue)
+          : Math.max(0, (Number(invoice.total) || 0) - (Number(invoice.amountPaid) || 0))
+      setPaymentAmount(remainingBalance > 0 ? remainingBalance : 0)
+      setReference(buildInvoicePaymentRef())
+      setIdempotencyKey(buildIdempotencyKey())
+      setPaymentDate(new Date().toISOString().split('T')[0])
+      setNotes('')
+    }
+  }, [invoice, isOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
+    setIdempotencyKey(buildIdempotencyKey())
+  }, [isOpen, paymentAmount, invoice?.id])
 
   if (!invoice) return null
 
@@ -55,54 +88,139 @@ export function RecordPaymentModal({
   const symbol = invoice.currencySymbol || (currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : 'GH₵')
   const total = Number(invoice.total) || 0
   const currentPaid = Number(invoice.amountPaid) || 0
-  const currentBalance = Number(invoice.balanceDue) !== undefined ? Number(invoice.balanceDue) : total - currentPaid
+  const currentBalance =
+    invoice.balanceDue !== undefined && invoice.balanceDue !== null
+      ? Number(invoice.balanceDue)
+      : Math.max(0, total - currentPaid)
 
   const newTotalPaid = currentPaid + Number(paymentAmount || 0)
   const newBalance = Math.max(0, total - newTotalPaid)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (submittingRef.current || isSubmitting) return
+
     if (!paymentAmount || paymentAmount <= 0) {
       toast.error('Payment amount must be greater than 0.')
       return
     }
 
+    submittingRef.current = true
     setIsSubmitting(true)
     const toastId = toast.loading('Recording payment...')
 
     try {
       const nextStatus: InvoiceStatus = newBalance <= 0 ? 'Paid' : 'Partially Paid'
+      const cleanRef = reference.trim() || buildInvoicePaymentRef()
 
-      // 1. Update the invoice
-      await updateDocument(COLLECTIONS.INVOICES, invoice.id, {
-        amountPaid: newTotalPaid,
-        balanceDue: newBalance,
-        status: nextStatus,
-        paymentMethod,
-        paymentReference: reference,
-        paymentDate,
-        paymentNotes: notes,
-        paidAt: nextStatus === 'Paid' ? new Date().toISOString() : invoice.paidAt,
-        updatedAt: new Date().toISOString(),
-      })
+      // Determine whether this invoice is associated with an existing client
+      const explicitClientId = (invoice.clientId || (invoice as any).clientInfo?.id || '').trim()
+      let resolvedClientId = explicitClientId
 
-      // 2. Add an entry to the payments collection for audit trail
-      try {
+      if (!resolvedClientId) {
+        try {
+          const allClients = await getDocuments<Client>(COLLECTIONS.CLIENTS)
+          const invEmail = (invoice.clientEmail || (invoice as any).clientInfo?.email || '')
+            .trim()
+            .toLowerCase()
+          const invName = (invoice.clientName || (invoice as any).clientInfo?.name || '')
+            .trim()
+            .toLowerCase()
+
+          if (invEmail) {
+            const emailMatches = allClients.filter(
+              (c) => c.email && c.email.trim().toLowerCase() === invEmail
+            )
+            if (emailMatches.length === 1) {
+              resolvedClientId = emailMatches[0].id
+            }
+          }
+          if (!resolvedClientId && invName) {
+            const nameMatches = allClients.filter(
+              (c) => c.fullName && c.fullName.trim().toLowerCase() === invName
+            )
+            if (nameMatches.length === 1) {
+              resolvedClientId = nameMatches[0].id
+            }
+          }
+        } catch {
+          // Ignore client list lookup error; server will validate if explicitClientId exists
+        }
+      }
+
+      if (resolvedClientId) {
+        // Client-linked invoice: use canonical server payment endpoint so client, project,
+        // invoice, payment history, and payment links all update atomically.
+        const authHeaders = await getAdminAuthHeaders(true)
+        const res = await fetch('/api/payments/record', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders,
+          },
+          body: JSON.stringify({
+            clientId: resolvedClientId,
+            clientName: invoice.clientName,
+            invoiceId: invoice.id,
+            invoiceNumber: invoice.invoiceNumber,
+            projectId: (invoice as any).projectId || undefined,
+            amount: Number(paymentAmount),
+            currency,
+            paymentType: 'payment',
+            isDeposit: false,
+            channel: paymentMethod,
+            reference: cleanRef,
+            idempotencyKey,
+            paidAt: paymentDate,
+            status: 'success',
+            notes: notes.trim(),
+          }),
+        })
+
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to record payment')
+        }
+
+        syncRecordedPaymentToLocalCache(data)
+      } else {
+        // Standalone custom/walk-in invoice without a client account
+        const paidAtIso = paymentDate
+          ? new Date(paymentDate).toISOString()
+          : new Date().toISOString()
+
+        await updateDocument(COLLECTIONS.INVOICES, invoice.id, {
+          amountPaid: newTotalPaid,
+          balanceDue: newBalance,
+          status: nextStatus,
+          paymentMethod,
+          paymentReference: cleanRef,
+          paymentDate,
+          paymentNotes: notes.trim(),
+          paidAt: nextStatus === 'Paid' ? new Date().toISOString() : invoice.paidAt,
+          updatedAt: new Date().toISOString(),
+        })
+
         await addDocument(COLLECTIONS.PAYMENTS, {
           invoiceId: invoice.id,
           invoiceNumber: invoice.invoiceNumber,
-          clientId: invoice.clientId,
-          clientName: invoice.clientName,
+          clientId: '',
+          clientName: invoice.clientName || 'Walk-in Client',
+          projectId: (invoice as any).projectId || '',
+          projectName: '',
+          paystackReference: cleanRef,
+          reference: cleanRef,
           amount: Number(paymentAmount),
           currency,
+          paymentType: 'payment',
+          isDeposit: false,
           paymentMethod,
-          reference,
-          notes,
-          paymentDate,
-          createdAt: new Date().toISOString(),
+          channel: paymentMethod,
+          paidAt: paidAtIso,
+          status: 'success',
+          source: 'manual',
+          notes: notes.trim(),
         })
-      } catch (err) {
-        console.warn('Could not write to payments collection:', err)
       }
 
       toast.success(
@@ -118,6 +236,7 @@ export function RecordPaymentModal({
       console.error('Failed to record payment:', err)
       toast.error(err.message || 'Failed to record payment', { id: toastId })
     } finally {
+      submittingRef.current = false
       setIsSubmitting(false)
     }
   }

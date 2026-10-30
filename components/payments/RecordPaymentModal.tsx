@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   CreditCard,
   DollarSign,
@@ -23,7 +23,9 @@ import {
   COLLECTIONS,
   getDocuments,
   getDocument,
+  syncRecordedPaymentToLocalCache,
 } from '@/lib/firebase/firestore'
+import { getAdminAuthHeaders } from '@/lib/firebase/auth'
 import type { Client, Project, Invoice } from '@/lib/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
@@ -53,6 +55,43 @@ const PAYMENT_METHODS = [
   'Other',
 ]
 
+function buildReferenceCode(type: 'deposit' | 'payment'): string {
+  const prefix = type === 'deposit' ? 'DEP' : 'PAY'
+  const randomSuffix = Math.random().toString(36).substring(2, 7).toUpperCase()
+  const datePart = new Date().toISOString().slice(2, 10).replace(/-/g, '')
+  return `${prefix}-${datePart}-${randomSuffix}`
+}
+
+function buildIdempotencyKey(): string {
+  return `idem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function findMatchingClient(list: Client[], rawIdentifier?: string | null): Client | undefined {
+  const clean = (rawIdentifier || '').trim()
+  if (!clean) return undefined
+
+  const direct = list.find((c) => c.id === clean)
+  if (direct) return direct
+
+  const byLegacyField = list.find(
+    (c) =>
+      ((c as any).legacyId && String((c as any).legacyId).trim() === clean) ||
+      ((c as any).clientId && String((c as any).clientId).trim() === clean)
+  )
+  if (byLegacyField) return byLegacyField
+
+  const lower = clean.toLowerCase()
+  if (clean.includes('@')) {
+    const emailMatches = list.filter((c) => c.email && c.email.trim().toLowerCase() === lower)
+    if (emailMatches.length === 1) return emailMatches[0]
+  }
+
+  const nameMatches = list.filter((c) => c.fullName && c.fullName.trim().toLowerCase() === lower)
+  if (nameMatches.length === 1) return nameMatches[0]
+
+  return undefined
+}
+
 export function RecordPaymentModal({
   isOpen,
   onClose,
@@ -65,15 +104,17 @@ export function RecordPaymentModal({
   preselectedInvoiceId,
   defaultType = 'payment',
 }: RecordPaymentModalProps) {
-  const effectiveClientId = initialClientId || preselectedClientId || ''
-  const effectiveProjectId = initialProjectId || preselectedProjectId || ''
-  const effectiveInvoiceId = initialInvoiceId || preselectedInvoiceId || ''
+  const effectiveClientId = (initialClientId || preselectedClientId || '').trim()
+  const effectiveProjectId = (initialProjectId || preselectedProjectId || '').trim()
+  const effectiveInvoiceId = (initialInvoiceId || preselectedInvoiceId || '').trim()
 
   const [clients, setClients] = useState<Client[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loadingInitial, setLoadingInitial] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const submittingRef = useRef(false)
+  const wasOpenRef = useRef(false)
 
   // Selected entities
   const [selectedClientId, setSelectedClientId] = useState(effectiveClientId)
@@ -86,11 +127,58 @@ export function RecordPaymentModal({
   const [currency, setCurrency] = useState<string>('GHS')
   const [channel, setChannel] = useState<string>('Mobile Money (MTN MoMo)')
   const [reference, setReference] = useState<string>('')
+  const [idempotencyKey, setIdempotencyKey] = useState<string>(() => buildIdempotencyKey())
   const [paidAt, setPaidAt] = useState<string>(() => new Date().toISOString().split('T')[0])
   const [status, setStatus] = useState<'success' | 'pending'>('success')
   const [notes, setNotes] = useState<string>('')
 
-  // Load clients
+  // Sync initial / preselected props cleanly whenever modal opens or props change
+  useEffect(() => {
+    if (!isOpen) {
+      wasOpenRef.current = false
+      submittingRef.current = false
+      return
+    }
+
+    const justOpened = !wasOpenRef.current
+    wasOpenRef.current = true
+
+    setSelectedClientId(effectiveClientId)
+    setSelectedProjectId(effectiveProjectId)
+    setSelectedInvoiceId(effectiveInvoiceId)
+    setPaymentType(defaultType)
+
+    if (justOpened) {
+      setAmount('')
+      setNotes('')
+      setStatus('success')
+      setPaidAt(new Date().toISOString().split('T')[0])
+      setReference(buildReferenceCode(defaultType))
+      setIdempotencyKey(buildIdempotencyKey())
+    }
+  }, [isOpen, effectiveClientId, effectiveProjectId, effectiveInvoiceId, defaultType])
+
+  // Refresh idempotency key when core transaction parameters change
+  useEffect(() => {
+    if (!isOpen) return
+    setIdempotencyKey(buildIdempotencyKey())
+  }, [isOpen, selectedClientId, selectedProjectId, selectedInvoiceId, amount, paymentType])
+
+  // Update generated reference prefix when switching between deposit and payment
+  useEffect(() => {
+    if (!isOpen) return
+    const prefix = paymentType === 'deposit' ? 'DEP' : 'PAY'
+    setReference((prev) => {
+      if (!prev) return buildReferenceCode(paymentType)
+      if (prev.startsWith('DEP-') || prev.startsWith('PAY-')) {
+        const rest = prev.slice(4)
+        return rest ? `${prefix}-${rest}` : buildReferenceCode(paymentType)
+      }
+      return prev
+    })
+  }, [paymentType, isOpen])
+
+  // Load clients, projects, and invoices & normalize preselected IDs to canonical Firestore doc IDs
   useEffect(() => {
     if (!isOpen) return
     let active = true
@@ -103,10 +191,90 @@ export function RecordPaymentModal({
           getDocuments<Project>(COLLECTIONS.PROJECTS),
           getDocuments<Invoice>(COLLECTIONS.INVOICES),
         ])
-        if (active) {
-          setClients(cls)
-          setProjects(prjs)
-          setInvoices(invs)
+
+        if (!active) return
+
+        let nextClients = [...cls]
+        let nextProjects = [...prjs]
+        let nextInvoices = [...invs]
+
+        // Ensure explicitly preselected project/invoice are loaded even if absent from list cache
+        let preProj = effectiveProjectId
+          ? nextProjects.find((p) => p.id === effectiveProjectId)
+          : undefined
+        if (effectiveProjectId && !preProj) {
+          const fetchedProj = await getDocument<Project>(COLLECTIONS.PROJECTS, effectiveProjectId)
+          if (fetchedProj) {
+            preProj = fetchedProj
+            nextProjects = [fetchedProj, ...nextProjects]
+          }
+        }
+
+        let preInv = effectiveInvoiceId
+          ? nextInvoices.find((i) => i.id === effectiveInvoiceId)
+          : undefined
+        if (effectiveInvoiceId && !preInv) {
+          const fetchedInv = await getDocument<Invoice>(COLLECTIONS.INVOICES, effectiveInvoiceId)
+          if (fetchedInv) {
+            preInv = fetchedInv
+            nextInvoices = [fetchedInv, ...nextInvoices]
+          }
+        }
+
+        // Resolve canonical client ID from preselected client, project, or invoice
+        const candidateClientId =
+          effectiveClientId ||
+          preProj?.clientId ||
+          preInv?.clientId ||
+          (preInv as any)?.clientInfo?.id ||
+          ''
+
+        let resolvedClient = findMatchingClient(nextClients, candidateClientId)
+        if (!resolvedClient && candidateClientId) {
+          const directClient = await getDocument<Client>(COLLECTIONS.CLIENTS, candidateClientId)
+          if (directClient) {
+            resolvedClient = directClient
+            if (!nextClients.some((c) => c.id === directClient.id)) {
+              nextClients = [directClient, ...nextClients]
+            }
+          }
+        }
+
+        if (!active) return
+
+        setClients(nextClients)
+        setProjects(nextProjects)
+        setInvoices(nextInvoices)
+
+        if (resolvedClient) {
+          setSelectedClientId(resolvedClient.id)
+        }
+
+        // Cross-link preselected project <-> invoice if one implies the other
+        if (preProj && !effectiveInvoiceId && preProj.invoiceId) {
+          const linkedInv = nextInvoices.find((i) => i.id === preProj!.invoiceId)
+          if (linkedInv) {
+            setSelectedInvoiceId(linkedInv.id)
+            if (linkedInv.currency) setCurrency(linkedInv.currency)
+            if (Number(linkedInv.balanceDue || 0) > 0) {
+              const balStr = String(linkedInv.balanceDue)
+              setAmount((prev) => prev || balStr)
+            }
+          }
+        } else if (preInv) {
+          if (preInv.currency) setCurrency(preInv.currency)
+          if (Number(preInv.balanceDue || 0) > 0) {
+            const balStr = String(preInv.balanceDue)
+            setAmount((prev) => prev || balStr)
+          }
+          if (!effectiveProjectId) {
+            const linkedProjId =
+              (preInv as any).projectId ||
+              nextProjects.find((p) => p.invoiceId === preInv!.id)?.id
+            if (linkedProjId) {
+              setSelectedProjectId(linkedProjId)
+            }
+          }
         }
       } catch (err) {
         console.error('Failed to load clients/projects for payment recording:', err)
@@ -119,56 +287,84 @@ export function RecordPaymentModal({
     return () => {
       active = false
     }
-  }, [isOpen])
+  }, [isOpen, effectiveClientId, effectiveProjectId, effectiveInvoiceId])
 
-  // Sync initial props
-  useEffect(() => {
-    if (initialClientId) setSelectedClientId(initialClientId)
-    if (initialProjectId) setSelectedProjectId(initialProjectId)
-    if (initialInvoiceId) setSelectedInvoiceId(initialInvoiceId)
-    if (defaultType) setPaymentType(defaultType)
-  }, [initialClientId, initialProjectId, initialInvoiceId, defaultType, isOpen])
+  // Get selected client object (supporting canonical ID or legacy ID match)
+  const currentClient = findMatchingClient(clients, selectedClientId)
 
-  // Auto-generate a clean reference code when opening or switching type
-  useEffect(() => {
-    if (isOpen) {
-      const prefix = paymentType === 'deposit' ? 'DEP' : 'PAY'
-      const randomSuffix = Math.random().toString(36).substring(2, 7).toUpperCase()
-      const datePart = new Date().toISOString().slice(2, 10).replace(/-/g, '')
-      setReference((prev) => {
-        if (!prev || prev.startsWith('DEP-') || prev.startsWith('PAY-')) {
-          return `${prefix}-${datePart}-${randomSuffix}`
-        }
-        return prev
-      })
+  const matchesSelectedClient = (
+    entityClientId?: string,
+    entityEmail?: string,
+    entityName?: string
+  ): boolean => {
+    if (!selectedClientId) return true
+    const clean = (entityClientId || '').trim()
+    if (clean && clean === selectedClientId) return true
+    if (currentClient) {
+      if (clean && clean === currentClient.id) return true
+      const legacyId = String((currentClient as any).legacyId || '').trim()
+      const altClientId = String((currentClient as any).clientId || '').trim()
+      if (legacyId && clean === legacyId) return true
+      if (altClientId && clean === altClientId) return true
+      if (
+        clean &&
+        currentClient.fullName &&
+        clean.toLowerCase() === currentClient.fullName.trim().toLowerCase()
+      ) {
+        return true
+      }
+      if (
+        !clean &&
+        entityEmail &&
+        currentClient.email &&
+        entityEmail.trim().toLowerCase() === currentClient.email.trim().toLowerCase()
+      ) {
+        return true
+      }
+      if (
+        !clean &&
+        entityName &&
+        currentClient.fullName &&
+        entityName.trim().toLowerCase() === currentClient.fullName.trim().toLowerCase()
+      ) {
+        return true
+      }
     }
-  }, [paymentType, isOpen])
-
-  // Get selected client object
-  const currentClient = clients.find((c) => c.id === selectedClientId)
+    return false
+  }
 
   // Filter projects and invoices for selected client
   const clientProjects = selectedClientId
-    ? projects.filter((p) => p.clientId === selectedClientId)
+    ? projects.filter((p) => matchesSelectedClient(p.clientId, undefined, p.clientName))
     : projects
 
   const clientInvoices = selectedClientId
-    ? invoices.filter((i) => i.clientId === selectedClientId)
+    ? invoices.filter((i) =>
+        matchesSelectedClient(
+          i.clientId || (i as any).clientInfo?.id,
+          i.clientEmail || (i as any).clientInfo?.email,
+          i.clientName || (i as any).clientInfo?.name
+        )
+      )
     : invoices
 
   const currentProject = projects.find((p) => p.id === selectedProjectId)
   const currentInvoice = invoices.find((i) => i.id === selectedInvoiceId)
 
   // Outstanding balance calculation
-  const outstandingBalance = currentInvoice?.balanceDue ?? currentProject?.outstandingBalance ?? currentClient?.outstandingBalance ?? 0
+  const outstandingBalance =
+    currentInvoice?.balanceDue ??
+    currentProject?.outstandingBalance ??
+    currentClient?.outstandingBalance ??
+    0
 
   // Quick amount buttons helper
   const handleQuickAmount = (fraction: number) => {
     if (outstandingBalance > 0) {
-      const calc = Math.round(outstandingBalance * fraction)
+      const calc = Math.round(outstandingBalance * fraction * 100) / 100
       setAmount(calc.toString())
     } else if (currentProject?.price) {
-      const calc = Math.round(currentProject.price * fraction)
+      const calc = Math.round(currentProject.price * fraction * 100) / 100
       setAmount(calc.toString())
     }
   }
@@ -176,7 +372,10 @@ export function RecordPaymentModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!selectedClientId) {
+    if (submittingRef.current || submitting) return
+
+    const canonicalClientId = (currentClient?.id || selectedClientId || '').trim()
+    if (!canonicalClientId) {
       toast.error('Please select a client')
       return
     }
@@ -187,14 +386,19 @@ export function RecordPaymentModal({
       return
     }
 
+    submittingRef.current = true
     setSubmitting(true)
     try {
+      const authHeaders = await getAdminAuthHeaders(true)
       const res = await fetch('/api/payments/record', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+        },
         body: JSON.stringify({
-          clientId: selectedClientId,
-          clientName: currentClient?.fullName || 'Client',
+          clientId: canonicalClientId,
+          clientName: currentClient?.fullName || currentProject?.clientName || currentInvoice?.clientName || 'Client',
           projectId: selectedProjectId || undefined,
           projectName: currentProject?.name || undefined,
           invoiceId: selectedInvoiceId || undefined,
@@ -205,14 +409,17 @@ export function RecordPaymentModal({
           isDeposit: paymentType === 'deposit',
           channel,
           reference: reference.trim(),
+          idempotencyKey,
           paidAt,
           status,
           notes: notes.trim(),
         }),
       })
 
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || 'Failed to record payment')
+
+      syncRecordedPaymentToLocalCache(data)
 
       toast.success(
         paymentType === 'deposit'
@@ -226,6 +433,7 @@ export function RecordPaymentModal({
       console.error('Error recording payment:', err)
       toast.error(err.message || 'Failed to record payment.')
     } finally {
+      submittingRef.current = false
       setSubmitting(false)
     }
   }
@@ -273,16 +481,19 @@ export function RecordPaymentModal({
             Client <span className="text-rose-500">*</span>
           </label>
           <select
-            value={selectedClientId}
+            value={currentClient?.id || selectedClientId}
             onChange={(e) => {
               setSelectedClientId(e.target.value)
               setSelectedProjectId('')
               setSelectedInvoiceId('')
             }}
             required
+            disabled={loadingInitial && clients.length === 0}
             className="w-full h-10 px-3 rounded-lg border border-gray-300 bg-white text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-colors"
           >
-            <option value="">-- Select Client --</option>
+            <option value="">
+              {loadingInitial && clients.length === 0 ? 'Loading clients…' : '-- Select Client --'}
+            </option>
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.fullName} {c.company ? `(${c.company})` : ''} — Bal: {formatCurrency(c.outstandingBalance || 0)}
@@ -321,7 +532,28 @@ export function RecordPaymentModal({
             </label>
             <select
               value={selectedProjectId}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
+              onChange={(e) => {
+                const projId = e.target.value
+                setSelectedProjectId(projId)
+                if (!projId) return
+                const foundProj = projects.find((p) => p.id === projId)
+                if (foundProj) {
+                  if (!selectedClientId && foundProj.clientId) {
+                    const matched = findMatchingClient(clients, foundProj.clientId)
+                    setSelectedClientId(matched ? matched.id : foundProj.clientId)
+                  }
+                  if (foundProj.invoiceId) {
+                    const linkedInv = invoices.find((i) => i.id === foundProj.invoiceId)
+                    if (linkedInv) {
+                      setSelectedInvoiceId(linkedInv.id)
+                      if (linkedInv.currency) setCurrency(linkedInv.currency)
+                      if (!amount && Number(linkedInv.balanceDue || 0) > 0) {
+                        setAmount(String(linkedInv.balanceDue))
+                      }
+                    }
+                  }
+                }
+              }}
               className="w-full h-9 px-3 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-colors"
             >
               <option value="">-- No specific project (General) --</option>
@@ -343,8 +575,25 @@ export function RecordPaymentModal({
                 const invId = e.target.value
                 setSelectedInvoiceId(invId)
                 const found = invoices.find((i) => i.id === invId)
-                if (found?.balanceDue) {
-                  setAmount(found.balanceDue.toString())
+                if (found) {
+                  if (!selectedClientId) {
+                    const invClientKey = found.clientId || (found as any).clientInfo?.id
+                    if (invClientKey) {
+                      const matched = findMatchingClient(clients, invClientKey)
+                      setSelectedClientId(matched ? matched.id : invClientKey)
+                    }
+                  }
+                  const linkedProjId =
+                    (found as any).projectId || projects.find((p) => p.invoiceId === invId)?.id
+                  if (linkedProjId) {
+                    setSelectedProjectId(linkedProjId)
+                  }
+                  if (found.currency) {
+                    setCurrency(found.currency)
+                  }
+                  if (found.balanceDue && found.balanceDue > 0) {
+                    setAmount(found.balanceDue.toString())
+                  }
                 }
               }}
               className="w-full h-9 px-3 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-colors"

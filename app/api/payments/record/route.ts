@@ -1,9 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb, requireAdmin } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
-import { FieldValue, Timestamp } from 'firebase-admin/firestore'
+import { normalizeEntityId, resolveCanonicalClient } from '@/lib/firebase/client-resolver'
+import { FieldValue } from 'firebase-admin/firestore'
 
 export const dynamic = 'force-dynamic'
+
+function roundCurrency(val: number): number {
+  if (!Number.isFinite(val)) return 0
+  return Math.round(val * 100) / 100
+}
+
+function doesEntityMatchClient(
+  entityClientIdRaw: unknown,
+  canonicalClientId: string,
+  clientData: Record<string, any>,
+  rawSubmittedClientId: string
+): boolean {
+  const entityClientId = normalizeEntityId(entityClientIdRaw, COLLECTIONS.CLIENTS)
+  if (!entityClientId) return true
+  if (entityClientId === canonicalClientId) return true
+  if (typeof clientData.id === 'string' && entityClientId === clientData.id.trim()) return true
+  if (typeof clientData.clientId === 'string' && entityClientId === clientData.clientId.trim()) return true
+  if (typeof clientData.legacyId === 'string' && entityClientId === clientData.legacyId.trim()) return true
+  if (rawSubmittedClientId && entityClientId === rawSubmittedClientId) return true
+  const rawStr = typeof entityClientIdRaw === 'string' ? entityClientIdRaw.trim() : ''
+  if (rawStr && clientData.fullName && rawStr.toLowerCase() === String(clientData.fullName).trim().toLowerCase()) {
+    return true
+  }
+  if (rawStr && clientData.email && rawStr.toLowerCase() === String(clientData.email).trim().toLowerCase()) {
+    return true
+  }
+  return false
+}
 
 /**
  * POST /api/payments/record
@@ -30,81 +59,239 @@ export async function POST(req: NextRequest) {
       isDeposit = false,
       channel = 'Mobile Money', // 'Mobile Money' | 'Bank Transfer' | 'Cash' | 'Card' | 'Cheque' | 'POS' | 'Other'
       reference,
+      idempotencyKey,
       paidAt,
       status = 'success',
       notes = '',
     } = body
 
-    if (!clientId) {
+    const rawClientStr = typeof clientId === 'string' ? clientId.trim() : ''
+    const normalizedProjectId = normalizeEntityId(projectId, COLLECTIONS.PROJECTS)
+    const normalizedInvoiceId = normalizeEntityId(invoiceId, COLLECTIONS.INVOICES)
+
+    if (!rawClientStr && !normalizedProjectId && !normalizedInvoiceId) {
       return NextResponse.json({ error: 'Client is required to record a payment' }, { status: 400 })
     }
 
-    const parsedAmount = Number(amount)
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      return NextResponse.json({ error: 'Valid payment amount is required' }, { status: 400 })
+    const parsedAmount = roundCurrency(Number(amount))
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      return NextResponse.json({ error: 'Valid payment amount greater than zero is required' }, { status: 400 })
     }
 
     const adminDb = getAdminDb()
-    const batch = adminDb.batch()
 
     // Determine actual deposit flag
     const effectiveIsDeposit = Boolean(isDeposit || paymentType === 'deposit')
 
     // Generate unique reference if not provided
     const prefix = effectiveIsDeposit ? 'DEP' : 'PAY'
-    const cleanRef = reference?.trim() || `${prefix}-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`
+    const cleanRef =
+      (typeof reference === 'string' && reference.trim()) ||
+      `${prefix}-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`
+    const cleanIdempotencyKey =
+      typeof idempotencyKey === 'string' && idempotencyKey.trim() ? idempotencyKey.trim() : ''
 
-    const paymentDate = paidAt ? new Date(paidAt).toISOString() : new Date().toISOString()
+    // 0. Prevent duplicate payment submissions (by reference or idempotencyKey)
+    const paymentsCol = adminDb.collection(COLLECTIONS.PAYMENTS)
+    const [existingByPaystackRef, existingByRef] = await Promise.all([
+      paymentsCol.where('paystackReference', '==', cleanRef).limit(1).get(),
+      paymentsCol.where('reference', '==', cleanRef).limit(1).get(),
+    ])
+
+    const duplicateSnap = !existingByPaystackRef.empty
+      ? existingByPaystackRef.docs[0]
+      : !existingByRef.empty
+      ? existingByRef.docs[0]
+      : null
+
+    if (duplicateSnap) {
+      return NextResponse.json(
+        {
+          error: `A payment with reference "${cleanRef}" has already been recorded.`,
+          duplicate: true,
+          existingPaymentId: duplicateSnap.id,
+        },
+        { status: 409 }
+      )
+    }
+
+    if (cleanIdempotencyKey) {
+      const existingByKey = await paymentsCol
+        .where('idempotencyKey', '==', cleanIdempotencyKey)
+        .limit(1)
+        .get()
+      if (!existingByKey.empty) {
+        return NextResponse.json(
+          {
+            error: 'This payment submission was already processed.',
+            duplicate: true,
+            existingPaymentId: existingByKey.docs[0].id,
+          },
+          { status: 409 }
+        )
+      }
+    }
+
+    const parsedPaidAt = paidAt ? new Date(paidAt) : new Date()
+    const paymentDate = Number.isFinite(parsedPaidAt.getTime())
+      ? parsedPaidAt.toISOString()
+      : new Date().toISOString()
+    const nowIso = new Date().toISOString()
     const recordedBy = auth.email || 'admin'
 
-    // 1. Fetch Client info to verify and update balance
-    const clientRef = adminDb.collection(COLLECTIONS.CLIENTS).doc(clientId)
-    const clientSnap = await clientRef.get()
-    if (!clientSnap.exists) {
-      return NextResponse.json({ error: 'Client not found' }, { status: 404 })
-    }
-    const clientData = clientSnap.data()!
-    const resolvedClientName = clientName || clientData.fullName || clientData.name || 'Client'
-
-    // 2. Fetch Invoice if linked
-    let invoiceData: any = null
+    // 1. Pre-load explicitly selected Invoice and/or Project so their metadata can
+    //    be validated and cross-referenced cleanly.
+    let invoiceData: Record<string, any> | null = null
     let invoiceRef: any = null
-    let resolvedInvoiceNumber = invoiceNumber || ''
-    if (invoiceId) {
-      invoiceRef = adminDb.collection(COLLECTIONS.INVOICES).doc(invoiceId)
+    let resolvedInvoiceId = ''
+    let resolvedInvoiceNumber = typeof invoiceNumber === 'string' ? invoiceNumber.trim() : ''
+
+    if (normalizedInvoiceId) {
+      invoiceRef = adminDb.collection(COLLECTIONS.INVOICES).doc(normalizedInvoiceId)
       const invoiceSnap = await invoiceRef.get()
-      if (invoiceSnap.exists) {
-        invoiceData = invoiceSnap.data()!
-        resolvedInvoiceNumber = invoiceData.invoiceNumber || resolvedInvoiceNumber
+      if (!invoiceSnap.exists) {
+        return NextResponse.json({ error: 'Selected invoice not found' }, { status: 404 })
       }
+      const invDocData: Record<string, any> = invoiceSnap.data() || {}
+      invoiceData = invDocData
+      resolvedInvoiceId = invoiceSnap.id
+      resolvedInvoiceNumber = invDocData.invoiceNumber || resolvedInvoiceNumber
     }
 
-    // 3. Fetch Project if linked
-    let projectData: any = null
+    let projectData: Record<string, any> | null = null
     let projectRef: any = null
-    let resolvedProjectName = projectName || ''
-    if (projectId) {
-      projectRef = adminDb.collection(COLLECTIONS.PROJECTS).doc(projectId)
+    let resolvedProjectId = ''
+    let resolvedProjectName = typeof projectName === 'string' ? projectName.trim() : ''
+
+    if (normalizedProjectId) {
+      projectRef = adminDb.collection(COLLECTIONS.PROJECTS).doc(normalizedProjectId)
       const projectSnap = await projectRef.get()
-      if (projectSnap.exists) {
-        projectData = projectSnap.data()!
-        resolvedProjectName = projectData.name || resolvedProjectName
+      if (!projectSnap.exists) {
+        return NextResponse.json({ error: 'Selected project not found' }, { status: 404 })
+      }
+      const projDocData: Record<string, any> = projectSnap.data() || {}
+      projectData = projDocData
+      resolvedProjectId = projectSnap.id
+      resolvedProjectName = projDocData.name || resolvedProjectName
+    }
+
+    // 2. Resolve canonical Client record (direct doc lookup first, safe fallbacks for legacy IDs)
+    const resolvedClient = await resolveCanonicalClient(adminDb, {
+      clientsCollection: COLLECTIONS.CLIENTS,
+      clientId,
+      projectClientId: projectData?.clientId,
+      invoiceClientId: invoiceData?.clientId || invoiceData?.clientInfo?.id,
+      linkedClientEmail:
+        invoiceData?.clientEmail || invoiceData?.clientInfo?.email || projectData?.clientEmail,
+      linkedClientName:
+        invoiceData?.clientName || invoiceData?.clientInfo?.name || projectData?.clientName,
+    })
+
+    if (!resolvedClient) {
+      return NextResponse.json(
+        {
+          error: rawClientStr
+            ? `Client not found (ID: ${rawClientStr}). Please verify the client exists in your Clients directory.`
+            : 'Client not found. Please select an existing client before recording a payment.',
+        },
+        { status: 404 }
+      )
+    }
+
+    const canonicalClientId = resolvedClient.id
+    const clientRef = resolvedClient.ref
+    const clientData = resolvedClient.data
+    const resolvedClientName =
+      clientData.fullName ||
+      clientData.name ||
+      (typeof clientName === 'string' ? clientName.trim() : '') ||
+      'Client'
+
+    // Validate ownership of explicitly passed project/invoice
+    if (
+      projectData &&
+      !doesEntityMatchClient(projectData.clientId, canonicalClientId, clientData, rawClientStr)
+    ) {
+      return NextResponse.json(
+        { error: 'The selected project belongs to a different client.' },
+        { status: 400 }
+      )
+    }
+
+    if (
+      invoiceData &&
+      !doesEntityMatchClient(
+        invoiceData.clientId || invoiceData?.clientInfo?.id,
+        canonicalClientId,
+        clientData,
+        rawClientStr
+      )
+    ) {
+      return NextResponse.json(
+        { error: 'The selected invoice belongs to a different client.' },
+        { status: 400 }
+      )
+    }
+
+    // 3. Auto-resolve linked Invoice <-> Project cross-associations so neither gets out of sync
+    if (projectData && !invoiceData && projectData.invoiceId) {
+      const autoInvId = normalizeEntityId(projectData.invoiceId, COLLECTIONS.INVOICES)
+      if (autoInvId) {
+        const autoInvRef = adminDb.collection(COLLECTIONS.INVOICES).doc(autoInvId)
+        const autoInvSnap = await autoInvRef.get()
+        if (autoInvSnap.exists) {
+          const autoInvDocData: Record<string, any> = autoInvSnap.data() || {}
+          invoiceRef = autoInvRef
+          invoiceData = autoInvDocData
+          resolvedInvoiceId = autoInvSnap.id
+          resolvedInvoiceNumber = autoInvDocData.invoiceNumber || resolvedInvoiceNumber
+        }
+      }
+    } else if (invoiceData && !projectData) {
+      const autoProjId = normalizeEntityId(invoiceData.projectId, COLLECTIONS.PROJECTS)
+      if (autoProjId) {
+        const autoProjRef = adminDb.collection(COLLECTIONS.PROJECTS).doc(autoProjId)
+        const autoProjSnap = await autoProjRef.get()
+        if (autoProjSnap.exists) {
+          const autoProjDocData: Record<string, any> = autoProjSnap.data() || {}
+          projectRef = autoProjRef
+          projectData = autoProjDocData
+          resolvedProjectId = autoProjSnap.id
+          resolvedProjectName = autoProjDocData.name || resolvedProjectName
+        }
+      } else if (resolvedInvoiceId) {
+        const linkedProjQuery = await adminDb
+          .collection(COLLECTIONS.PROJECTS)
+          .where('invoiceId', '==', resolvedInvoiceId)
+          .limit(1)
+          .get()
+        if (!linkedProjQuery.empty) {
+          const pSnap = linkedProjQuery.docs[0]
+          const pDocData: Record<string, any> = pSnap.data() || {}
+          projectRef = pSnap.ref
+          projectData = pDocData
+          resolvedProjectId = pSnap.id
+          resolvedProjectName = pDocData.name || resolvedProjectName
+        }
       }
     }
 
-    // 4. Create Payment Document
+    const batch = adminDb.batch()
+
+    // 4. Create Payment Document using canonical identifiers
     const paymentRef = adminDb.collection(COLLECTIONS.PAYMENTS).doc()
     const paymentId = paymentRef.id
 
     const paymentPayload: Record<string, any> = {
-      invoiceId: invoiceId || '',
+      invoiceId: resolvedInvoiceId,
       invoiceNumber: resolvedInvoiceNumber,
-      clientId,
+      clientId: canonicalClientId,
       clientName: resolvedClientName,
-      projectId: projectId || '',
+      projectId: resolvedProjectId,
       projectName: resolvedProjectName,
       paystackReference: cleanRef,
       reference: cleanRef,
+      ...(cleanIdempotencyKey ? { idempotencyKey: cleanIdempotencyKey } : {}),
       amount: parsedAmount,
       currency,
       paymentType: effectiveIsDeposit ? 'deposit' : paymentType,
@@ -114,20 +301,25 @@ export async function POST(req: NextRequest) {
       paidAt: paymentDate,
       status, // 'success' | 'pending' | 'failed'
       source: 'manual',
-      notes: notes.trim(),
+      notes: typeof notes === 'string' ? notes.trim() : '',
       recordedBy,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     }
     batch.set(paymentRef, paymentPayload)
 
+    let updatedClientSnapshot: Record<string, any> | null = null
+    let updatedInvoiceSnapshot: Record<string, any> | null = null
+    let updatedProjectSnapshot: Record<string, any> | null = null
+
     // Only update financial balances if payment is 'success' (completed)
     if (status === 'success') {
       // 5. Update Client Balances
-      const currentTotalPaid = Number(clientData.totalPaid || 0)
-      const currentOutstanding = Number(clientData.outstandingBalance || 0)
-      const newClientTotalPaid = currentTotalPaid + parsedAmount
-      const newClientOutstanding = Math.max(0, currentOutstanding - parsedAmount)
+      const currentTotalPaid = roundCurrency(Number(clientData.totalPaid || 0))
+      const currentOutstanding = roundCurrency(Number(clientData.outstandingBalance || 0))
+      const currentPaymentCount = Number(clientData.paymentCount || 0)
+      const newClientTotalPaid = roundCurrency(currentTotalPaid + parsedAmount)
+      const newClientOutstanding = roundCurrency(Math.max(0, currentOutstanding - parsedAmount))
 
       batch.update(clientRef, {
         totalPaid: newClientTotalPaid,
@@ -137,35 +329,90 @@ export async function POST(req: NextRequest) {
         updatedAt: FieldValue.serverTimestamp(),
       })
 
+      updatedClientSnapshot = {
+        ...clientData,
+        id: canonicalClientId,
+        totalPaid: newClientTotalPaid,
+        outstandingBalance: newClientOutstanding,
+        lastPaymentDate: nowIso,
+        paymentCount: currentPaymentCount + 1,
+        updatedAt: nowIso,
+      }
+
       // 6. Update Invoice Balances if linked
       if (invoiceRef && invoiceData) {
-        const invTotal = Number(invoiceData.total || 0)
-        const invCurrentPaid = Number(invoiceData.amountPaid || 0)
-        const newInvPaid = invCurrentPaid + parsedAmount
-        const newInvBalance = Math.max(0, invTotal - newInvPaid)
-        const newInvStatus = newInvBalance <= 0 ? 'Paid' : 'Partially Paid'
+        const invTotal = roundCurrency(Number(invoiceData.total || 0))
+        const invCurrentPaid = roundCurrency(Number(invoiceData.amountPaid || 0))
+        const newInvPaid = roundCurrency(invCurrentPaid + parsedAmount)
+        const newInvBalance = roundCurrency(Math.max(0, invTotal - newInvPaid))
+        const newInvStatus =
+          invTotal > 0 && newInvBalance <= 0
+            ? 'Paid'
+            : newInvPaid > 0
+            ? 'Partially Paid'
+            : invoiceData.status || 'Sent'
 
         const invUpdates: Record<string, any> = {
+          clientId: canonicalClientId,
           amountPaid: newInvPaid,
           balanceDue: newInvBalance,
           status: newInvStatus,
+          paymentMethod: channel,
+          paymentReference: cleanRef,
+          paymentDate,
           updatedAt: FieldValue.serverTimestamp(),
+        }
+        if (typeof notes === 'string' && notes.trim()) {
+          invUpdates.paymentNotes = notes.trim()
         }
         if (newInvStatus === 'Paid') {
           invUpdates.paidAt = FieldValue.serverTimestamp()
         }
         batch.update(invoiceRef, invUpdates)
+
+        updatedInvoiceSnapshot = {
+          ...invoiceData,
+          id: resolvedInvoiceId,
+          clientId: canonicalClientId,
+          amountPaid: newInvPaid,
+          balanceDue: newInvBalance,
+          status: newInvStatus,
+          paymentMethod: channel,
+          paymentReference: cleanRef,
+          paymentDate,
+          ...(newInvStatus === 'Paid' ? { paidAt: nowIso } : {}),
+          updatedAt: nowIso,
+        }
+
+        // If invoice is now fully paid and has an active payment link, mark it Paid
+        if (newInvStatus === 'Paid' && invoiceData.paymentLinkId) {
+          const linkId = normalizeEntityId(invoiceData.paymentLinkId, COLLECTIONS.CLIENT_LINKS)
+          if (linkId) {
+            const linkRef = adminDb.collection(COLLECTIONS.CLIENT_LINKS).doc(linkId)
+            const linkSnap = await linkRef.get()
+            if (linkSnap.exists && linkSnap.data()?.status !== 'Paid') {
+              batch.update(linkRef, {
+                status: 'Paid',
+                paymentStatus: 'Paid',
+                paystackReference: cleanRef,
+                updatedAt: FieldValue.serverTimestamp(),
+              })
+            }
+          }
+        }
       }
 
       // 7. Update Project Balances if linked
       if (projectRef && projectData) {
-        const projPrice = Number(projectData.price || 0)
-        const projCurrentPaid = Number(projectData.amountPaid || 0)
-        const newProjPaid = projCurrentPaid + parsedAmount
-        const newProjBalance = Math.max(0, projPrice - newProjPaid)
-        const newProjPaymentStatus = newProjBalance <= 0 ? 'Paid' : 'Partially Paid'
+        const projPrice = roundCurrency(Number(projectData.price || 0))
+        const projCurrentPaid = roundCurrency(Number(projectData.amountPaid || 0))
+        const newProjPaid = roundCurrency(projCurrentPaid + parsedAmount)
+        const newProjBalance = roundCurrency(Math.max(0, projPrice - newProjPaid))
+        const newProjPaymentStatus =
+          projPrice > 0 && newProjBalance <= 0 ? 'Paid' : 'Partially Paid'
 
         const projUpdates: Record<string, any> = {
+          clientId: canonicalClientId,
           amountPaid: newProjPaid,
           outstandingBalance: newProjBalance,
           paymentStatus: newProjPaymentStatus,
@@ -173,7 +420,10 @@ export async function POST(req: NextRequest) {
         }
 
         if (effectiveIsDeposit) {
-          projUpdates.depositAmount = Number(projectData.depositAmount || 0) + parsedAmount
+          projUpdates.depositPaid = roundCurrency(Number(projectData.depositPaid || 0) + parsedAmount)
+          if (projectData.depositAmount === undefined || projectData.depositAmount === null) {
+            projUpdates.depositAmount = parsedAmount
+          }
         }
 
         if (newProjPaymentStatus === 'Paid' && projectData.status === 'Awaiting Payment') {
@@ -181,6 +431,18 @@ export async function POST(req: NextRequest) {
         }
 
         batch.update(projectRef, projUpdates)
+
+        updatedProjectSnapshot = {
+          ...projectData,
+          id: resolvedProjectId,
+          clientId: canonicalClientId,
+          amountPaid: newProjPaid,
+          outstandingBalance: newProjBalance,
+          paymentStatus: newProjPaymentStatus,
+          ...(effectiveIsDeposit ? { depositPaid: projUpdates.depositPaid } : {}),
+          ...(projUpdates.status ? { status: projUpdates.status } : {}),
+          updatedAt: nowIso,
+        }
       }
 
       // 8. Create Activity Log
@@ -193,9 +455,9 @@ export async function POST(req: NextRequest) {
         description: `${typeLabel} of ${formattedAmount} recorded for ${resolvedClientName}${resolvedInvoiceNumber ? ` (Invoice #${resolvedInvoiceNumber})` : ''} via ${channel}`,
         entityId: paymentId,
         entityType: 'payment',
-        clientId,
+        clientId: canonicalClientId,
         clientName: resolvedClientName,
-        projectId: projectId || null,
+        projectId: resolvedProjectId || null,
         performedBy: recordedBy,
         metadata: {
           paymentId,
@@ -204,9 +466,9 @@ export async function POST(req: NextRequest) {
           amount: parsedAmount,
           currency,
           isDeposit: effectiveIsDeposit,
-          invoiceId: invoiceId || null,
+          invoiceId: resolvedInvoiceId || null,
           invoiceNumber: resolvedInvoiceNumber || null,
-          projectId: projectId || null,
+          projectId: resolvedProjectId || null,
         },
         createdAt: FieldValue.serverTimestamp(),
       })
@@ -218,8 +480,10 @@ export async function POST(req: NextRequest) {
         title: `${typeLabel} Recorded`,
         message: `${typeLabel} of ${formattedAmount} recorded for ${resolvedClientName} (${channel}).`,
         isRead: false,
-        clientId,
+        clientId: canonicalClientId,
         clientName: resolvedClientName,
+        invoiceId: resolvedInvoiceId || null,
+        projectId: resolvedProjectId || null,
         entityId: paymentId,
         createdAt: FieldValue.serverTimestamp(),
       })
@@ -231,11 +495,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       paymentId,
+      clientId: canonicalClientId,
       payment: {
-        id: paymentId,
         ...paymentPayload,
+        id: paymentId,
         paidAt: paymentDate,
+        createdAt: nowIso,
+        updatedAt: nowIso,
       },
+      updatedClient: updatedClientSnapshot,
+      updatedInvoice: updatedInvoiceSnapshot,
+      updatedProject: updatedProjectSnapshot,
     })
   } catch (error: any) {
     console.error('[API /api/payments/record] Error:', error)
@@ -253,7 +523,7 @@ export async function DELETE(req: NextRequest) {
 
   try {
     const { searchParams } = new URL(req.url)
-    const paymentId = searchParams.get('paymentId')
+    const paymentId = normalizeEntityId(searchParams.get('paymentId'), COLLECTIONS.PAYMENTS)
     const revertBalances = searchParams.get('revertBalances') !== 'false'
 
     if (!paymentId) {
@@ -270,66 +540,104 @@ export async function DELETE(req: NextRequest) {
 
     const paymentData = snap.data()!
     const batch = adminDb.batch()
+    const nowIso = new Date().toISOString()
+
+    let updatedClientSnapshot: Record<string, any> | null = null
+    let updatedInvoiceSnapshot: Record<string, any> | null = null
+    let updatedProjectSnapshot: Record<string, any> | null = null
 
     if (revertBalances && paymentData.status === 'success') {
-      const amount = Number(paymentData.amount || 0)
+      const amount = roundCurrency(Number(paymentData.amount || 0))
 
-      // Revert client balances
+      // Revert client balances using canonical client resolution
       if (paymentData.clientId) {
-        const clientRef = adminDb.collection(COLLECTIONS.CLIENTS).doc(paymentData.clientId)
-        const clientSnap = await clientRef.get()
-        if (clientSnap.exists) {
-          const clientData = clientSnap.data()!
-          const currentTotalPaid = Number(clientData.totalPaid || 0)
-          const currentOutstanding = Number(clientData.outstandingBalance || 0)
-          batch.update(clientRef, {
-            totalPaid: Math.max(0, currentTotalPaid - amount),
-            outstandingBalance: currentOutstanding + amount,
-            paymentCount: Math.max(0, (clientData.paymentCount || 1) - 1),
+        const resolvedClient = await resolveCanonicalClient(adminDb, {
+          clientsCollection: COLLECTIONS.CLIENTS,
+          clientId: paymentData.clientId,
+        })
+        if (resolvedClient) {
+          const clientData = resolvedClient.data
+          const currentTotalPaid = roundCurrency(Number(clientData.totalPaid || 0))
+          const currentOutstanding = roundCurrency(Number(clientData.outstandingBalance || 0))
+          const newTotalPaid = roundCurrency(Math.max(0, currentTotalPaid - amount))
+          const newOutstanding = roundCurrency(currentOutstanding + amount)
+          const newCount = Math.max(0, Number(clientData.paymentCount || 1) - 1)
+          batch.update(resolvedClient.ref, {
+            totalPaid: newTotalPaid,
+            outstandingBalance: newOutstanding,
+            paymentCount: newCount,
             updatedAt: FieldValue.serverTimestamp(),
           })
+          updatedClientSnapshot = {
+            ...clientData,
+            id: resolvedClient.id,
+            totalPaid: newTotalPaid,
+            outstandingBalance: newOutstanding,
+            paymentCount: newCount,
+            updatedAt: nowIso,
+          }
         }
       }
 
       // Revert invoice balances
-      if (paymentData.invoiceId) {
-        const invoiceRef = adminDb.collection(COLLECTIONS.INVOICES).doc(paymentData.invoiceId)
+      const invId = normalizeEntityId(paymentData.invoiceId, COLLECTIONS.INVOICES)
+      if (invId) {
+        const invoiceRef = adminDb.collection(COLLECTIONS.INVOICES).doc(invId)
         const invoiceSnap = await invoiceRef.get()
         if (invoiceSnap.exists) {
           const invoiceData = invoiceSnap.data()!
-          const currentPaid = Number(invoiceData.amountPaid || 0)
-          const total = Number(invoiceData.total || 0)
-          const newPaid = Math.max(0, currentPaid - amount)
-          const newBalance = Math.max(0, total - newPaid)
+          const currentPaid = roundCurrency(Number(invoiceData.amountPaid || 0))
+          const total = roundCurrency(Number(invoiceData.total || 0))
+          const newPaid = roundCurrency(Math.max(0, currentPaid - amount))
+          const newBalance = roundCurrency(Math.max(0, total - newPaid))
+          const newStatus = newPaid <= 0 ? 'Sent' : newBalance <= 0 && total > 0 ? 'Paid' : 'Partially Paid'
           batch.update(invoiceRef, {
             amountPaid: newPaid,
             balanceDue: newBalance,
-            status: newPaid <= 0 ? 'Sent' : 'Partially Paid',
+            status: newStatus,
             updatedAt: FieldValue.serverTimestamp(),
           })
+          updatedInvoiceSnapshot = {
+            ...invoiceData,
+            id: invId,
+            amountPaid: newPaid,
+            balanceDue: newBalance,
+            status: newStatus,
+            updatedAt: nowIso,
+          }
         }
       }
 
       // Revert project balances
-      if (paymentData.projectId) {
-        const projectRef = adminDb.collection(COLLECTIONS.PROJECTS).doc(paymentData.projectId)
+      const projId = normalizeEntityId(paymentData.projectId, COLLECTIONS.PROJECTS)
+      if (projId) {
+        const projectRef = adminDb.collection(COLLECTIONS.PROJECTS).doc(projId)
         const projectSnap = await projectRef.get()
         if (projectSnap.exists) {
           const projectData = projectSnap.data()!
-          const currentPaid = Number(projectData.amountPaid || 0)
-          const price = Number(projectData.price || 0)
-          const newPaid = Math.max(0, currentPaid - amount)
-          const newBalance = Math.max(0, price - newPaid)
+          const currentPaid = roundCurrency(Number(projectData.amountPaid || 0))
+          const price = roundCurrency(Number(projectData.price || 0))
+          const newPaid = roundCurrency(Math.max(0, currentPaid - amount))
+          const newBalance = roundCurrency(Math.max(0, price - newPaid))
+          const newPayStatus = newPaid <= 0 ? 'Unpaid' : newBalance <= 0 && price > 0 ? 'Paid' : 'Partially Paid'
           const projUpdates: Record<string, any> = {
             amountPaid: newPaid,
             outstandingBalance: newBalance,
-            paymentStatus: newPaid <= 0 ? 'Unpaid' : 'Partially Paid',
+            paymentStatus: newPayStatus,
             updatedAt: FieldValue.serverTimestamp(),
           }
-          if (paymentData.isDeposit) {
-            projUpdates.depositAmount = Math.max(0, (projectData.depositAmount || 0) - amount)
+          if (paymentData.isDeposit && projectData.depositPaid !== undefined) {
+            projUpdates.depositPaid = roundCurrency(Math.max(0, Number(projectData.depositPaid || 0) - amount))
           }
           batch.update(projectRef, projUpdates)
+          updatedProjectSnapshot = {
+            ...projectData,
+            id: projId,
+            amountPaid: newPaid,
+            outstandingBalance: newBalance,
+            paymentStatus: newPayStatus,
+            updatedAt: nowIso,
+          }
         }
       }
     }
@@ -352,7 +660,14 @@ export async function DELETE(req: NextRequest) {
 
     await batch.commit()
 
-    return NextResponse.json({ success: true, message: 'Payment record removed.' })
+    return NextResponse.json({
+      success: true,
+      deletedPaymentId: paymentId,
+      updatedClient: updatedClientSnapshot,
+      updatedInvoice: updatedInvoiceSnapshot,
+      updatedProject: updatedProjectSnapshot,
+      message: 'Payment record removed.',
+    })
   } catch (error: any) {
     console.error('[API DELETE /api/payments/record] Error:', error)
     return NextResponse.json({ error: error?.message || 'Failed to remove payment' }, { status: 500 })

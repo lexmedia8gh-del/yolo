@@ -98,8 +98,21 @@ export default function ProjectDetailPage() {
       const proj = await getDocument<Project>(COLLECTIONS.PROJECTS, id)
       if (proj) setProject(proj)
 
-      if (proj?.clientId) {
-        const cli = await getDocument<any>(COLLECTIONS.CLIENTS, proj.clientId)
+      if (proj?.clientId || proj?.clientName) {
+        let cli = proj.clientId
+          ? await getDocument<any>(COLLECTIONS.CLIENTS, proj.clientId)
+          : null
+        if (!cli) {
+          const allClients = await getDocuments<any>(COLLECTIONS.CLIENTS)
+          const rawId = (proj.clientId || '').trim()
+          const rawName = (proj.clientName || '').trim().toLowerCase()
+          cli =
+            allClients.find(
+              (c: any) =>
+                (rawId && (c.id === rawId || c.legacyId === rawId || c.clientId === rawId)) ||
+                (!rawId && rawName && c.fullName?.trim().toLowerCase() === rawName)
+            ) || null
+        }
         setClient(cli)
       }
 
@@ -603,7 +616,7 @@ export default function ProjectDetailPage() {
           isOpen={showRecordPaymentModal}
           onClose={() => setShowRecordPaymentModal(false)}
           preselectedProjectId={project.id}
-          preselectedClientId={project.clientId}
+          preselectedClientId={client?.id || project.clientId}
           preselectedInvoiceId={project.invoiceId}
           onSuccess={() => {
             reloadProjectData()

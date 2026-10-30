@@ -96,11 +96,12 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'syncCollection' && Array.isArray(body?.docs)) {
+      const defaultCloudSynced = body?.cloudSynced !== undefined ? Boolean(body.cloudSynced) : true
       for (const item of body.docs) {
         const itemId = sanitizeDocId(item?.id)
         if (!itemId) continue
         const { id: _ignored, ...rest } = item
-        setLocalDoc(col, itemId, rest, { merge: true, cloudSynced: true })
+        setLocalDoc(col, itemId, rest, { merge: true, cloudSynced: defaultCloudSynced })
       }
       return NextResponse.json({ ok: true })
     }
