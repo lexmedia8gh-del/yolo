@@ -1,9 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isSupabaseConfigured, getSupabaseClient, TABLES } from '@/lib/supabase'
+import { getAdminDb, requireAdmin } from '@/lib/firebase/admin'
+import { COLLECTIONS } from '@/lib/firebase/firestore'
+import { clearLocalCollection } from '@/lib/firebase/local-server-store'
 
 export const dynamic = 'force-dynamic'
 
+async function purgeFirestoreCollection(collectionName: string): Promise<number> {
+  let count = clearLocalCollection(collectionName)
+  try {
+    const adminDb = getAdminDb()
+    const snap = await adminDb.collection(collectionName).get()
+    if (!snap.empty) {
+      await Promise.all(
+        snap.docs.map(async (docSnap) => {
+          try {
+            await docSnap.ref.delete()
+            count++
+          } catch {}
+        })
+      )
+    }
+  } catch (err) {
+    console.warn(`[DataReset API] Firestore cleanup warning for ${collectionName}:`, err)
+  }
+  return count
+}
+
 export async function POST(req: NextRequest) {
+  const authResult = await requireAdmin(req)
+  if (!authResult.ok) {
+    return NextResponse.json(
+      { success: false, error: authResult.error },
+      { status: authResult.status }
+    )
+  }
+
   try {
     const body = await req.json()
     const { selection, confirmationPhrase } = body
@@ -30,6 +62,51 @@ export async function POST(req: NextRequest) {
 
     const deletedCounts: Record<string, number> = {}
 
+    // 1. Purge server Firestore + local-server-store collections
+    const collectionsToPurge = new Set<string>()
+    if (selection.payments || selection.invoices || selection.clients) {
+      collectionsToPurge.add(COLLECTIONS.PAYMENTS)
+    }
+    if (selection.invoices || selection.clients) {
+      collectionsToPurge.add(COLLECTIONS.INVOICES)
+      collectionsToPurge.add(COLLECTIONS.INVOICE_ITEMS)
+      collectionsToPurge.add(COLLECTIONS.CLIENT_LINKS)
+    }
+    if (selection.deliveries || selection.projects || selection.clients) {
+      collectionsToPurge.add(COLLECTIONS.DELIVERY_FILES)
+      collectionsToPurge.add(COLLECTIONS.DELIVERIES)
+      collectionsToPurge.add(COLLECTIONS.CLIENT_PREVIEWS)
+      collectionsToPurge.add(COLLECTIONS.PREVIEW_LOGS)
+    }
+    if (selection.reminders) {
+      collectionsToPurge.add(COLLECTIONS.REMINDERS)
+    }
+    if (selection.tasks) {
+      collectionsToPurge.add(COLLECTIONS.TASKS)
+    }
+    if (selection.logs) {
+      collectionsToPurge.add(COLLECTIONS.WHATSAPP_MESSAGES)
+      collectionsToPurge.add(COLLECTIONS.ACTIVITY_LOGS)
+      collectionsToPurge.add(COLLECTIONS.NOTIFICATIONS)
+    }
+    if (selection.projects || selection.clients) {
+      collectionsToPurge.add(COLLECTIONS.PROJECTS)
+      collectionsToPurge.add(COLLECTIONS.QUICK_JOBS)
+    }
+    if (selection.clients) {
+      collectionsToPurge.add(COLLECTIONS.CLIENTS)
+    }
+    if (selection.catalog) {
+      collectionsToPurge.add(COLLECTIONS.PACKAGES)
+      collectionsToPurge.add(COLLECTIONS.SERVICES)
+      collectionsToPurge.add(COLLECTIONS.ADD_ONS)
+    }
+
+    for (const colName of Array.from(collectionsToPurge)) {
+      deletedCounts[colName] = await purgeFirestoreCollection(colName)
+    }
+
+    // 2. Purge Supabase tables if configured
     if (isSupabaseConfigured()) {
       const supabase = getSupabaseClient()
 
@@ -37,12 +114,12 @@ export async function POST(req: NextRequest) {
       try {
         if (selection.payments || selection.invoices || selection.clients) {
           const { error } = await supabase.from(TABLES.PAYMENTS).delete().neq('id', '00000000-0000-0000-0000-000000000000')
-          if (!error) deletedCounts.payments = 1
+          if (!error) deletedCounts.payments = Math.max(deletedCounts.payments || 0, 1)
         }
 
         if (selection.invoices || selection.clients) {
           const { error } = await supabase.from(TABLES.INVOICES).delete().neq('id', '00000000-0000-0000-0000-000000000000')
-          if (!error) deletedCounts.invoices = 1
+          if (!error) deletedCounts.invoices = Math.max(deletedCounts.invoices || 0, 1)
         }
 
         if (selection.deliveries || selection.projects || selection.clients) {

@@ -26,6 +26,7 @@ import type { Project, Client, ClientLink } from '@/lib/types'
 import {
   formatCurrency,
   copyToClipboard,
+  openExternalUrl,
   generateSecureToken,
   getPaymentLink,
 } from '@/lib/utils'
@@ -178,9 +179,9 @@ export function ProjectPaymentLinkModal({
     const phone = client?.whatsappNumber || client?.phone
     if (phone) {
       const cleanPhone = phone.replace(/[^0-9]/g, '')
-      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank')
+      openExternalUrl(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`)
     } else {
-      window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank')
+      openExternalUrl(`https://wa.me/?text=${encodeURIComponent(msg)}`)
     }
   }
 
@@ -253,7 +254,7 @@ export function ProjectPaymentLinkModal({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => window.open(getPaymentLink(createdLink.token), '_blank')}
+              onClick={() => openExternalUrl(getPaymentLink(createdLink.token))}
               className="w-full sm:flex-1 text-xs"
               icon={<ExternalLink size={14} />}
             >

@@ -94,10 +94,16 @@ export async function POST(req: NextRequest) {
       try {
         const fs = await import('fs')
         const path = await import('path')
-        const localDir = path.join(process.cwd(), 'public', 'uploads', path.dirname(storagePath))
-        await fs.promises.mkdir(localDir, { recursive: true })
-        const localFilePath = path.join(process.cwd(), 'public', 'uploads', storagePath)
-        await fs.promises.writeFile(localFilePath, buffer)
+        const targets = [
+          path.join('/tmp', 'uploads', storagePath),
+          path.join(process.cwd(), 'public', 'uploads', storagePath),
+        ]
+        for (const target of targets) {
+          try {
+            await fs.promises.mkdir(path.dirname(target), { recursive: true })
+            await fs.promises.writeFile(target, buffer)
+          } catch {}
+        }
       } catch (localWriteErr) {
         console.warn('[Delivery Upload Local Write Warning]:', localWriteErr)
       }

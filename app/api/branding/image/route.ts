@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
+import fs from 'fs'
+import path from 'path'
 import { getCandidateStorageBuckets } from '@/lib/firebase/admin'
-import { getSupabaseUrl } from '@/lib/supabase/client'
+import { getSupabaseUrl, isSupabaseConfigured } from '@/lib/supabase/client'
 import {
   cleanStoragePath,
   downloadBrandingAssetFromSupabase,
@@ -8,6 +10,45 @@ import {
 } from '@/lib/supabase/storage'
 
 export const dynamic = 'force-dynamic'
+
+function inferBrandingMimeType(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase() || ''
+  switch (ext) {
+    case 'png':
+      return 'image/png'
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg'
+    case 'webp':
+      return 'image/webp'
+    case 'svg':
+      return 'image/svg+xml'
+    case 'ico':
+      return 'image/x-icon'
+    default:
+      return 'image/png'
+  }
+}
+
+async function readLocalBrandingAsset(rawPath: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+  if (!isSafeBrandingStoragePath(rawPath)) return null
+  const cleaned = cleanStoragePath(rawPath)
+  if (!cleaned || cleaned.includes('..')) return null
+
+  const candidates = [
+    path.join('/tmp', 'uploads', cleaned),
+    path.join(process.cwd(), 'public', 'uploads', cleaned),
+  ]
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) {
+        const buffer = await fs.promises.readFile(candidate)
+        return { buffer, contentType: inferBrandingMimeType(cleaned) }
+      }
+    } catch {}
+  }
+  return null
+}
 
 function extractSafeSupabaseBrandingPath(rawUrl: string): string | null {
   try {
@@ -80,13 +121,23 @@ export async function GET(req: NextRequest) {
   const storagePathParam = searchParams.get('path') || ''
 
   try {
-    // 1. Primary: Stream directly from Supabase Storage 'Delivery files' bucket by storagePath
+    // 1. Primary: Stream directly from Supabase Storage 'Delivery files' bucket or local fallback by storagePath
     if (storagePathParam && isSafeBrandingStoragePath(storagePathParam)) {
-      const asset = await downloadBrandingAssetFromSupabase(storagePathParam)
-      if (asset) {
-        return new NextResponse(new Uint8Array(asset.buffer), {
+      if (isSupabaseConfigured()) {
+        const asset = await downloadBrandingAssetFromSupabase(storagePathParam)
+        if (asset) {
+          return new NextResponse(new Uint8Array(asset.buffer), {
+            status: 200,
+            headers: buildImageResponseHeaders(asset.contentType, true),
+          })
+        }
+      }
+
+      const localAsset = await readLocalBrandingAsset(storagePathParam)
+      if (localAsset) {
+        return new NextResponse(new Uint8Array(localAsset.buffer), {
           status: 200,
-          headers: buildImageResponseHeaders(asset.contentType, true),
+          headers: buildImageResponseHeaders(localAsset.contentType, true),
         })
       }
     }
@@ -95,11 +146,21 @@ export async function GET(req: NextRequest) {
     if (targetUrl) {
       const supabasePath = extractSafeSupabaseBrandingPath(targetUrl)
       if (supabasePath) {
-        const asset = await downloadBrandingAssetFromSupabase(supabasePath)
-        if (asset) {
-          return new NextResponse(new Uint8Array(asset.buffer), {
+        if (isSupabaseConfigured()) {
+          const asset = await downloadBrandingAssetFromSupabase(supabasePath)
+          if (asset) {
+            return new NextResponse(new Uint8Array(asset.buffer), {
+              status: 200,
+              headers: buildImageResponseHeaders(asset.contentType, true),
+            })
+          }
+        }
+
+        const localAsset = await readLocalBrandingAsset(supabasePath)
+        if (localAsset) {
+          return new NextResponse(new Uint8Array(localAsset.buffer), {
             status: 200,
-            headers: buildImageResponseHeaders(asset.contentType, true),
+            headers: buildImageResponseHeaders(localAsset.contentType, true),
           })
         }
 

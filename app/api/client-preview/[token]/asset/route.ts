@@ -268,29 +268,28 @@ export async function GET(
     }
 
     // 7. Local filesystem fallback for dev/sandbox persistence
-    if (storagePath) {
+    if (storagePath && !storagePath.includes('..')) {
       try {
         const fs = await import('fs')
         const path = await import('path')
-        const localFilePath = path.join(process.cwd(), 'public', 'uploads', storagePath)
-        if (fs.existsSync(localFilePath)) {
-          const buffer = await fs.promises.readFile(localFilePath)
-          console.log('[Secure Storage Stream Local Fallback Success]:', {
-            storagePath,
-            bytesReceived: buffer.length,
-            status: 200,
-            mimeType,
-          })
-          return new NextResponse(new Uint8Array(buffer), {
-            status: 200,
-            headers: {
-              'Content-Type': mimeType,
-              'Content-Disposition': `inline; filename="${encodeURIComponent(fileName)}"`,
-              'Content-Length': buffer.length.toString(),
-              'Cache-Control': 'private, no-transform, max-age=3600',
-              'X-Content-Type-Options': 'nosniff',
-            },
-          })
+        const candidates = [
+          path.join('/tmp', 'uploads', storagePath),
+          path.join(process.cwd(), 'public', 'uploads', storagePath),
+        ]
+        for (const localFilePath of candidates) {
+          if (fs.existsSync(localFilePath)) {
+            const buffer = await fs.promises.readFile(localFilePath)
+            return new NextResponse(new Uint8Array(buffer), {
+              status: 200,
+              headers: {
+                'Content-Type': mimeType,
+                'Content-Disposition': `inline; filename="${encodeURIComponent(fileName)}"`,
+                'Content-Length': buffer.length.toString(),
+                'Cache-Control': 'private, no-transform, max-age=3600',
+                'X-Content-Type-Options': 'nosniff',
+              },
+            })
+          }
         }
       } catch {}
     }

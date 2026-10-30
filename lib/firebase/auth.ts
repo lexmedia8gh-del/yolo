@@ -11,6 +11,7 @@ import {
   EmailAuthProvider,
   GoogleAuthProvider,
   onAuthStateChanged,
+  onIdTokenChanged,
   signInWithPopup,
   setPersistence,
   browserLocalPersistence,
@@ -118,18 +119,25 @@ export function setSessionCookie(token: string, maxAgeSeconds = 604800) {
   document.cookie = `__session=${token}; path=/${maxAgePart}${sameSitePart}`
 }
 
+let lastSyncedServerToken = ''
+
 export async function syncServerSessionCookie(token: string, maxAgeSeconds = 604800): Promise<void> {
   if (typeof window === 'undefined' || !token) return
+  if (lastSyncedServerToken === token) return
+  lastSyncedServerToken = token
   try {
     await fetch('/api/admin/session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, maxAgeSeconds }),
     })
-  } catch {}
+  } catch {
+    lastSyncedServerToken = ''
+  }
 }
 
 export async function clearServerSessionCookie(): Promise<void> {
+  lastSyncedServerToken = ''
   if (typeof window === 'undefined') return
   try {
     await fetch('/api/admin/session', { method: 'DELETE' })
@@ -234,12 +242,17 @@ async function ensureAdminFirestoreProfile(fbUser: FirebaseUser): Promise<void> 
   }
 }
 
+export function hasActiveFirebaseUser(): boolean {
+  const authInstance = getAuthInstance()
+  return Boolean(isFirebaseAuthConfigured && authInstance?.currentUser)
+}
+
 export async function getActiveIdToken(forceRefresh = false): Promise<string | null> {
   const authInstance = getAuthInstance()
   if (isFirebaseAuthConfigured && authInstance?.currentUser) {
     return authInstance.currentUser.getIdToken(forceRefresh)
   }
-  if (hasLocalAdminSessionCookie() || (!isFirebaseAuthConfigured && hasSessionCookie())) {
+  if (hasLocalAdminSessionCookie() || hasSessionCookie()) {
     return 'active-admin-session'
   }
   return null
@@ -417,9 +430,7 @@ export async function signInWithEmail(email: string, password: string, rememberM
     const activeToken = verifyData?.claimUpdated ? await fbUser.getIdToken(true) : token
 
     setSessionCookie(activeToken, cookieMaxAge)
-    if (verifyData?.claimUpdated) {
-      await syncServerSessionCookie(activeToken, cookieMaxAge)
-    }
+    await syncServerSessionCookie(activeToken, cookieMaxAge)
 
     try {
       if (typeof window !== 'undefined' && fbUser.email) {
@@ -508,9 +519,7 @@ export async function signInWithGoogle() {
   const finalToken = verifyData?.claimUpdated ? await fbUser.getIdToken(true) : token
 
   setSessionCookie(finalToken, 604800)
-  if (verifyData?.claimUpdated) {
-    await syncServerSessionCookie(finalToken, 604800)
-  }
+  await syncServerSessionCookie(finalToken, 604800)
 
   try {
     if (typeof window !== 'undefined' && fbUser.email) {
@@ -913,11 +922,14 @@ export function onAuthChange(callback: (user: User | null) => void) {
 
   let unsubscribe: () => void = () => {}
   try {
-    unsubscribe = onAuthStateChanged(authInstance, (fbUser) => {
+    unsubscribe = onIdTokenChanged(authInstance, (fbUser) => {
       if (fbUser) {
         fbUser
           .getIdToken()
-          .then((token) => setSessionCookie(token, 604800))
+          .then((token) => {
+            setSessionCookie(token, 604800)
+            void syncServerSessionCookie(token, 604800)
+          })
           .catch(() => {})
         callback(mapFirebaseUser(fbUser))
       } else if (hasLocalAdminSessionCookie()) {

@@ -30,6 +30,7 @@ import {
   getPaymentLink,
   formatCurrency,
   copyToClipboard,
+  openExternalUrl,
 } from '@/lib/utils'
 import type { QuickJob, ClientLink } from '@/lib/types'
 import toast from 'react-hot-toast'
@@ -215,7 +216,7 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
     const linkUrl = getPaymentLink(link.token)
     const clientName = link.clientName || currentJob.clientName || 'Valued Client'
     const message = `Hello ${clientName}, please find the secure payment link for ${currentJob.jobDescription} (${formatCurrency(Number(link.amount) || 0, link.currency || 'GHS')}): ${linkUrl}`
-    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank')
+    openExternalUrl(`https://wa.me/?text=${encodeURIComponent(message)}`)
   }
 
   // Record Offline Payment (Admin Manual Confirmation)
@@ -554,7 +555,7 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => window.open(linkUrl, '_blank')}
+                          onClick={() => openExternalUrl(linkUrl)}
                           title="Open Payment Portal"
                           className="shrink-0 h-8 px-2.5"
                         >

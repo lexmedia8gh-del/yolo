@@ -22,6 +22,7 @@ import {
   increment,
   writeBatch,
 } from 'firebase/firestore'
+import { onAuthStateChanged } from 'firebase/auth'
 import { db, getAuthInstance, isFirebaseConfigured } from './config'
 
 // ─── Collection Names (centralized) ──────────────────────────
@@ -50,7 +51,171 @@ export const COLLECTIONS = {
   ADD_ONS: 'addOns',
 } as const
 
-// Local fallback pub/sub for unconfigured preview environments
+const PUBLIC_READ_COLLECTIONS = new Set<string>([
+  COLLECTIONS.DELIVERIES,
+  COLLECTIONS.DELIVERY_FILES,
+  COLLECTIONS.CLIENT_LINKS,
+  COLLECTIONS.CLIENT_PREVIEWS,
+])
+
+const PUBLIC_WRITE_COLLECTIONS = new Set<string>([
+  COLLECTIONS.PREVIEW_LOGS,
+])
+
+function hasFirebaseUserSession(): boolean {
+  if (typeof window === 'undefined') return false
+  return Boolean(getAuthInstance()?.currentUser)
+}
+
+function canReadCloudFirestore(collectionName: string): boolean {
+  if (!isFirebaseConfigured) return false
+  if (PUBLIC_READ_COLLECTIONS.has(collectionName)) return true
+  return hasFirebaseUserSession()
+}
+
+function canWriteCloudFirestore(collectionName: string): boolean {
+  if (!isFirebaseConfigured) return false
+  if (PUBLIC_WRITE_COLLECTIONS.has(collectionName)) return true
+  return hasFirebaseUserSession()
+}
+
+/**
+ * Recursively strips `undefined` properties from plain objects and arrays
+ * while preserving Firebase FieldValue sentinels, Timestamps, and Dates.
+ */
+export function stripUndefinedDeep<T>(input: T): T {
+  if (input === null || input === undefined || typeof input !== 'object') {
+    return input
+  }
+  if (Array.isArray(input)) {
+    return input
+      .filter((item) => item !== undefined)
+      .map((item) => stripUndefinedDeep(item)) as unknown as T
+  }
+  if (Object.getPrototypeOf(input) !== Object.prototype) {
+    return input
+  }
+  const cleaned: Record<string, any> = {}
+  for (const [key, val] of Object.entries(input as Record<string, any>)) {
+    if (val === undefined) continue
+    cleaned[key] = stripUndefinedDeep(val)
+  }
+  return cleaned as T
+}
+
+function sanitizeForJsonMirror(input: any): any {
+  if (input === null || input === undefined || typeof input !== 'object') {
+    return input
+  }
+  if (input instanceof Date) {
+    return Number.isFinite(input.getTime()) ? input.toISOString() : new Date().toISOString()
+  }
+  if (typeof input.toDate === 'function') {
+    try {
+      const d = input.toDate()
+      if (d instanceof Date && Number.isFinite(d.getTime())) return d.toISOString()
+    } catch {}
+  }
+  if (Array.isArray(input)) {
+    return input.filter((v) => v !== undefined).map(sanitizeForJsonMirror)
+  }
+  // Convert client SDK FieldValue sentinels (serverTimestamp, increment, etc.)
+  if (Object.getPrototypeOf(input) !== Object.prototype) {
+    const methodName = (input as any)._methodName || ''
+    if (methodName === 'serverTimestamp') {
+      return { __lex_transform: 'serverTimestamp' }
+    }
+    if (methodName === 'increment') {
+      return { __lex_transform: 'increment', operand: Number((input as any)._operand || 0) }
+    }
+    if (methodName === 'deleteField') {
+      return { __lex_transform: 'delete' }
+    }
+    if (methodName === 'arrayUnion') {
+      return { __lex_transform: 'arrayUnion', elements: ((input as any)._elements || []).map(sanitizeForJsonMirror) }
+    }
+    if (methodName === 'arrayRemove') {
+      return { __lex_transform: 'arrayRemove', elements: ((input as any)._elements || []).map(sanitizeForJsonMirror) }
+    }
+    return undefined
+  }
+
+  const out: Record<string, any> = {}
+  for (const [k, v] of Object.entries(input)) {
+    if (v === undefined) continue
+    const converted = sanitizeForJsonMirror(v)
+    if (converted !== undefined) {
+      out[k] = converted
+    }
+  }
+  return out
+}
+
+async function postToServerLocalStore(payload: Record<string, any>): Promise<void> {
+  if (typeof window === 'undefined') return
+  try {
+    await fetch('/api/admin/local-store', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+  } catch {}
+}
+
+export async function syncBatchToServerLocalStore(
+  operations: Array<{
+    type: 'set' | 'update' | 'delete'
+    collection: string
+    id: string
+    data?: Record<string, any>
+    merge?: boolean
+    cloudSynced?: boolean
+  }>
+): Promise<void> {
+  if (typeof window === 'undefined' || operations.length === 0) return
+  const sanitizedOps = operations.map((op) => ({
+    ...op,
+    data: op.data ? sanitizeForJsonMirror(op.data) : undefined,
+  }))
+  await postToServerLocalStore({
+    action: 'batch',
+    operations: sanitizedOps,
+  })
+}
+
+async function fetchServerLocalCollection<T extends { id?: string }>(collectionName: string): Promise<T[] | null> {
+  if (typeof window === 'undefined') return null
+  try {
+    const res = await fetch(
+      `/api/admin/local-store?collection=${encodeURIComponent(collectionName)}`,
+      { cache: 'no-store' }
+    )
+    if (!res.ok) return null
+    const json = await res.json()
+    if (json?.ok && Array.isArray(json.docs)) {
+      return json.docs as T[]
+    }
+  } catch {}
+  return null
+}
+
+async function fetchServerLocalDoc<T>(collectionName: string, docId: string): Promise<T | null> {
+  if (typeof window === 'undefined') return null
+  try {
+    const res = await fetch(
+      `/api/admin/local-store?collection=${encodeURIComponent(collectionName)}&id=${encodeURIComponent(docId)}`,
+      { cache: 'no-store' }
+    )
+    if (!res.ok) return null
+    const json = await res.json()
+    if (json?.ok && json.doc) {
+      return json.doc as T
+    }
+  } catch {}
+  return null
+}
+
+// Local fallback pub/sub for PIN sessions and unconfigured preview environments
 const localListeners = new Map<string, Set<() => void>>()
 
 function notifyLocalListeners(collectionName: string) {
@@ -87,12 +252,29 @@ function getLocalCollection<T>(collectionName: string): T[] {
   }
 }
 
-function setLocalCollection<T>(collectionName: string, items: T[]) {
+function setLocalCollection<T>(collectionName: string, items: T[], notify = true) {
   if (typeof window === 'undefined') return
   try {
     localStorage.setItem(`lexmedia_${collectionName}`, JSON.stringify(items))
-    notifyLocalListeners(collectionName)
+    if (notify) {
+      notifyLocalListeners(collectionName)
+    }
   } catch {}
+}
+
+function mergeServerAndBrowserDocs<T extends { id?: string }>(
+  serverDocs: T[] | null,
+  browserDocs: T[]
+): T[] {
+  if (!serverDocs || serverDocs.length === 0) return browserDocs
+  const map = new Map<string, T>()
+  for (const b of browserDocs) {
+    if (b?.id) map.set(b.id, b)
+  }
+  for (const s of serverDocs) {
+    if (s?.id) map.set(s.id, s)
+  }
+  return Array.from(map.values())
 }
 
 function generateLocalId(prefix = 'doc'): string {
@@ -104,20 +286,49 @@ export async function getDocument<T>(
   collectionName: string,
   docId: string
 ): Promise<T | null> {
-  if (!isFirebaseConfigured) {
+  if (!canReadCloudFirestore(collectionName)) {
+    const serverDoc = await fetchServerLocalDoc<T & { id: string }>(collectionName, docId)
+    if (serverDoc) {
+      const local = getLocalCollection<any>(collectionName)
+      const idx = local.findIndex((i) => i.id === docId)
+      if (idx >= 0) local[idx] = serverDoc
+      else local.push(serverDoc)
+      setLocalCollection(collectionName, local, false)
+      return serverDoc
+    }
     const local = getLocalCollection<T & { id: string }>(collectionName)
-    return local.find((item) => item.id === docId) || null
+    const matched = local.find((item) => item.id === docId) || null
+    if (matched) {
+      void postToServerLocalStore({
+        action: 'set',
+        collection: collectionName,
+        id: docId,
+        data: sanitizeForJsonMirror(matched),
+        merge: true,
+        cloudSynced: false,
+      })
+    }
+    return matched
   }
 
   try {
     const docRef = doc(db, collectionName, docId)
     const snap = await getDoc(docRef)
     if (snap.exists()) {
-      return { id: snap.id, ...snap.data() } as T
+      const resolved = { id: snap.id, ...snap.data() } as T
+      return resolved
     }
+    // Also check server local store in case created via PIN mode earlier
+    const serverDoc = await fetchServerLocalDoc<T>(collectionName, docId)
+    if (serverDoc) return serverDoc
     return null
   } catch (err: any) {
-    console.warn(`[Cloud Firestore] Offline or network warning fetching ${collectionName}/${docId}:`, err?.message || err)
+    console.warn(
+      `[Cloud Firestore] Offline or permission fallback fetching ${collectionName}/${docId}:`,
+      err?.message || err
+    )
+    const serverDoc = await fetchServerLocalDoc<T>(collectionName, docId)
+    if (serverDoc) return serverDoc
     const local = getLocalCollection<T & { id: string }>(collectionName)
     return local.find((item) => item.id === docId) || null
   }
@@ -128,8 +339,14 @@ export async function getDocuments<T>(
   collectionName: string,
   constraints: QueryConstraint[] = []
 ): Promise<T[]> {
-  if (!isFirebaseConfigured) {
-    return getLocalCollection<T>(collectionName)
+  if (!canReadCloudFirestore(collectionName)) {
+    const browserDocs = getLocalCollection<T & { id?: string }>(collectionName)
+    const serverDocs = await fetchServerLocalCollection<T & { id?: string }>(collectionName)
+    const merged = mergeServerAndBrowserDocs(serverDocs, browserDocs)
+    if (serverDocs && serverDocs.length > 0) {
+      setLocalCollection(collectionName, merged, false)
+    }
+    return merged as T[]
   }
 
   try {
@@ -137,11 +354,22 @@ export async function getDocuments<T>(
     const q = query(colRef, ...constraints)
     const snap = await getDocs(q)
     const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() } as T))
-    setLocalCollection(collectionName, docs)
+    if (constraints.length === 0) {
+      setLocalCollection(collectionName, docs, false)
+      if (docs.length > 0) {
+        void postToServerLocalStore({
+          action: 'syncCollection',
+          collection: collectionName,
+          docs: docs.map((d) => sanitizeForJsonMirror(d)),
+        })
+      }
+    }
     return docs
   } catch (err: any) {
-    console.error(`[Cloud Firestore] Error fetching collection '${collectionName}':`, err)
-    return getLocalCollection<T>(collectionName)
+    console.warn(`[Cloud Firestore] Fallback fetching collection '${collectionName}':`, err?.message || err)
+    const browserDocs = getLocalCollection<T & { id?: string }>(collectionName)
+    const serverDocs = await fetchServerLocalCollection<T & { id?: string }>(collectionName)
+    return mergeServerAndBrowserDocs(serverDocs, browserDocs) as T[]
   }
 }
 
@@ -201,32 +429,55 @@ export async function addDocument(
   collectionName: string,
   data: DocumentData
 ): Promise<string> {
-  if (!isFirebaseConfigured) {
+  const cleanData = stripUndefinedDeep(data)
+
+  if (!canWriteCloudFirestore(collectionName)) {
     const id = generateLocalId(collectionName.slice(0, 3))
     const nowIso = new Date().toISOString()
-    const local = getLocalCollection<any>(collectionName)
-    local.unshift({
-      ...data,
+    const mirrorData = sanitizeForJsonMirror(cleanData) || {}
+    const newRecord = {
+      ...mirrorData,
       id,
-      createdAt: data.createdAt ?? nowIso,
+      createdAt: mirrorData.createdAt ?? nowIso,
       updatedAt: nowIso,
-    })
+    }
+    const local = getLocalCollection<any>(collectionName)
+    local.unshift(newRecord)
     setLocalCollection(collectionName, local)
+    await postToServerLocalStore({
+      action: 'add',
+      collection: collectionName,
+      id,
+      data: newRecord,
+      merge: false,
+      cloudSynced: false,
+    })
     return id
   }
 
   try {
     const colRef = collection(db, collectionName)
     const docRef = await addDoc(colRef, {
-      ...data,
+      ...cleanData,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     })
-    console.log(`[Cloud Firestore] Successfully created document in '${collectionName}':`, docRef.id)
 
+    const nowIso = new Date().toISOString()
+    const mirrorData = sanitizeForJsonMirror(cleanData) || {}
+    const localRecord = { id: docRef.id, ...mirrorData, createdAt: nowIso, updatedAt: nowIso }
     const local = getLocalCollection<any>(collectionName)
-    local.unshift({ id: docRef.id, ...data, createdAt: new Date().toISOString() })
+    local.unshift(localRecord)
     setLocalCollection(collectionName, local)
+
+    void postToServerLocalStore({
+      action: 'set',
+      collection: collectionName,
+      id: docRef.id,
+      data: localRecord,
+      merge: true,
+      cloudSynced: true,
+    })
 
     return docRef.id
   } catch (error) {
@@ -241,19 +492,22 @@ export async function setDocument(
   data: DocumentData,
   merge = false
 ): Promise<void> {
-  if (!isFirebaseConfigured) {
+  const cleanData = stripUndefinedDeep(data)
+
+  if (!canWriteCloudFirestore(collectionName)) {
     const local = getLocalCollection<any>(collectionName)
     const existingIdx = local.findIndex((i) => i.id === docId)
     const nowIso = new Date().toISOString()
+    const mirrorData = sanitizeForJsonMirror(cleanData) || {}
     const updatedItem = merge
       ? {
           ...(existingIdx >= 0 ? local[existingIdx] : { id: docId, createdAt: nowIso }),
-          ...data,
+          ...mirrorData,
           id: docId,
           updatedAt: nowIso,
         }
       : {
-          ...data,
+          ...mirrorData,
           id: docId,
           createdAt: existingIdx >= 0 ? local[existingIdx]?.createdAt ?? nowIso : nowIso,
           updatedAt: nowIso,
@@ -264,20 +518,30 @@ export async function setDocument(
       local.push(updatedItem)
     }
     setLocalCollection(collectionName, local)
+    await postToServerLocalStore({
+      action: 'set',
+      collection: collectionName,
+      id: docId,
+      data: updatedItem,
+      merge,
+      cloudSynced: false,
+    })
     return
   }
 
   try {
     const docRef = doc(db, collectionName, docId)
-    await setDoc(docRef, { ...data, updatedAt: serverTimestamp() }, { merge })
-    console.log(`[Cloud Firestore] Successfully set document '${collectionName}/${docId}'`)
+    await setDoc(docRef, { ...cleanData, updatedAt: serverTimestamp() }, { merge })
 
+    const nowIso = new Date().toISOString()
+    const mirrorData = sanitizeForJsonMirror(cleanData) || {}
     const local = getLocalCollection<any>(collectionName)
     const existingIdx = local.findIndex((i) => i.id === docId)
     const updatedItem = {
       ...(existingIdx >= 0 ? local[existingIdx] : { id: docId }),
-      ...data,
-      updatedAt: new Date().toISOString(),
+      ...mirrorData,
+      id: docId,
+      updatedAt: nowIso,
     }
     if (existingIdx >= 0) {
       local[existingIdx] = updatedItem
@@ -285,6 +549,15 @@ export async function setDocument(
       local.push(updatedItem)
     }
     setLocalCollection(collectionName, local)
+
+    void postToServerLocalStore({
+      action: 'set',
+      collection: collectionName,
+      id: docId,
+      data: updatedItem,
+      merge,
+      cloudSynced: true,
+    })
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${collectionName}/${docId}`)
   }
@@ -296,28 +569,47 @@ export async function updateDocument(
   docId: string,
   data: Partial<DocumentData>
 ): Promise<void> {
-  if (!isFirebaseConfigured) {
+  const cleanData = stripUndefinedDeep(data)
+
+  if (!canWriteCloudFirestore(collectionName)) {
     const local = getLocalCollection<any>(collectionName)
     const idx = local.findIndex((i) => i.id === docId)
     const nowIso = new Date().toISOString()
+    const mirrorData = sanitizeForJsonMirror(cleanData) || {}
     if (idx >= 0) {
-      local[idx] = { ...local[idx], ...data, id: docId, updatedAt: nowIso }
+      local[idx] = { ...local[idx], ...mirrorData, id: docId, updatedAt: nowIso }
       setLocalCollection(collectionName, local)
     }
+    await postToServerLocalStore({
+      action: 'update',
+      collection: collectionName,
+      id: docId,
+      data: { ...mirrorData, updatedAt: nowIso },
+      cloudSynced: false,
+    })
     return
   }
 
   try {
     const docRef = doc(db, collectionName, docId)
-    await updateDoc(docRef, { ...data, updatedAt: serverTimestamp() })
-    console.log(`[Cloud Firestore] Successfully updated document '${collectionName}/${docId}'`)
+    await updateDoc(docRef, { ...cleanData, updatedAt: serverTimestamp() })
 
+    const nowIso = new Date().toISOString()
+    const mirrorData = sanitizeForJsonMirror(cleanData) || {}
     const local = getLocalCollection<any>(collectionName)
     const idx = local.findIndex((i) => i.id === docId)
     if (idx >= 0) {
-      local[idx] = { ...local[idx], ...data, updatedAt: new Date().toISOString() }
+      local[idx] = { ...local[idx], ...mirrorData, updatedAt: nowIso }
       setLocalCollection(collectionName, local)
     }
+
+    void postToServerLocalStore({
+      action: 'update',
+      collection: collectionName,
+      id: docId,
+      data: { ...mirrorData, updatedAt: nowIso },
+      cloudSynced: true,
+    })
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `${collectionName}/${docId}`)
   }
@@ -328,21 +620,33 @@ export async function deleteDocument(
   collectionName: string,
   docId: string
 ): Promise<void> {
-  if (!isFirebaseConfigured) {
+  if (!canWriteCloudFirestore(collectionName)) {
     const local = getLocalCollection<any>(collectionName)
     const filtered = local.filter((i) => i.id !== docId)
     setLocalCollection(collectionName, filtered)
+    await postToServerLocalStore({
+      action: 'delete',
+      collection: collectionName,
+      id: docId,
+      cloudSynced: false,
+    })
     return
   }
 
   try {
     const docRef = doc(db, collectionName, docId)
     await deleteDoc(docRef)
-    console.log(`[Cloud Firestore] Successfully deleted document '${collectionName}/${docId}'`)
 
     const local = getLocalCollection<any>(collectionName)
     const filtered = local.filter((i) => i.id !== docId)
     setLocalCollection(collectionName, filtered)
+
+    void postToServerLocalStore({
+      action: 'delete',
+      collection: collectionName,
+      id: docId,
+      cloudSynced: true,
+    })
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `${collectionName}/${docId}`)
   }
@@ -359,36 +663,78 @@ export function subscribeToDocument<T>(
     return () => {}
   }
 
-  if (!isFirebaseConfigured) {
-    const emitLocal = () => {
-      const local = getLocalCollection<T & { id: string }>(collectionName)
-      callback(local.find((i) => i.id === docId) || null)
-    }
-    emitLocal()
-    return subscribeLocal(collectionName, emitLocal)
-  }
+  let disposed = false
+  let cloudUnsub: (() => void) | null = null
 
-  try {
-    const docRef = doc(db, collectionName, docId)
-    return onSnapshot(
-      docRef,
-      (snap: DocumentSnapshot) => {
-        if (snap.exists()) {
-          callback({ id: snap.id, ...snap.data() } as T)
-        } else {
-          const local = getLocalCollection<T & { id: string }>(collectionName)
-          callback(local.find((i) => i.id === docId) || null)
-        }
-      },
-      () => {
-        const local = getLocalCollection<T & { id: string }>(collectionName)
-        callback(local.find((i) => i.id === docId) || null)
-      }
-    )
-  } catch {
+  const emitLocal = () => {
+    if (disposed) return
     const local = getLocalCollection<T & { id: string }>(collectionName)
     callback(local.find((i) => i.id === docId) || null)
-    return () => {}
+  }
+
+  const localUnsub = subscribeLocal(collectionName, emitLocal)
+
+  const attachCloud = () => {
+    if (disposed || cloudUnsub || !canReadCloudFirestore(collectionName)) return
+    try {
+      const docRef = doc(db, collectionName, docId)
+      cloudUnsub = onSnapshot(
+        docRef,
+        (snap: DocumentSnapshot) => {
+          if (disposed) return
+          if (snap.exists()) {
+            callback({ id: snap.id, ...snap.data() } as T)
+          } else {
+            emitLocal()
+          }
+        },
+        () => {
+          emitLocal()
+        }
+      )
+    } catch {
+      emitLocal()
+    }
+  }
+
+  if (canReadCloudFirestore(collectionName)) {
+    attachCloud()
+  } else {
+    emitLocal()
+    void fetchServerLocalDoc<T & { id: string }>(collectionName, docId).then((serverDoc) => {
+      if (disposed || !serverDoc) return
+      const local = getLocalCollection<any>(collectionName)
+      const idx = local.findIndex((i) => i.id === docId)
+      if (idx >= 0) local[idx] = serverDoc
+      else local.push(serverDoc)
+      setLocalCollection(collectionName, local, false)
+      callback(serverDoc)
+    })
+  }
+
+  const authInstance = getAuthInstance()
+  const authUnsub = authInstance
+    ? onAuthStateChanged(authInstance, (fbUser) => {
+        if (disposed) return
+        if (fbUser && !cloudUnsub) {
+          attachCloud()
+        }
+      })
+    : null
+
+  return () => {
+    disposed = true
+    localUnsub()
+    if (cloudUnsub) {
+      try {
+        cloudUnsub()
+      } catch {}
+    }
+    if (authUnsub) {
+      try {
+        authUnsub()
+      } catch {}
+    }
   }
 }
 
@@ -402,33 +748,80 @@ export function subscribeToCollection<T>(
     return () => {}
   }
 
-  if (!isFirebaseConfigured) {
-    const emitLocal = () => {
-      callback(getLocalCollection<T>(collectionName))
-    }
-    emitLocal()
-    return subscribeLocal(collectionName, emitLocal)
+  let disposed = false
+  let cloudUnsub: (() => void) | null = null
+
+  const emitLocal = () => {
+    if (disposed) return
+    callback(getLocalCollection<T>(collectionName))
   }
 
-  try {
-    const colRef = collection(db, collectionName)
-    const q = query(colRef, ...constraints)
-    return onSnapshot(
-      q,
-      (snap: QuerySnapshot) => {
-        const data = snap.docs.map((d) => ({ id: d.id, ...d.data() } as T))
-        setLocalCollection(collectionName, data)
-        callback(data)
-      },
-      (err) => {
-        console.warn(`[Firestore] Subscription error for ${collectionName}:`, err)
-        callback(getLocalCollection<T>(collectionName))
-      }
-    )
-  } catch (err) {
-    console.warn(`[Firestore] Failed to initiate subscription for ${collectionName}:`, err)
-    callback(getLocalCollection<T>(collectionName))
-    return () => {}
+  const localUnsub = subscribeLocal(collectionName, emitLocal)
+
+  const attachCloud = () => {
+    if (disposed || cloudUnsub || !canReadCloudFirestore(collectionName)) return
+    try {
+      const colRef = collection(db, collectionName)
+      const q = query(colRef, ...constraints)
+      cloudUnsub = onSnapshot(
+        q,
+        (snap: QuerySnapshot) => {
+          if (disposed) return
+          const data = snap.docs.map((d) => ({ id: d.id, ...d.data() } as T))
+          if (constraints.length === 0) {
+            setLocalCollection(collectionName, data, false)
+          }
+          callback(data)
+        },
+        (err) => {
+          console.warn(`[Firestore] Subscription fallback for ${collectionName}:`, err?.message || err)
+          emitLocal()
+        }
+      )
+    } catch (err) {
+      console.warn(`[Firestore] Failed to initiate subscription for ${collectionName}:`, err)
+      emitLocal()
+    }
+  }
+
+  if (canReadCloudFirestore(collectionName)) {
+    attachCloud()
+  } else {
+    emitLocal()
+    void fetchServerLocalCollection<T & { id?: string }>(collectionName).then((serverDocs) => {
+      if (disposed || !serverDocs) return
+      const merged = mergeServerAndBrowserDocs(
+        serverDocs,
+        getLocalCollection<T & { id?: string }>(collectionName)
+      )
+      setLocalCollection(collectionName, merged, false)
+      callback(merged as T[])
+    })
+  }
+
+  const authInstance = getAuthInstance()
+  const authUnsub = authInstance
+    ? onAuthStateChanged(authInstance, (fbUser) => {
+        if (disposed) return
+        if (fbUser && !cloudUnsub) {
+          attachCloud()
+        }
+      })
+    : null
+
+  return () => {
+    disposed = true
+    localUnsub()
+    if (cloudUnsub) {
+      try {
+        cloudUnsub()
+      } catch {}
+    }
+    if (authUnsub) {
+      try {
+        authUnsub()
+      } catch {}
+    }
   }
 }
 
@@ -439,23 +832,43 @@ export async function incrementField(
   field: string,
   amount = 1
 ): Promise<void> {
-  if (!isFirebaseConfigured) {
+  if (!canWriteCloudFirestore(collectionName)) {
     const local = getLocalCollection<any>(collectionName)
     const idx = local.findIndex((i) => i.id === docId)
+    const nowIso = new Date().toISOString()
     if (idx >= 0) {
       local[idx] = {
         ...local[idx],
         [field]: Number(local[idx][field] || 0) + amount,
-        updatedAt: new Date().toISOString(),
+        updatedAt: nowIso,
       }
       setLocalCollection(collectionName, local)
     }
+    await postToServerLocalStore({
+      action: 'update',
+      collection: collectionName,
+      id: docId,
+      data: {
+        [field]: { __lex_transform: 'increment', operand: amount },
+        updatedAt: nowIso,
+      },
+      cloudSynced: false,
+    })
     return
   }
 
   try {
     const docRef = doc(db, collectionName, docId)
     await updateDoc(docRef, { [field]: increment(amount) })
+    void postToServerLocalStore({
+      action: 'update',
+      collection: collectionName,
+      id: docId,
+      data: {
+        [field]: { __lex_transform: 'increment', operand: amount },
+      },
+      cloudSynced: true,
+    })
   } catch (err) {
     console.warn('Firestore incrementField warning:', err)
   }

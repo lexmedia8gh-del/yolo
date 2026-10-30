@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   X,
   ChevronRight,
@@ -31,13 +32,16 @@ import {
   collection,
   serverTimestamp,
   isFirebaseConfigured,
+  syncBatchToServerLocalStore,
 } from '@/lib/firebase/firestore'
+import { hasActiveFirebaseUser } from '@/lib/firebase/auth'
 import type { Client, Service, Package, Invoice, ClientLink } from '@/lib/types'
 import {
   formatCurrency,
   generateLxmInvoiceNumber,
   generateSecureToken,
   copyToClipboard,
+  openExternalUrl,
   appUrl,
   getPaymentLink,
 } from '@/lib/utils'
@@ -119,6 +123,7 @@ function StepIndicator({ current }: { current: WizardStep }) {
 
 // ─── Main Wizard ─────────────────────────────────────────────
 export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
+  const router = useRouter()
   const [step, setStep] = useState<WizardStep>('service')
 
   // Data
@@ -262,7 +267,7 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
       let createdProjectId = ''
       let createdInvoiceId = ''
 
-      if (isFirebaseConfigured) {
+      if (isFirebaseConfigured && hasActiveFirebaseUser()) {
         // 2. Prepare refs
         const projectRef = doc(collection(db, COLLECTIONS.PROJECTS))
         const invoiceRef = doc(collection(db, COLLECTIONS.INVOICES))
@@ -271,9 +276,9 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
 
         // 3. Batch write — atomic
         const batch = writeBatch(db)
+        const nowIso = new Date().toISOString()
 
-        // Project doc
-        batch.set(projectRef, {
+        const projectPayload = {
           name: resolvedProjectName,
           clientId: client.id,
           clientName: client.fullName,
@@ -295,13 +300,10 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
           startDate: startDate || null,
           deadline: dueDate || null,
           notes: projectNotes || '',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
           createdBy: 'admin',
-        })
+        }
 
-        // Invoice doc — one line item for the package
-        batch.set(invoiceRef, {
+        const invoicePayload = {
           invoiceNumber,
           clientId: client.id,
           clientName: client.fullName,
@@ -330,24 +332,64 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
           depositAmount,
           currency: selectedPackage.currency || 'GHS',
           status: 'Pending',
-          invoiceDate: serverTimestamp(),
           dueDate: dueDate || null,
           notes: projectNotes || '',
+          createdBy: 'admin',
+        }
+
+        const clientCountersPayload = {
+          projectCount: (client.projectCount || 0) + 1,
+          totalBilled: (client.totalBilled || 0) + totalAmount,
+          outstandingBalance: (client.outstandingBalance || 0) + totalAmount,
+        }
+
+        // Project doc
+        batch.set(projectRef, {
+          ...projectPayload,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
-          createdBy: 'admin',
+        })
+
+        // Invoice doc — one line item for the package
+        batch.set(invoiceRef, {
+          ...invoicePayload,
+          invoiceDate: serverTimestamp(),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
         })
 
         // Update client counters
         const clientRef = doc(db, COLLECTIONS.CLIENTS, client.id)
         batch.update(clientRef, {
-          projectCount: (client.projectCount || 0) + 1,
-          totalBilled: (client.totalBilled || 0) + totalAmount,
-          outstandingBalance: (client.outstandingBalance || 0) + totalAmount,
+          ...clientCountersPayload,
           updatedAt: serverTimestamp(),
         })
 
         await batch.commit()
+
+        void syncBatchToServerLocalStore([
+          {
+            type: 'set',
+            collection: COLLECTIONS.PROJECTS,
+            id: createdProjectId,
+            data: { ...projectPayload, createdAt: nowIso, updatedAt: nowIso },
+            cloudSynced: true,
+          },
+          {
+            type: 'set',
+            collection: COLLECTIONS.INVOICES,
+            id: createdInvoiceId,
+            data: { ...invoicePayload, invoiceDate: nowIso, createdAt: nowIso, updatedAt: nowIso },
+            cloudSynced: true,
+          },
+          {
+            type: 'update',
+            collection: COLLECTIONS.CLIENTS,
+            id: client.id,
+            data: { ...clientCountersPayload, updatedAt: nowIso },
+            cloudSynced: true,
+          },
+        ])
       } else {
         createdProjectId = await addDocument(COLLECTIONS.PROJECTS, {
           name: resolvedProjectName,
@@ -923,7 +965,7 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
                       size="sm"
                       fullWidth
                       icon={<ExternalLink size={13} />}
-                      onClick={() => window.open(result.paymentUrl, '_blank')}
+                      onClick={() => openExternalUrl(result.paymentUrl)}
                     >
                       Open Link
                     </Button>
@@ -957,7 +999,7 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
                   variant="outline"
                   fullWidth
                   icon={<FileText size={15} />}
-                  onClick={() => window.open('/invoices', '_self')}
+                  onClick={() => router.push('/invoices')}
                 >
                   View Invoice
                 </Button>
@@ -965,7 +1007,7 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
                   variant="primary"
                   fullWidth
                   icon={<ExternalLink size={15} />}
-                  onClick={() => window.open(`/projects/${result.projectId}`, '_self')}
+                  onClick={() => router.push(`/projects/${result.projectId}`)}
                 >
                   View Project
                 </Button>

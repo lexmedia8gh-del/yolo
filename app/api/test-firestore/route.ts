@@ -1,65 +1,45 @@
-import { NextResponse } from 'next/server'
-import { db, isFirebaseConfigured } from '@/lib/firebase/config'
-import { collection, addDoc, getDocs, serverTimestamp } from 'firebase/firestore'
+import { NextRequest, NextResponse } from 'next/server'
+import { isFirebaseConfigured } from '@/lib/firebase/config'
+import {
+  getAdminDb,
+  getFirebaseDatabaseId,
+  getFirebaseProjectId,
+  requireAdmin,
+} from '@/lib/firebase/admin'
+import { COLLECTIONS } from '@/lib/firebase/firestore'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
-  const result: any = {
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'lexmedia-client-system',
-    apiKeyConfigured: isFirebaseConfigured,
-    appIdConfigured: !!process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+export async function GET(req: NextRequest) {
+  const authResult = await requireAdmin(req)
+  if (!authResult.ok) {
+    return NextResponse.json({ error: authResult.error }, { status: authResult.status })
   }
 
-  if (!isFirebaseConfigured) {
-    return NextResponse.json(
-      {
-        status: 'unconfigured',
-        message: 'Firebase environment variables are not configured yet.',
-        ...result,
-      },
-      { status: 200 }
-    )
+  const result: Record<string, any> = {
+    projectId: getFirebaseProjectId(),
+    databaseId: getFirebaseDatabaseId() || '(default)',
+    apiKeyConfigured: isFirebaseConfigured,
   }
 
   try {
-    // 1. Attempt to add a real test document to Firestore
-    const testDoc = {
-      fullName: 'Verified Test Client',
-      email: 'test@lexmedia.com',
-      phone: '+233 24 000 0000',
-      company: 'Lexmedia Diagnostics',
-      status: 'active',
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      createdBy: 'diagnostic-test',
-    }
-
-    const docRef = await addDoc(collection(db, 'clients'), testDoc)
-    result.writeSuccess = true
-    result.createdDocId = docRef.id
-
-    // 2. Attempt to read from Firestore
-    const snap = await getDocs(collection(db, 'clients'))
+    const adminDb = getAdminDb()
+    const brandingSnap = await adminDb.collection(COLLECTIONS.SETTINGS).doc('branding').get()
     result.readSuccess = true
-    result.totalClientsInFirestore = snap.size
+    result.brandingConfigured = brandingSnap.exists
 
     return NextResponse.json({
       status: 'success',
-      message: 'Cloud Firestore is fully connected and accepting writes!',
+      message: 'Firestore server adapter is connected and operational.',
       ...result,
     })
   } catch (err: any) {
     return NextResponse.json(
       {
         status: 'error',
-        errorCode: err.code || 'unknown',
-        errorMessage: err.message,
+        errorCode: err?.code || 'unknown',
+        errorMessage: err?.message || 'Connection test failed',
         ...result,
-        diagnosis:
-          err.code === 'permission-denied'
-            ? 'Cloud Firestore is reachable, but your Firestore Security Rules in Firebase Console are currently blocking writes. Set rules to "allow read, write: if true;" in Firebase Console -> Firestore Database -> Rules.'
-            : 'Check Firebase configuration in .env.local',
       },
       { status: 500 }
     )

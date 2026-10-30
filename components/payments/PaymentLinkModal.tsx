@@ -25,6 +25,7 @@ import type { Client, Project, Invoice, ClientLink } from '@/lib/types'
 import {
   formatCurrency,
   copyToClipboard,
+  openExternalUrl,
   generateSecureToken,
   appUrl,
   getPaymentLink,
@@ -263,7 +264,7 @@ export function PaymentLinkModal({
               <Button
                 variant="outline"
                 size="md"
-                onClick={() => window.open(activeUrl, '_blank')}
+                onClick={() => openExternalUrl(activeUrl)}
                 icon={<ExternalLink size={14} />}
               >
                 Test Link in Browser

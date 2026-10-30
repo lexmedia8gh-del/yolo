@@ -37,6 +37,7 @@ import {
   formatCurrency,
   formatDate,
   copyToClipboard,
+  openExternalUrl,
   generateSecureToken,
   generateWhatsAppLink,
   appUrl,
@@ -358,7 +359,7 @@ export default function LinksPage() {
                               <button
                                 onClick={() => {
                                   const msg = `Hello ${link.clientName}! 👋\n\nHere is your secure payment link for invoice ${link.invoiceNumber || ''}:\n${publicUrl}\n\nAmount due: ${formatCurrency(link.amount || 0)}\n\nThank you! 🙏`
-                                  window.open(generateWhatsAppLink(whatsappNum, msg), '_blank')
+                                  openExternalUrl(generateWhatsAppLink(whatsappNum, msg))
                                 }}
                                 className="p-1.5 rounded-lg text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
                                 title="Send Link via WhatsApp"
@@ -469,7 +470,7 @@ export default function LinksPage() {
                           type="button"
                           onClick={() => {
                             const msg = `Hello ${link.clientName}! 👋\n\nHere is your secure payment link for invoice ${link.invoiceNumber || ''}:\n${publicUrl}\n\nAmount due: ${formatCurrency(link.amount || 0)}\n\nThank you! 🙏`
-                            window.open(generateWhatsAppLink(whatsappNum, msg), '_blank')
+                            openExternalUrl(generateWhatsAppLink(whatsappNum, msg))
                           }}
                           className="h-9 px-3 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 font-medium flex items-center gap-1 hover:bg-emerald-100"
                         >

@@ -23,7 +23,7 @@ import {
 import { BrandingProvider, useBranding } from '@/lib/contexts/BrandingContext'
 import { formatCurrency, formatFileSize, copyToClipboard } from '@/lib/utils'
 import { Spinner } from '@/components/ui/Spinner'
-import { getSupabaseClient } from '@/lib/supabase/client'
+import { getSupabaseClient, isSupabaseConfigured } from '@/lib/supabase/client'
 import toast from 'react-hot-toast'
 
 interface QuickJobDTO {
@@ -188,7 +188,7 @@ function QuickJobPortalContent() {
     setUploadProgress(10)
 
     try {
-      const supabase = getSupabaseClient()
+      const useSupabaseDirect = isSupabaseConfigured()
       const bucketName = 'deliveries'
 
       for (let i = 0; i < uploadedFiles.length; i++) {
@@ -196,41 +196,67 @@ function QuickJobPortalContent() {
         const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')
         const storagePath = `quick-jobs/${job.id}/${Date.now()}_${safeName}`
 
-        // Upload file to Supabase storage
-        const { data: uploadData, error: uploadErr } = await supabase.storage
-          .from(bucketName)
-          .upload(storagePath, file, {
-            cacheControl: '3600',
-            upsert: true,
-          })
+        let uploadedDirectly = false
+        let directUrl = ''
 
-        if (uploadErr) {
-          throw new Error(`Storage upload failed: ${uploadErr.message}`)
+        if (useSupabaseDirect) {
+          try {
+            const supabase = getSupabaseClient()
+            const { error: uploadErr } = await supabase.storage
+              .from(bucketName)
+              .upload(storagePath, file, {
+                cacheControl: '3600',
+                upsert: true,
+              })
+
+            if (!uploadErr) {
+              const { data: publicUrlData } = supabase.storage.from(bucketName).getPublicUrl(storagePath)
+              directUrl = publicUrlData?.publicUrl || ''
+              if (directUrl) {
+                uploadedDirectly = true
+              }
+            }
+          } catch (supEx) {
+            console.warn('Direct Supabase upload failed, falling back to server upload:', supEx)
+          }
         }
 
-        // Get public or signed URL
-        const { data: publicUrlData } = supabase.storage.from(bucketName).getPublicUrl(storagePath)
-        const directUrl = publicUrlData?.publicUrl || ''
+        let recordRes: Response
+        if (uploadedDirectly && directUrl) {
+          recordRes = await fetch('/api/quick-jobs/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jobId: job.id,
+              clientId: job.id,
+              clientName: job.clientName,
+              directUrl,
+              storagePath,
+              fileName: file.name,
+              fileSize: file.size,
+              fileType: file.type || 'application/octet-stream',
+            }),
+          })
+        } else {
+          const formData = new FormData()
+          formData.append('file', file)
+          formData.append('jobId', job.id)
+          formData.append('clientId', job.id)
+          formData.append('clientName', job.clientName)
+          formData.append('storagePath', storagePath)
+          formData.append('fileName', file.name)
+          formData.append('fileSize', String(file.size))
+          formData.append('fileType', file.type || 'application/octet-stream')
 
-        // Register file with backend
-        const recordRes = await fetch('/api/quick-jobs/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jobId: job.id,
-            clientId: job.id,
-            clientName: job.clientName,
-            directUrl,
-            storagePath,
-            fileName: file.name,
-            fileSize: file.size,
-            fileType: file.type || 'application/octet-stream',
-          }),
-        })
+          recordRes = await fetch('/api/quick-jobs/upload', {
+            method: 'POST',
+            body: formData,
+          })
+        }
 
         if (!recordRes.ok) {
-          const recordErr = await recordRes.json()
-          throw new Error(recordErr.error || 'Failed to record uploaded file.')
+          const recordErr = await recordRes.json().catch(() => ({}))
+          throw new Error(recordErr.error || 'Failed to upload file.')
         }
 
         setUploadProgress(Math.round(((i + 1) / uploadedFiles.length) * 100))

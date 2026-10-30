@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb, getAdminStorage } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
+import { isSupabaseConfigured } from '@/lib/supabase/client'
 import fs from 'fs'
 import path from 'path'
 
@@ -56,7 +57,7 @@ export async function GET(req: NextRequest) {
     const downloadUrl = data.downloadUrl
 
     // 2. Try downloading from Supabase Storage across known buckets
-    if (storagePath) {
+    if (storagePath && isSupabaseConfigured()) {
       try {
         const supabase = getSupabaseServerClient()
         const buckets = ['Delivery files', 'deliveries', 'delivery-files', 'quick-jobs']
@@ -170,19 +171,25 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 5. Fallback to local filesystem for legacy compatibility
-    if (storagePath) {
-      const localFilePath = path.join(process.cwd(), 'public', 'uploads', storagePath)
-      if (fs.existsSync(localFilePath)) {
-        const fileBuffer = await fs.promises.readFile(localFilePath)
-        return new NextResponse(new Uint8Array(fileBuffer), {
-          status: 200,
-          headers: {
-            'Content-Type': mimeType,
-            'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
-            'Content-Length': fileBuffer.length.toString(),
-          },
-        })
+    // 5. Fallback to local filesystem (/tmp/uploads and public/uploads)
+    if (storagePath && typeof storagePath === 'string' && !storagePath.includes('..')) {
+      const cleanRel = storagePath.replace(/^\/+/, '')
+      const localCandidates = [
+        path.join('/tmp', 'uploads', cleanRel),
+        path.join(process.cwd(), 'public', 'uploads', cleanRel),
+      ]
+      for (const localFilePath of localCandidates) {
+        if (fs.existsSync(localFilePath)) {
+          const fileBuffer = await fs.promises.readFile(localFilePath)
+          return new NextResponse(new Uint8Array(fileBuffer), {
+            status: 200,
+            headers: {
+              'Content-Type': mimeType,
+              'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
+              'Content-Length': fileBuffer.length.toString(),
+            },
+          })
+        }
       }
     }
 

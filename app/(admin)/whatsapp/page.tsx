@@ -24,7 +24,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
 import { getDocuments, COLLECTIONS } from '@/lib/firebase/firestore'
 import type { Client } from '@/lib/types'
-import { generateWhatsAppLink, formatWhatsAppPhone, copyToClipboard } from '@/lib/utils'
+import { generateWhatsAppLink, formatWhatsAppPhone, copyToClipboard, openExternalUrl } from '@/lib/utils'
 import { CLIENT_TEMPLATES, formatTemplateForClient } from '@/lib/templates/clientTemplates'
 import toast from 'react-hot-toast'
 
@@ -91,7 +91,7 @@ export default function WhatsAppPage() {
       toast('Opening WhatsApp with contact picker...', { icon: '💬' })
     }
 
-    window.open(url, '_blank', 'noopener,noreferrer')
+    openExternalUrl(url)
   }
 
   return (

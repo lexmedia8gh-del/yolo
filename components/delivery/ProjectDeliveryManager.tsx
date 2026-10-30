@@ -71,6 +71,7 @@ import {
   getFileCategory,
   generateSecureToken,
   copyToClipboard,
+  openExternalUrl,
   getDeliveryLink,
 } from '@/lib/utils'
 import { Timestamp } from 'firebase/firestore'
@@ -164,6 +165,7 @@ export function ProjectDeliveryManager({
   const replaceFileInputRef = useRef<HTMLInputElement>(null)
   const [fileToReplace, setFileToReplace] = useState<DeliveryFile | null>(null)
   const [isReplacingFile, setIsReplacingFile] = useState(false)
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
 
   // Optional Image Optimization (OFF by default)
   const [imageOptimizationEnabled, setImageOptimizationEnabled] = useState<boolean>(() => {
@@ -559,7 +561,7 @@ export function ProjectDeliveryManager({
 
   // 4. Handle File Delete
   const handleDeleteFile = async (file: DeliveryFile) => {
-    if (!confirm(`Delete "${file.fileName}" from this delivery?`)) return
+    setConfirmingDeleteId(null)
 
     try {
       if (file.storagePath) {
@@ -1693,7 +1695,7 @@ export function ProjectDeliveryManager({
                 size="sm"
                 variant="outline"
                 icon={<ExternalLink size={13} />}
-                onClick={() => window.open(deliveryUrl, '_blank')}
+                onClick={() => openExternalUrl(deliveryUrl)}
               >
                 Preview Client Portal
               </Button>
@@ -1774,19 +1776,39 @@ export function ProjectDeliveryManager({
                       <RefreshCw size={13} className={isReplacingFile && fileToReplace?.id === file.id ? "animate-spin" : ""} />
                     </button>
                     <button
-                      onClick={() => window.open(file.downloadUrl, '_blank')}
+                      onClick={() => openExternalUrl(file.downloadUrl)}
                       className="p-1.5 rounded-lg text-gray-500 hover:text-indigo-600 hover:bg-gray-100 transition-colors text-xs font-medium flex items-center gap-1"
                       title="Download file"
                     >
                       <ExternalLink size={13} />
                     </button>
-                    <button
-                      onClick={() => handleDeleteFile(file)}
-                      className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
-                      title="Delete file"
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                    {confirmingDeleteId === file.id ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteFile(file)}
+                          className="px-2 py-1 rounded-md bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold transition-colors"
+                        >
+                          Delete?
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingDeleteId(null)}
+                          className="px-2 py-1 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-600 text-[11px] font-medium transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingDeleteId(file.id)}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                        title="Delete file"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}

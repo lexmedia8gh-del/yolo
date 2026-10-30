@@ -2,6 +2,7 @@ import * as admin from 'firebase-admin';
 import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 import type { NextRequest } from 'next/server';
 import firebaseAppletConfig from '@/firebase-applet-config.json';
+import { getFirestoreRestAdapter } from './firestore-rest-adapter';
 
 function cleanAdminEnv(raw?: string): string | undefined {
   if (!raw) return undefined;
@@ -122,9 +123,14 @@ function ensureAdminApp(): admin.app.App {
   return admin.app();
 }
 
-export function getAdminDb() {
-  const app = ensureAdminApp();
+export function getAdminDb(): FirebaseFirestore.Firestore {
+  const projectId = getFirebaseProjectId();
   const dbId = getFirebaseDatabaseId();
+  if (!hasAdminCredentials() && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    return getFirestoreRestAdapter(projectId, dbId) as unknown as FirebaseFirestore.Firestore;
+  }
+
+  const app = ensureAdminApp();
   if (dbId && dbId !== '(default)') {
     return getAdminFirestore(app, dbId);
   }
@@ -181,7 +187,7 @@ export async function requireAdmin(request: NextRequest) {
 
     // 3. UID-bound profile role check: preserves admin access if an admin changed their email
     let hasStoredAdminRole = false;
-    if (!hasAdminClaim && !isAuthorizedEmail && hasAdminCredentials()) {
+    if (!hasAdminClaim && !isAuthorizedEmail) {
       try {
         const userSnap = await getAdminDb().collection('users').doc(decoded.uid).get();
         hasStoredAdminRole = userSnap.exists && userSnap.data()?.role === 'admin';

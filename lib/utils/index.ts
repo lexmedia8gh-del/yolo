@@ -357,7 +357,7 @@ export function getFileCategory(fileName: string, mimeType?: string): 'image' | 
   return 'other'
 }
 
-// ─── Clipboard ───────────────────────────────────────────────
+// ─── Clipboard & External Navigation ─────────────────────────
 export async function copyToClipboard(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text)
@@ -372,6 +372,18 @@ export async function copyToClipboard(text: string): Promise<boolean> {
     document.body.removeChild(el)
     return true
   }
+}
+
+export function openExternalUrl(url: string): void {
+  if (!url || typeof document === 'undefined') return
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.target = '_blank'
+  anchor.rel = 'noopener noreferrer'
+  anchor.style.display = 'none'
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
 }
 
 // ─── Centralized App URL & Payment Link Utilities ───────────

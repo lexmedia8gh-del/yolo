@@ -18,7 +18,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
-import { copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone } from '@/lib/utils'
+import { copyToClipboard, openExternalUrl, generateWhatsAppLink, formatWhatsAppPhone } from '@/lib/utils'
 import {
   ClientTemplate,
   getStoredClientTemplates,
@@ -139,7 +139,7 @@ export function ClientInformationTemplatesModal({
       toast('Opening WhatsApp with contact picker...', { icon: '💬' })
     }
 
-    window.open(url, '_blank', 'noopener,noreferrer')
+    openExternalUrl(url)
   }
 
   // Save new custom template

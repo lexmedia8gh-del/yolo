@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { updateDocument, COLLECTIONS } from '@/lib/firebase/firestore'
 import type { Project, ClientLink } from '@/lib/types'
-import { formatCurrency, formatDate, copyToClipboard, getPaymentLink } from '@/lib/utils'
+import { formatCurrency, formatDate, copyToClipboard, openExternalUrl, getPaymentLink } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface ProjectPaymentRequestsProps {
@@ -49,7 +49,7 @@ export function ProjectPaymentRequests({
     const url = getPaymentLink(link.token)
     const clientName = project.clientName || 'Valued Client'
     const msg = `Hello ${clientName}! 👋\n\nPlease find your secure payment link for ${project.name} (${formatCurrency(link.amount || 0, link.currency || project.currency || 'GHS')}):\n${url}\n\nThank you for choosing LEXMEDIA.GH!`
-    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank')
+    openExternalUrl(`https://wa.me/?text=${encodeURIComponent(msg)}`)
   }
 
   const handleCancelRequest = async () => {
@@ -234,7 +234,7 @@ export function ProjectPaymentRequests({
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => window.open(paymentUrl, '_blank')}
+                      onClick={() => openExternalUrl(paymentUrl)}
                       title="View Payment Page"
                       className="h-8 px-2.5 text-xs"
                       icon={<ExternalLink size={13} />}

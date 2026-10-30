@@ -50,6 +50,7 @@ import {
   formatFileSize,
   generateSecureToken,
   copyToClipboard,
+  openExternalUrl,
   buildClientPreviewUrl,
   getFileCategory,
 } from '@/lib/utils'
@@ -447,7 +448,7 @@ export function CreatePreviewModal({
             <Button
               variant="primary"
               icon={<ExternalLink size={14} />}
-              onClick={() => window.open(createdPreview.url, '_blank')}
+              onClick={() => openExternalUrl(createdPreview.url)}
             >
               Open Client Preview
             </Button>

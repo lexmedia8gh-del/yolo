@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import fs from 'fs'
+import path from 'path'
 import { getAdminDb, requireAdmin } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 import { FieldValue } from 'firebase-admin/firestore'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
+import { isSupabaseConfigured } from '@/lib/supabase/client'
 import { STORAGE_BUCKETS } from '@/lib/supabase/storage'
 
 export const dynamic = 'force-dynamic'
@@ -66,26 +69,43 @@ export async function POST(req: NextRequest) {
     const sanitizedName = fileName.replace(/[^a-zA-Z0-9._\- ]/g, '_').trim() || 'file'
     const storagePath = `deliveries/${parentId}/${deliveryId}/${fileId}/${sanitizedName}`
 
-    // Upload complete assembled buffer to Supabase Storage
-    const supabase = getSupabaseServerClient()
-    const { error: uploadError } = await supabase.storage
-      .from(STORAGE_BUCKETS.DELIVERY_FILES)
-      .upload(storagePath, completeBuffer, {
-        contentType: fileType,
-        upsert: true,
-      })
+    // Upload complete assembled buffer to Supabase Storage if configured, with local fallback
+    let downloadUrl = `/api/files?id=${encodeURIComponent(fileId)}`
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabaseServerClient()
+        const { error: uploadError } = await supabase.storage
+          .from(STORAGE_BUCKETS.DELIVERY_FILES)
+          .upload(storagePath, completeBuffer, {
+            contentType: fileType,
+            upsert: true,
+          })
 
-    if (uploadError) {
-      console.error('[Chunk Upload] Storage upload error:', uploadError)
-      return NextResponse.json({ error: `Storage upload failed: ${uploadError.message}` }, { status: 500 })
+        if (!uploadError) {
+          const { data: urlData } = supabase.storage
+            .from(STORAGE_BUCKETS.DELIVERY_FILES)
+            .getPublicUrl(storagePath)
+          if (urlData?.publicUrl) {
+            downloadUrl = `/api/files?id=${encodeURIComponent(fileId)}`
+          }
+        } else {
+          console.warn('[Chunk Upload] Supabase upload warning, falling back to local disk:', uploadError.message)
+        }
+      } catch (supErr: any) {
+        console.warn('[Chunk Upload] Supabase exception, falling back to local disk:', supErr?.message)
+      }
     }
 
-    // Get public URL
-    const { data: urlData } = supabase.storage
-      .from(STORAGE_BUCKETS.DELIVERY_FILES)
-      .getPublicUrl(storagePath)
-
-    const downloadUrl = urlData?.publicUrl || `/api/files?id=${fileId}`
+    const localTargets = [
+      path.join('/tmp', 'uploads', storagePath),
+      path.join(process.cwd(), 'public', 'uploads', storagePath),
+    ]
+    for (const target of localTargets) {
+      try {
+        await fs.promises.mkdir(path.dirname(target), { recursive: true })
+        await fs.promises.writeFile(target, completeBuffer)
+      } catch {}
+    }
 
     // Register Firestore record
     const adminDb = getAdminDb()

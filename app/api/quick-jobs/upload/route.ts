@@ -1,20 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
+import fs from 'fs'
+import path from 'path'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 import { FieldValue } from 'firebase-admin/firestore'
 import { generateSecureToken } from '@/lib/utils'
+import { isSupabaseConfigured } from '@/lib/supabase/client'
+import { getSupabaseServerClient } from '@/lib/supabase/server'
+import { STORAGE_BUCKETS } from '@/lib/supabase/storage'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
   try {
     let body: any = {}
+    let uploadedFile: File | null = null
     const contentType = req.headers.get('content-type') || ''
-    
+
     if (contentType.includes('application/json')) {
       body = await req.json()
     } else if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData()
+      const maybeFile = formData.get('file')
+      if (maybeFile && typeof (maybeFile as File).arrayBuffer === 'function') {
+        uploadedFile = maybeFile as File
+      }
       body = {
         jobId: formData.get('jobId'),
         clientId: formData.get('clientId'),
@@ -22,30 +32,30 @@ export async function POST(req: NextRequest) {
         fileDocId: formData.get('fileDocId'),
         directUrl: formData.get('directUrl'),
         storagePath: formData.get('storagePath'),
-        fileName: formData.get('fileName'),
-        fileSize: formData.get('fileSize'),
-        fileType: formData.get('fileType'),
+        fileName: formData.get('fileName') || uploadedFile?.name,
+        fileSize: formData.get('fileSize') || uploadedFile?.size,
+        fileType: formData.get('fileType') || uploadedFile?.type,
       }
     } else {
       body = await req.json().catch(() => ({}))
     }
 
-    const jobId = body.jobId || ''
-    const clientId = body.clientId || ''
-    const clientName = body.clientName || ''
-    const directUrl = body.directUrl || ''
-    const storagePath = body.storagePath || ''
-    const fileName = body.fileName || body.originalName || 'file'
-    const fileSize = parseInt(body.fileSize, 10) || 0
-    const fileType = body.fileType || 'application/octet-stream'
+    const jobId = String(body.jobId || '').trim()
+    const clientId = String(body.clientId || '').trim()
+    const clientName = String(body.clientName || '').trim()
+    let directUrl = String(body.directUrl || '').trim()
+    let storagePath = String(body.storagePath || '').trim()
+    const fileName = String(body.fileName || body.originalName || uploadedFile?.name || 'file')
+    const fileSize = parseInt(String(body.fileSize ?? uploadedFile?.size ?? 0), 10) || 0
+    const fileType = String(body.fileType || uploadedFile?.type || 'application/octet-stream')
 
     if (!jobId) {
       return NextResponse.json({ error: 'Missing Quick Job ID' }, { status: 400 })
     }
 
-    if (!directUrl || !storagePath) {
+    if ((!directUrl || !storagePath) && !uploadedFile) {
       return NextResponse.json(
-        { error: 'Upload failed: Files must be uploaded directly to Supabase Storage. Missing direct storage URL.' },
+        { error: 'Upload failed: Missing file payload or direct storage URL.' },
         { status: 400 }
       )
     }
@@ -71,9 +81,50 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const fileDocId = body.fileDocId || generateSecureToken('qjf_')
+    const fileDocId = String(body.fileDocId || generateSecureToken('qjf_'))
+    let storageProvider: 'supabase' | 'local' = 'supabase'
+
+    if (uploadedFile && (!directUrl || !storagePath)) {
+      const buffer = Buffer.from(await uploadedFile.arrayBuffer())
+      const safeName = fileName.replace(/[^a-zA-Z0-9.\-_]/g, '_') || 'file'
+      storagePath = (storagePath && !storagePath.includes('..'))
+        ? storagePath
+        : `quick-jobs/${jobId}/${Date.now()}_${safeName}`
+
+      let uploadedToSupabase = false
+      if (isSupabaseConfigured()) {
+        try {
+          const supabase = getSupabaseServerClient()
+          const { error: supErr } = await supabase.storage
+            .from(STORAGE_BUCKETS.DELIVERY_FILES)
+            .upload(storagePath, buffer, {
+              contentType: fileType,
+              upsert: true,
+            })
+          if (!supErr) {
+            uploadedToSupabase = true
+          }
+        } catch (supEx) {
+          console.warn('[Quick Jobs Upload] Supabase upload warning, falling back to local storage:', supEx)
+        }
+      }
+
+      const localTargets = [
+        path.join('/tmp', 'uploads', storagePath),
+        path.join(process.cwd(), 'public', 'uploads', storagePath),
+      ]
+      for (const target of localTargets) {
+        try {
+          await fs.promises.mkdir(path.dirname(target), { recursive: true })
+          await fs.promises.writeFile(target, buffer)
+        } catch {}
+      }
+
+      directUrl = `/api/files?id=${encodeURIComponent(fileDocId)}`
+      storageProvider = uploadedToSupabase ? 'supabase' : 'local'
+    }
+
     const downloadUrl = directUrl
-    const storageProvider = 'supabase'
 
     // 2. Save File Document to Firestore
     const fileRecord = {

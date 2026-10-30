@@ -73,13 +73,15 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Always persist locally for offline/sandbox/fallback resiliency
-    try {
-      const localDir = path.join(process.cwd(), 'public', 'uploads', path.dirname(finalPath))
-      await fs.promises.mkdir(localDir, { recursive: true })
-      const localFilePath = path.join(process.cwd(), 'public', 'uploads', finalPath)
-      await fs.promises.writeFile(localFilePath, buffer)
-    } catch (localWriteErr) {
-      console.warn('[Preview Upload Local Write Warning]:', localWriteErr)
+    const localTargets = [
+      path.join('/tmp', 'uploads', finalPath),
+      path.join(process.cwd(), 'public', 'uploads', finalPath),
+    ]
+    for (const target of localTargets) {
+      try {
+        await fs.promises.mkdir(path.dirname(target), { recursive: true })
+        await fs.promises.writeFile(target, buffer)
+      } catch {}
     }
 
     return NextResponse.json({

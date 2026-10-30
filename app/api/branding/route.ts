@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAdminDb, hasAdminCredentials, requireAdmin } from '@/lib/firebase/admin'
+import { getAdminDb, requireAdmin } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 
 export const dynamic = 'force-dynamic'
@@ -60,13 +60,6 @@ function sanitizeStoredLogoUrl(url?: unknown, storagePath?: unknown): string {
 }
 
 export async function GET() {
-  if (!hasAdminCredentials() && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    return NextResponse.json({
-      success: true,
-      branding: DEFAULT_BRANDING,
-    })
-  }
-
   try {
     const adminDb = getAdminDb()
     const [brandSnap, bizSnap] = await Promise.all([
@@ -117,13 +110,6 @@ export async function PATCH(req: NextRequest) {
   const authResult = await requireAdmin(req)
   if (!authResult.ok) {
     return NextResponse.json({ error: authResult.error }, { status: authResult.status })
-  }
-
-  if (!hasAdminCredentials() && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    return NextResponse.json(
-      { error: 'Firebase Admin credentials are not configured on server.', code: 'ADMIN_UNCONFIGURED' },
-      { status: 503 }
-    )
   }
 
   try {

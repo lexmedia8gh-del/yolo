@@ -19,7 +19,7 @@ import {
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import type { Client, Project, Invoice } from '@/lib/types'
-import { formatCurrency, copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone, getProductionUrl, getPaymentLink, isVercelPlatformDomain } from '@/lib/utils'
+import { formatCurrency, copyToClipboard, openExternalUrl, generateWhatsAppLink, formatWhatsAppPhone, getProductionUrl, getPaymentLink, isVercelPlatformDomain } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface PreparePaymentMessageModalProps {
@@ -164,7 +164,7 @@ export function PreparePaymentMessageModal({
       toast('Opening WhatsApp with contact picker...', { icon: '💬' })
     }
 
-    window.open(url, '_blank', 'noopener,noreferrer')
+    openExternalUrl(url)
   }
 
   const handleSendEmailViaBrevo = async () => {
