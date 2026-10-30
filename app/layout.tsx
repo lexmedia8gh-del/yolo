@@ -14,6 +14,10 @@ export const metadata: Metadata = {
   },
   description:
     'Operations management system for LEXMEDIA.GH.',
+  openGraph: {
+    title: 'LEXMEDIA.GH • Ctrl Room',
+    description: 'Operations management system for LEXMEDIA.GH.',
+  },
   icons: {
     icon: '/favicon.ico',
   },

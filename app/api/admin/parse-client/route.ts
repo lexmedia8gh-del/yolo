@@ -218,7 +218,14 @@ export async function POST(req: NextRequest) {
     // Try Gemini AI if API key is present
     if (process.env.GEMINI_API_KEY) {
       try {
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+        const ai = new GoogleGenAI({
+          apiKey: process.env.GEMINI_API_KEY,
+          httpOptions: {
+            headers: {
+              "User-Agent": "aistudio-build",
+            },
+          },
+        })
         const prompt = `You are a smart client intake assistant for a creative design and media agency.
 Analyze this unstructured text (which may be a WhatsApp message, email, meeting note, or client conversation) and extract structured client details.
 
@@ -241,7 +248,7 @@ ${trimmedText}
 """`
 
         const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-3.8-flash",
           contents: prompt,
           config: {
             responseMimeType: "application/json",

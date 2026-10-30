@@ -49,6 +49,26 @@ export function isPublicClientRoute(pathname: string): boolean {
   return false
 }
 
+function buildRedirectUrl(request: NextRequest, targetPath: string): URL {
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
+  const rawHost = forwardedHost || request.headers.get('host')?.split(',')[0]?.trim() || ''
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
+
+  if (rawHost && !rawHost.startsWith('0.0.0.0')) {
+    const proto =
+      forwardedProto ||
+      (rawHost.startsWith('localhost') || rawHost.startsWith('127.0.0.1') ? 'http' : 'https')
+    return new URL(targetPath, `${proto}://${rawHost}`)
+  }
+
+  const envAppUrl = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || '').trim()
+  if (envAppUrl.startsWith('http://') || envAppUrl.startsWith('https://')) {
+    return new URL(targetPath, envAppUrl)
+  }
+
+  return new URL(targetPath, request.url)
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
@@ -61,7 +81,9 @@ export function middleware(request: NextRequest) {
   if (pathname === '/') {
     const sessionCookie = request.cookies.get('__session')
     const isAuthenticated = !!sessionCookie?.value
-    return NextResponse.redirect(new URL(isAuthenticated ? '/dashboard' : '/login', request.url))
+    return NextResponse.redirect(
+      buildRedirectUrl(request, isAuthenticated ? '/dashboard' : '/login')
+    )
   }
 
   // 2. Check for Firebase auth session cookie
@@ -78,14 +100,14 @@ export function middleware(request: NextRequest) {
 
   // Redirect unauthenticated users away from protected routes
   if (isProtectedPath && !isAuthenticated) {
-    const loginUrl = new URL('/login', request.url)
+    const loginUrl = buildRedirectUrl(request, '/login')
     loginUrl.searchParams.set('redirect', pathname)
     return NextResponse.redirect(loginUrl)
   }
 
   // Redirect authenticated users away from login page
   if (isAuthPath && isAuthenticated) {
-    return NextResponse.redirect(new URL('/dashboard', request.url))
+    return NextResponse.redirect(buildRedirectUrl(request, '/dashboard'))
   }
 
   return NextResponse.next()
