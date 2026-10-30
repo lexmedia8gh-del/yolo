@@ -210,6 +210,27 @@ export function QuickClientCreationModal({
       toast.success('Client created successfully!')
       onClose()
 
+      // Automatically dispatch Onboarding Welcome Email if client email is available
+      if (clientPayload.email && clientPayload.email.includes('@')) {
+        try {
+          const emailRes = await fetch('/api/clients/send-welcome-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              clientId: newId,
+              email: clientPayload.email,
+              name: clientPayload.fullName,
+            }),
+          })
+          const emailData = await emailRes.json()
+          if (emailRes.ok && emailData.ok) {
+            toast.success(`Onboarding welcome email sent to ${clientPayload.email}`)
+          }
+        } catch (emailErr) {
+          console.warn('Welcome email dispatch warning:', emailErr)
+        }
+      }
+
       // Attempt Welcome SMS if phone number is present
       const targetPhone = clientPayload.phone || clientPayload.whatsappNumber
       if (targetPhone) {
@@ -226,8 +247,6 @@ export function QuickClientCreationModal({
           const smsData = await smsRes.json()
           if (smsRes.ok && smsData.success === true) {
             toast.success(smsData.message || 'Welcome SMS request accepted by provider')
-          } else if (smsData?.error) {
-            toast.error(`Welcome SMS notice: ${smsData.error}`, { duration: 5000 })
           }
         } catch (smsErr) {
           console.warn('Welcome SMS dispatch error:', smsErr)

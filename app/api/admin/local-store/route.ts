@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/firebase/admin'
+import { getAdminDb, requireAdmin } from '@/lib/firebase/admin'
 import {
   clearLocalCollection,
   dehydrateForJsonResponse,
@@ -40,6 +40,35 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid collection name.' }, { status: 400 })
   }
 
+  // First try fetching directly from Cloud Firestore via getAdminDb
+  try {
+    const adminDb = getAdminDb()
+    if (docId) {
+      const snap = await adminDb.collection(col).doc(docId).get()
+      if (snap.exists) {
+        const data = snap.data() || {}
+        setLocalDoc(col, docId, data, { merge: true, cloudSynced: true })
+        return NextResponse.json({
+          ok: true,
+          doc: { ...data, id: docId },
+        })
+      }
+    } else {
+      const colSnap = await adminDb.collection(col).get()
+      if (!colSnap.empty) {
+        const cloudDocs: any[] = []
+        colSnap.forEach((d) => {
+          const data = d.data() || {}
+          setLocalDoc(col, d.id, data, { merge: true, cloudSynced: true })
+          cloudDocs.push({ ...data, id: d.id })
+        })
+        return NextResponse.json({ ok: true, docs: cloudDocs })
+      }
+    }
+  } catch (err) {
+    console.warn(`[LocalStore API] Cloud Firestore query fallback for ${col}:`, err)
+  }
+
   if (docId) {
     const found = getLocalDocHydrated(col, docId)
     if (!found.exists || !found.data) {
@@ -66,6 +95,7 @@ export async function POST(req: NextRequest) {
     const action = String(body?.action || '')
     const col = sanitizeCollection(body?.collection)
     const cloudSynced = Boolean(body?.cloudSynced)
+    const adminDb = getAdminDb()
 
     if (action === 'batch' && Array.isArray(body?.operations)) {
       for (const op of body.operations) {
@@ -74,13 +104,16 @@ export async function POST(req: NextRequest) {
         if (!opCol || !opId) continue
         if (op.type === 'delete') {
           deleteLocalDoc(opCol, opId, { cloudSynced: Boolean(op.cloudSynced) })
+          try { await adminDb.collection(opCol).doc(opId).delete() } catch {}
         } else if (op.type === 'update') {
           updateLocalDoc(opCol, opId, op.data || {}, { cloudSynced: Boolean(op.cloudSynced) })
+          try { await adminDb.collection(opCol).doc(opId).set(op.data || {}, { merge: true }) } catch {}
         } else {
           setLocalDoc(opCol, opId, op.data || {}, {
             merge: Boolean(op.merge),
             cloudSynced: Boolean(op.cloudSynced),
           })
+          try { await adminDb.collection(opCol).doc(opId).set(op.data || {}, { merge: Boolean(op.merge) }) } catch {}
         }
       }
       return NextResponse.json({ ok: true })
@@ -102,6 +135,7 @@ export async function POST(req: NextRequest) {
         if (!itemId) continue
         const { id: _ignored, ...rest } = item
         setLocalDoc(col, itemId, rest, { merge: true, cloudSynced: defaultCloudSynced })
+        try { await adminDb.collection(col).doc(itemId).set(rest, { merge: true }) } catch {}
       }
       return NextResponse.json({ ok: true })
     }
@@ -117,6 +151,11 @@ export async function POST(req: NextRequest) {
         merge: Boolean(body?.merge),
         cloudSynced,
       })
+      try {
+        await adminDb.collection(col).doc(docId).set(data, { merge: Boolean(body?.merge) })
+      } catch (e) {
+        console.warn(`[LocalStore API] Failed to mirror set to Cloud Firestore for ${col}/${docId}:`, e)
+      }
       return NextResponse.json({
         ok: true,
         id: docId,
@@ -127,6 +166,11 @@ export async function POST(req: NextRequest) {
     if (action === 'update') {
       const data = body?.data && typeof body.data === 'object' ? body.data : {}
       const updated = updateLocalDoc(col, docId, data, { cloudSynced })
+      try {
+        await adminDb.collection(col).doc(docId).set(data, { merge: true })
+      } catch (e) {
+        console.warn(`[LocalStore API] Failed to mirror update to Cloud Firestore for ${col}/${docId}:`, e)
+      }
       return NextResponse.json({
         ok: true,
         id: docId,
@@ -136,6 +180,11 @@ export async function POST(req: NextRequest) {
 
     if (action === 'delete') {
       deleteLocalDoc(col, docId, { cloudSynced })
+      try {
+        await adminDb.collection(col).doc(docId).delete()
+      } catch (e) {
+        console.warn(`[LocalStore API] Failed to mirror delete to Cloud Firestore for ${col}/${docId}:`, e)
+      }
       return NextResponse.json({ ok: true, id: docId })
     }
 

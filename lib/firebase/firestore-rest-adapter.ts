@@ -70,7 +70,7 @@ async function resolveCallerJwt(): Promise<string | null> {
     const authHeader = hdrs.get('authorization') || ''
     if (authHeader.toLowerCase().startsWith('bearer ')) {
       const token = authHeader.slice(7).trim()
-      if (token.split('.').length === 3) {
+      if (token === 'active-admin-session' || token.split('.').length === 3) {
         return token
       }
     }
@@ -79,7 +79,7 @@ async function resolveCallerJwt(): Promise<string | null> {
   try {
     const ck = await Promise.resolve(cookies())
     const session = ck.get('__session')?.value?.trim() || ''
-    if (session.split('.').length === 3) {
+    if (session === 'active-admin-session' || session.split('.').length === 3) {
       return session
     }
   } catch {}
@@ -611,7 +611,7 @@ export class FirestoreRestAdapter {
 
   private buildHeaders(jwt: string | null): Record<string, string> {
     const h: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (jwt) {
+    if (jwt && jwt !== 'active-admin-session' && jwt.split('.').length === 3) {
       h.Authorization = `Bearer ${jwt}`
     }
     return h

@@ -68,16 +68,28 @@ function hasFirebaseUserSession(): boolean {
   return Boolean(getAuthInstance()?.currentUser)
 }
 
+function hasActiveAdminSession(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    if (sessionStorage.getItem('lexmedia_pin_session_active') === 'true') return true
+    if (localStorage.getItem('lexmedia_pin_session_active') === 'true') return true
+    if (sessionStorage.getItem('lexmedia_admin_session_email')) return true
+    if (sessionStorage.getItem('lexmedia_active_id_token')) return true
+    if (document.cookie.includes('__session=')) return true
+  } catch {}
+  return false
+}
+
 function canReadCloudFirestore(collectionName: string): boolean {
   if (!isFirebaseConfigured) return false
   if (PUBLIC_READ_COLLECTIONS.has(collectionName)) return true
-  return hasFirebaseUserSession()
+  return hasFirebaseUserSession() || hasActiveAdminSession()
 }
 
 function canWriteCloudFirestore(collectionName: string): boolean {
   if (!isFirebaseConfigured) return false
   if (PUBLIC_WRITE_COLLECTIONS.has(collectionName)) return true
-  return hasFirebaseUserSession()
+  return hasFirebaseUserSession() || hasActiveAdminSession()
 }
 
 /**

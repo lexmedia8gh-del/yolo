@@ -838,6 +838,186 @@ export async function sendPaymentRequestEmail({
   })
 }
 
+export interface SendClientOnboardingEmailParams {
+  toEmail: string
+  clientName: string
+  clientId: string
+  portalLoginUrl?: string
+  personalMessage?: string
+  lexmediaLogoUrl?: string
+  supportEmail?: string
+  supportPhone?: string
+}
+
+export async function sendClientOnboardingEmail({
+  toEmail,
+  clientName,
+  clientId,
+  portalLoginUrl,
+  personalMessage,
+  lexmediaLogoUrl,
+  supportEmail = 'lexmedia8gh@gmail.com',
+  supportPhone = '+233 24 123 4567',
+}: SendClientOnboardingEmailParams): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const apiKey = process.env.BREVO_API_KEY
+  const { email: senderEmail } = getEmailSender()
+
+  const defaultUrl = `${getAppUrl()}/login`
+  const cleanLoginUrl = getProductionUrl(portalLoginUrl || defaultUrl)
+  const absLogo = makeAbsoluteLogoUrl(lexmediaLogoUrl)
+
+  const headerLogo = absLogo
+    ? `<img src="${escapeHtml(absLogo)}" alt="LEXMEDIA.GH" width="130" style="display: block; margin: 0 auto 12px auto; max-height: 56px; object-fit: contain;" />`
+    : `<table align="center" border="0" cellspacing="0" cellpadding="0" style="margin: 0 auto 12px auto;">
+        <tr>
+          <td align="center" style="background-color: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.25); width: 56px; height: 56px; border-radius: 14px;">
+            <span style="font-size: 24px; font-weight: 800; color: #38bdf8; font-family: monospace;">LM</span>
+          </td>
+        </tr>
+      </table>`
+
+  const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to LEXMEDIA.GH</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0b1329; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #0b1329; padding: 40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 580px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3);">
+          
+          <!-- Header Banner -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 36px 32px 32px 32px; text-align: center;">
+              ${headerLogo}
+              <h1 style="color: #ffffff; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.3px;">LEXMEDIA.GH</h1>
+              <p style="color: #38bdf8; margin: 4px 0 0 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">Client Workspace Onboarding</p>
+            </td>
+          </tr>
+
+          <!-- Main Content Body -->
+          <tr>
+            <td style="padding: 36px 32px 24px 32px;">
+              <h2 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 700; color: #0f172a;">Welcome to LexMedia, ${escapeHtml(clientName)}!</h2>
+              <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #475569;">
+                Your client account has been successfully created. You now have access to your personalized portal where you can track media projects, review proofs, download final deliverables, and manage invoices.
+              </p>
+
+              ${personalMessage ? `
+                <div style="background-color: #eff6ff; border-left: 4px solid #3b82f6; padding: 14px 18px; margin: 0 0 24px 0; border-radius: 0 8px 8px 0;">
+                  <p style="margin: 0; font-size: 13px; font-style: italic; color: #1e40af; line-height: 1.5;">&ldquo;${escapeHtml(personalMessage)}&rdquo;</p>
+                </div>
+              ` : ''}
+
+              <!-- Account Credentials Box -->
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin: 0 0 24px 0; padding: 20px;">
+                <tr>
+                  <td>
+                    <p style="margin: 0 0 12px 0; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Your Account Information</p>
+                    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td style="font-size: 13px; color: #64748b; padding-bottom: 8px;">Client Name:</td>
+                        <td align="right" style="font-size: 13px; font-weight: 600; color: #0f172a; padding-bottom: 8px;">${escapeHtml(clientName)}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size: 13px; color: #64748b; padding-bottom: 8px;">Client ID:</td>
+                        <td align="right" style="font-size: 13px; font-weight: 700; font-family: monospace; color: #2563eb; padding-bottom: 8px;">${escapeHtml(clientId)}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size: 13px; color: #64748b;">Email Address:</td>
+                        <td align="right" style="font-size: 13px; font-weight: 600; color: #0f172a;">${escapeHtml(toEmail)}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Primary Action Button -->
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin: 28px 0 16px 0;">
+                <tr>
+                  <td align="center">
+                    <a href="${escapeHtml(cleanLoginUrl)}" target="_blank" style="display: inline-block; width: 85%; max-width: 320px; background-color: #2563eb; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 24px; border-radius: 10px; text-align: center; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);">
+                      Access Client Portal &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- 3-Step Getting Started Section -->
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="border-top: 1px solid #f1f5f9; padding-top: 24px; margin-top: 20px;">
+                <tr>
+                  <td style="font-size: 13px; font-weight: 700; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; padding-bottom: 14px;">
+                    Getting Started in 3 Steps
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td width="28" valign="top" style="font-size: 13px; font-weight: 800; color: #2563eb;">1.</td>
+                        <td style="font-size: 13px; color: #475569; padding-bottom: 10px; line-height: 1.4;">
+                          Click <strong>Access Client Portal</strong> to visit your dedicated workspace.
+                        </td>
+                      </tr>
+                      <tr>
+                        <td width="28" valign="top" style="font-size: 13px; font-weight: 800; color: #2563eb;">2.</td>
+                        <td style="font-size: 13px; color: #475569; padding-bottom: 10px; line-height: 1.4;">
+                          View active project updates, preview media deliverables, and approve proofs.
+                        </td>
+                      </tr>
+                      <tr>
+                        <td width="28" valign="top" style="font-size: 13px; font-weight: 800; color: #2563eb;">3.</td>
+                        <td style="font-size: 13px; color: #475569; line-height: 1.4;">
+                          Download high-resolution media files and view itemized invoices anytime.
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="font-size: 12px; color: #94a3b8; text-align: center; line-height: 1.5; margin-top: 24px;">
+                Direct portal link:<br>
+                <a href="${escapeHtml(cleanLoginUrl)}" style="color: #2563eb; text-decoration: none; word-break: break-all;">${escapeHtml(cleanLoginUrl)}</a>
+              </p>
+
+            </td>
+          </tr>
+
+          <!-- Footer & Support -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 24px 32px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="margin: 0 0 6px 0; font-size: 13px; font-weight: 600; color: #0f172a;">Need Help or Have Questions?</p>
+              <p style="margin: 0 0 16px 0; font-size: 12px; color: #64748b; line-height: 1.5;">
+                Our production team is available to assist. Reach us at <a href="mailto:${escapeHtml(supportEmail)}" style="color: #2563eb; text-decoration: none; font-weight: 500;">${escapeHtml(supportEmail)}</a>${supportPhone ? ` or call <strong>${escapeHtml(supportPhone)}</strong>` : ''}.
+              </p>
+              <p style="margin: 0; font-size: 12px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">&copy; LEXMEDIA.GH &mdash; Digital Media Production</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
+
+  const subject = `Welcome to LEXMEDIA.GH — Account Created (${clientId})`
+
+  return sendBrevoEmail({
+    toEmail,
+    clientName,
+    subject,
+    htmlContent,
+    apiKey,
+    senderEmail,
+    senderName,
+  })
+}
+
 async function sendBrevoEmail({
   toEmail,
   clientName,

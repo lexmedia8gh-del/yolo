@@ -50,6 +50,7 @@ import { PaymentDetailsModal } from '@/components/payments/PaymentDetailsModal'
 import { PaymentLinkModal } from '@/components/payments/PaymentLinkModal'
 import { PreparePaymentMessageModal } from '@/components/payments/PreparePaymentMessageModal'
 import { SendWelcomeSmsModal } from '@/components/clients/SendWelcomeSmsModal'
+import { MultiChannelDispatchModal } from '@/components/dispatch/MultiChannelDispatchModal'
 import toast from 'react-hot-toast'
 
 type TabId = 'projects' | 'invoices' | 'payments' | 'links' | 'notes' | 'communication'
@@ -76,6 +77,7 @@ function ClientProfilePageContent() {
   const [showWizard, setShowWizard] = useState(false)
   const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false)
   const [showWelcomeSmsModal, setShowWelcomeSmsModal] = useState(false)
+  const [showDispatchModal, setShowDispatchModal] = useState(false)
 
   // Payment & Link Modals
   const [showRecordPaymentModal, setShowRecordPaymentModal] = useState(false)
@@ -262,6 +264,45 @@ function ClientProfilePageContent() {
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          <Button
+            variant="outline"
+            icon={<Mail size={15} />}
+            onClick={async () => {
+              if (!client.email) {
+                toast.error('Client does not have an email address.')
+                return
+              }
+              const toastId = toast.loading('Sending welcome email...')
+              try {
+                const res = await fetch('/api/clients/send-welcome-email', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    clientId: client.id,
+                    email: client.email,
+                    name: client.fullName,
+                  }),
+                })
+                const data = await res.json()
+                if (res.ok && data.ok) {
+                  toast.success(`Welcome onboarding email sent to ${client.email}`, { id: toastId })
+                } else {
+                  toast.error(data.error || 'Failed to send welcome email.', { id: toastId })
+                }
+              } catch {
+                toast.error('Network error sending welcome email.', { id: toastId })
+              }
+            }}
+          >
+            Send Onboarding Email
+          </Button>
+          <Button
+            variant="outline"
+            icon={<Send size={15} />}
+            onClick={() => setShowDispatchModal(true)}
+          >
+            Multi-Channel Dispatch
+          </Button>
           <Button
             variant="outline"
             icon={<FileText size={15} />}
@@ -1110,6 +1151,24 @@ function ClientProfilePageContent() {
           clientName={client.fullName}
           phoneNumber={client.phone || client.whatsappNumber || ''}
           clientId={client.id}
+        />
+      )}
+
+      {/* Multi-Channel Dispatch Modal */}
+      {showDispatchModal && client && (
+        <MultiChannelDispatchModal
+          isOpen={showDispatchModal}
+          onClose={() => setShowDispatchModal(false)}
+          initialClient={{
+            id: client.id,
+            name: client.fullName,
+            email: client.email,
+            phone: client.phone || client.whatsappNumber,
+            companyName: client.company,
+          }}
+          onSuccess={() => {
+            toast.success('Dispatch sent successfully')
+          }}
         />
       )}
     </div>
