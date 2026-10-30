@@ -28,6 +28,7 @@ import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { DataResetManager } from '@/components/settings/DataResetManager'
 import { LogoUploadField } from '@/components/branding/LogoUploadField'
 import { PinInput } from '@/components/auth/PinInput'
+import { EmailSettingsTab } from '@/components/admin/EmailSettingsTab'
 import { sanitizeBrandingLogoUrl } from '@/lib/hooks/useInvoiceBranding'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { getDocument, setDocument, COLLECTIONS } from '@/lib/firebase/firestore'
@@ -46,7 +47,7 @@ import { getFirebaseErrorMessage } from '@/lib/utils'
 import type { BusinessSettings, BrandingSettings } from '@/lib/types'
 import toast from 'react-hot-toast'
 
-type SettingsTab = 'business' | 'invoice' | 'payment' | 'messages' | 'sms' | 'branding' | 'security' | 'account' | 'data_reset'
+type SettingsTab = 'business' | 'invoice' | 'payment' | 'messages' | 'sms' | 'email' | 'branding' | 'security' | 'account' | 'data_reset'
 
 const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
   { id: 'business', label: 'Business Info', icon: Building2 },
@@ -54,6 +55,7 @@ const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
   { id: 'payment', label: 'Payment', icon: CreditCard },
   { id: 'messages', label: 'Messages & Terms', icon: MessageSquare },
   { id: 'sms', label: 'SMS Settings', icon: MessageSquare },
+  { id: 'email', label: 'Email Settings', icon: Mail },
   { id: 'branding', label: 'Branding', icon: Palette },
   { id: 'security', label: 'Login & Security', icon: ShieldCheck },
   { id: 'account', label: 'My Account', icon: User },
@@ -1026,6 +1028,8 @@ export default function SettingsPage() {
                   </div>
                 </Card>
               )}
+
+              {activeTab === 'email' && <EmailSettingsTab />}
 
               {activeTab === 'branding' && (
                 <div className="space-y-6">

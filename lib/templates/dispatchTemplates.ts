@@ -1,7 +1,7 @@
 export interface MessageTemplate {
   id: string
   name: string
-  category: 'welcome' | 'credentials' | 'project_update' | 'invoice' | 'payment_confirmation' | 'service_completion' | 'dispatch' | 'announcement'
+  category: 'welcome' | 'credentials' | 'new_project' | 'project_update' | 'dispatch' | 'invoice' | 'payment_confirmation' | 'payment_reminder' | 'service_completion' | 'announcement'
   channel: 'all' | 'email' | 'sms'
   subject: string
   body: string
@@ -11,156 +11,240 @@ export interface MessageTemplate {
 export const DEFAULT_DISPATCH_TEMPLATES: MessageTemplate[] = [
   {
     id: 'welcome-onboarding',
-    name: 'Client Onboarding Welcome',
+    name: '1. Client Onboarding Welcome',
     category: 'welcome',
     channel: 'all',
-    subject: 'Welcome to LEXMEDIA.GH — Your Client Account is Ready',
+    subject: 'Welcome to {{companyName}} — Your Client Account is Ready',
     body: `Hello {{clientName}},
 
-Welcome to LEXMEDIA.GH! Your official client account (ID: {{clientId}}) has been successfully set up.
+Welcome to {{companyName}}! Your official client account (ID: {{clientId}}) has been successfully set up.
 
 You can access your dedicated client portal at any time to track project progress, preview deliverables, and manage billing:
 {{loginUrl}}
 
+Account Details:
+- Client Name: {{clientName}}
+- Client ID: {{clientId}}
+- Registered Email: {{clientEmail}}
+
 If you have any questions or need custom media production assistance, reach out to us at {{supportEmail}}.
 
 Best regards,
-LEXMEDIA.GH Production Team`,
-    description: 'Welcome new clients with account credentials and portal link',
+{{companyName}} Production Team`,
+    description: 'Welcome new clients with account credentials and portal access link',
   },
   {
-    id: 'credentials-reset',
-    name: 'Client Account Credentials & Portal Access',
+    id: 'account-details',
+    name: '2. Account Details & Credentials',
     category: 'credentials',
     channel: 'all',
-    subject: 'Your LEXMEDIA.GH Portal Access Information',
+    subject: 'Your Account Details & Portal Access — {{companyName}}',
     body: `Dear {{clientName}},
 
-Here is your official account access details for LEXMEDIA.GH:
+Here is your official account access details for {{companyName}}:
 
-Client Name: {{clientName}}
-Client ID: {{clientId}}
-Portal Access Link: {{loginUrl}}
+- Account ID: {{clientId}}
+- Primary Email: {{clientEmail}}
+- Client Portal Link: {{loginUrl}}
 
-Use this link to view active project proofs, review media files, and complete invoice payments securely.
+Use this link to view active project proofs, review media deliverables, and complete invoice payments securely.
 
-Thank you for partnering with LEXMEDIA.GH.`,
-    description: 'Send portal login URL and account identifier to clients',
+Thank you for partnering with {{companyName}}.`,
+    description: 'Send portal login URL and official client credentials',
+  },
+  {
+    id: 'new-project-created',
+    name: '3. New Project Created',
+    category: 'new_project',
+    channel: 'all',
+    subject: 'New Project Started: {{projectName}} (ID: {{projectId}})',
+    body: `Hello {{clientName}},
+
+A new project "{{projectName}}" (ID: {{projectId}}) has been created in your {{companyName}} account.
+
+Service Type: {{serviceName}}
+
+You can monitor production milestones, upload media briefs, and view live draft proofs directly inside your portal:
+{{loginUrl}}
+
+Thank you for choosing {{companyName}}!`,
+    description: 'Notify client when a new project record is initiated',
   },
   {
     id: 'project-status-update',
-    name: 'Project Progress Update',
+    name: '4. Project Progress Update',
     category: 'project_update',
     channel: 'all',
     subject: 'Update on Your Project: {{projectName}}',
     body: `Hi {{clientName}},
 
-We are pleased to share an update regarding your project "{{projectName}}".
+We are pleased to share an update regarding your project "{{projectName}}" (ID: {{projectId}}).
 
-Our production team has completed the latest phase of editing/rendering. You can review the current proofs and status in your client portal:
+Our production team has completed the latest editing/rendering milestone. You can review current proofs and status in your client portal:
 {{loginUrl}}
 
-Thank you for your continued trust in LEXMEDIA.GH.`,
-    description: 'Notify client when a project phase or milestone is updated',
+Outstanding Balance: {{outstandingBalance}}
+
+Thank you for your continued trust in {{companyName}}.`,
+    description: 'Notify client when a project phase or draft milestone is updated',
+  },
+  {
+    id: 'project-dispatch-ready',
+    name: '5. Project Dispatch & Deliverables',
+    category: 'dispatch',
+    channel: 'all',
+    subject: 'Deliverables Ready: {{projectName}}',
+    body: `Great news {{clientName}}!
+
+Your high-resolution media deliverables for "{{projectName}}" are ready in your portal.
+
+Review & Download Link:
+{{loginUrl}}
+
+Payment Status: {{paymentStatus}}
+Outstanding Balance: {{outstandingBalance}}
+
+Thank you for partnering with {{companyName}}!`,
+    description: 'Dispatch notification with link to project deliverables portal',
   },
   {
     id: 'invoice-payment-request',
-    name: 'Invoice & Payment Request',
+    name: '6. Invoice Notification & Payment Request',
     category: 'invoice',
     channel: 'all',
-    subject: 'Invoice {{invoiceNumber}} from LEXMEDIA.GH — Amount Due: {{amount}}',
+    subject: 'Invoice {{invoiceNumber}} from {{companyName}} — {{invoiceAmount}}',
     body: `Hello {{clientName}},
 
-Your invoice {{invoiceNumber}} for "{{projectName}}" is ready.
+Your invoice {{invoiceNumber}} for "{{projectName}}" has been issued.
 
-Total Amount Due: {{amount}}
-Status: {{paymentStatus}}
+- Total Invoice Amount: {{invoiceAmount}}
+- Amount Paid: {{amountPaid}}
+- Outstanding Balance: {{outstandingBalance}}
+- Payment Status: {{paymentStatus}}
 
 Pay securely online via Mobile Money, Card, or Bank transfer using the link below:
 {{loginUrl}}
 
-Thank you for your business!
-LEXMEDIA.GH`,
-    description: 'Send payment link and invoice summary to client',
+Thank you for your prompt payment!
+{{companyName}}`,
+    description: 'Send payment link and itemized invoice summary to client',
   },
   {
     id: 'payment-received-confirmation',
-    name: 'Payment Receipt & Confirmation',
+    name: '7. Payment Receipt & Confirmation',
     category: 'payment_confirmation',
     channel: 'all',
-    subject: 'Payment Confirmed — Invoice {{invoiceNumber}} ({{amount}})',
+    subject: 'Payment Confirmed — Invoice {{invoiceNumber}} ({{amountPaid}})',
     body: `Dear {{clientName}},
 
-Thank you! We have successfully received your payment of {{amount}} for Invoice {{invoiceNumber}}.
+Thank you! We have successfully received your payment of {{amountPaid}} for Invoice {{invoiceNumber}}.
 
-Your account balance has been updated, and any locked media deliverables for "{{projectName}}" are now unlocked for download in your portal:
+- Project: {{projectName}}
+- Total Invoice: {{invoiceAmount}}
+- Remaining Balance: {{outstandingBalance}}
+- Payment Status: {{paymentStatus}}
+
+Your account balance has been updated, and your deliverables are accessible in your portal:
 {{loginUrl}}
 
 Best regards,
-LEXMEDIA.GH`,
-    description: 'Confirm payment receipt and unlock deliverable downloads',
+{{companyName}}`,
+    description: 'Confirm payment receipt and update unlock status',
+  },
+  {
+    id: 'payment-reminder-due',
+    name: '8. Payment Due Reminder',
+    category: 'payment_reminder',
+    channel: 'all',
+    subject: 'Payment Reminder: Invoice {{invoiceNumber}} — {{outstandingBalance}} Due',
+    body: `Hello {{clientName}},
+
+This is a friendly reminder regarding outstanding invoice {{invoiceNumber}} for project "{{projectName}}".
+
+- Outstanding Balance: {{outstandingBalance}}
+- Payment Status: {{paymentStatus}}
+
+To avoid delays in final media release, please complete payment at your earliest convenience:
+{{loginUrl}}
+
+If you have already processed this payment, please disregard this notice or contact support at {{supportEmail}}.
+
+Best regards,
+{{companyName}} Billing`,
+    description: 'Send polite payment reminder for pending/unpaid invoices',
   },
   {
     id: 'service-completion-ready',
-    name: 'Final Deliverables Ready',
+    name: '9. Service Completion Notice',
     category: 'service_completion',
     channel: 'all',
-    subject: 'Your Deliverables for {{projectName}} Are Ready!',
-    body: `Great news {{clientName}}!
-
-Your high-resolution media deliverables for "{{projectName}}" are complete and ready for download.
-
-Access your files immediately in your client portal:
-{{loginUrl}}
-
-Thank you for choosing LEXMEDIA.GH!`,
-    description: 'Notify client that final project deliverables are ready for download',
-  },
-  {
-    id: 'general-dispatch-notice',
-    name: 'General Workspace Dispatch Notice',
-    category: 'dispatch',
-    channel: 'all',
-    subject: 'Notice from LEXMEDIA.GH for {{clientName}}',
+    subject: 'Service Completed: {{serviceName}} for {{clientName}}',
     body: `Hello {{clientName}},
 
-This is an official communication from LEXMEDIA.GH regarding your account (ID: {{clientId}}).
+We are delighted to inform you that your requested service "{{serviceName}}" for project "{{projectName}}" has been fully completed!
 
-Please visit your portal for detailed updates:
+All final high-definition media renders, video files, and assets are now archived and ready in your portal:
 {{loginUrl}}
 
-For any immediate inquiries, contact support at {{supportEmail}}.
+Thank you for trusting {{companyName}} with your digital media needs.`,
+    description: 'Notify client that full service production is complete',
+  },
+  {
+    id: 'general-announcement',
+    name: '10. General Announcement & Update',
+    category: 'announcement',
+    channel: 'all',
+    subject: 'Important Notice from {{companyName}}',
+    body: `Hello {{clientName}},
 
-Best regards,
-LEXMEDIA.GH`,
-    description: 'General purpose multi-channel broadcast message',
+This is an official update from {{companyName}} regarding your account (ID: {{clientId}}).
+
+Please visit your client portal to review your account dashboard and active project details:
+{{loginUrl}}
+
+For any immediate inquiries, feel free to contact us at {{supportEmail}}.
+
+Warm regards,
+{{companyName}} Team`,
+    description: 'General purpose announcement and broadcast template',
   },
 ]
 
 export interface SubstituteParams {
   clientName?: string
   clientId?: string
+  clientEmail?: string
   projectName?: string
+  projectId?: string
   invoiceNumber?: string
-  amount?: string
+  invoiceAmount?: string
+  amountPaid?: string
+  outstandingBalance?: string
   paymentStatus?: string
-  loginUrl?: string
   serviceName?: string
+  loginUrl?: string
   supportEmail?: string
+  companyName?: string
 }
 
 export function substitutePlaceholders(templateText: string, params: SubstituteParams): string {
   let result = templateText || ''
+  const company = params.companyName || 'LEXMEDIA.GH'
   const mapping: Record<string, string> = {
     clientName: params.clientName || 'Valued Client',
     clientId: params.clientId || 'LM-CLIENT',
+    clientEmail: params.clientEmail || 'client@example.com',
     projectName: params.projectName || 'Media Production Project',
+    projectId: params.projectId || 'PRJ-001',
     invoiceNumber: params.invoiceNumber || 'INV-0001',
-    amount: params.amount || 'GH₵0.00',
+    invoiceAmount: params.invoiceAmount || 'GH₵0.00',
+    amountPaid: params.amountPaid || 'GH₵0.00',
+    outstandingBalance: params.outstandingBalance || 'GH₵0.00',
     paymentStatus: params.paymentStatus || 'Pending',
+    serviceName: params.serviceName || 'Media Production',
     loginUrl: params.loginUrl || 'https://lexmedia.gh/login',
-    serviceName: params.serviceName || 'Media Service',
     supportEmail: params.supportEmail || 'lexmedia8gh@gmail.com',
+    companyName: company,
   }
 
   for (const [key, value] of Object.entries(mapping)) {
@@ -170,3 +254,27 @@ export function substitutePlaceholders(templateText: string, params: SubstituteP
 
   return result
 }
+
+export function validateTemplateVariables(
+  content: string,
+  providedVariables: SubstituteParams
+): { isComplete: boolean; unpopulatedVariables: string[] } {
+  if (!content) return { isComplete: true, unpopulatedVariables: [] }
+  const regex = /\{\{([a-zA-Z0-9_]+)\}\}/g
+  const unpopulated = new Set<string>()
+  let match: RegExpExecArray | null
+
+  while ((match = regex.exec(content)) !== null) {
+    const varName = match[1]
+    const val = (providedVariables as any)?.[varName]
+    if (val === undefined || val === null || val === '') {
+      unpopulated.add(varName)
+    }
+  }
+
+  return {
+    isComplete: unpopulated.size === 0,
+    unpopulatedVariables: Array.from(unpopulated),
+  }
+}
+
