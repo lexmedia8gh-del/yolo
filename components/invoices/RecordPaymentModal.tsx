@@ -116,10 +116,23 @@ export function RecordPaymentModal({
       // Determine whether this invoice is associated with an existing client
       const explicitClientId = (invoice.clientId || (invoice as any).clientInfo?.id || '').trim()
       let resolvedClientId = explicitClientId
+      let matchedClient: Client | undefined
 
-      if (!resolvedClientId) {
-        try {
-          const allClients = await getDocuments<Client>(COLLECTIONS.CLIENTS)
+      try {
+        const allClients = await getDocuments<Client>(COLLECTIONS.CLIENTS)
+        if (explicitClientId) {
+          matchedClient = allClients.find(
+            (c) =>
+              c.id === explicitClientId ||
+              ((c as any).legacyId && String((c as any).legacyId).trim() === explicitClientId) ||
+              ((c as any).clientId && String((c as any).clientId).trim() === explicitClientId)
+          )
+          if (matchedClient) {
+            resolvedClientId = matchedClient.id
+          }
+        }
+
+        if (!matchedClient) {
           const invEmail = (invoice.clientEmail || (invoice as any).clientInfo?.email || '')
             .trim()
             .toLowerCase()
@@ -132,20 +145,22 @@ export function RecordPaymentModal({
               (c) => c.email && c.email.trim().toLowerCase() === invEmail
             )
             if (emailMatches.length === 1) {
-              resolvedClientId = emailMatches[0].id
+              matchedClient = emailMatches[0]
+              resolvedClientId = matchedClient.id
             }
           }
-          if (!resolvedClientId && invName) {
+          if (!matchedClient && invName) {
             const nameMatches = allClients.filter(
               (c) => c.fullName && c.fullName.trim().toLowerCase() === invName
             )
             if (nameMatches.length === 1) {
-              resolvedClientId = nameMatches[0].id
+              matchedClient = nameMatches[0]
+              resolvedClientId = matchedClient.id
             }
           }
-        } catch {
-          // Ignore client list lookup error; server will validate if explicitClientId exists
         }
+      } catch {
+        // Ignore client list lookup error; server will validate if explicitClientId exists
       }
 
       if (resolvedClientId) {
@@ -160,10 +175,13 @@ export function RecordPaymentModal({
           },
           body: JSON.stringify({
             clientId: resolvedClientId,
-            clientName: invoice.clientName,
+            clientName: matchedClient?.fullName || invoice.clientName,
             invoiceId: invoice.id,
             invoiceNumber: invoice.invoiceNumber,
             projectId: (invoice as any).projectId || undefined,
+            existingClientSnapshot:
+              matchedClient && matchedClient.id === resolvedClientId ? matchedClient : undefined,
+            existingInvoiceSnapshot: invoice,
             amount: Number(paymentAmount),
             currency,
             paymentType: 'payment',

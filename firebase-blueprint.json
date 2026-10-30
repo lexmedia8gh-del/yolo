@@ -59,6 +59,20 @@
         "status": { "type": "string", "maxLength": 64 }
       },
       "required": ["invoiceNumber"]
+    },
+    "PaymentRecord": {
+      "title": "PaymentRecord",
+      "description": "Recorded client or project payment transaction",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string", "maxLength": 128 },
+        "projectId": { "type": "string", "maxLength": 128 },
+        "invoiceId": { "type": "string", "maxLength": 128 },
+        "reference": { "type": "string", "maxLength": 128 },
+        "currency": { "type": "string", "maxLength": 16 },
+        "status": { "type": "string", "maxLength": 32 }
+      },
+      "required": ["clientId", "reference", "status"]
     }
   },
   "firestore": {
@@ -81,6 +95,10 @@
     "/invoices/{docId}": {
       "schema": "InvoiceRecord",
       "description": "Invoice records"
+    },
+    "/payments/{docId}": {
+      "schema": "PaymentRecord",
+      "description": "Payment records"
     }
   }
 }

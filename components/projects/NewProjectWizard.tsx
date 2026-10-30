@@ -33,6 +33,7 @@ import {
   serverTimestamp,
   isFirebaseConfigured,
   syncBatchToServerLocalStore,
+  stripUndefinedDeep,
 } from '@/lib/firebase/firestore'
 import { hasActiveFirebaseUser } from '@/lib/firebase/auth'
 import type { Client, Service, Package, Invoice, ClientLink } from '@/lib/types'
@@ -358,12 +359,18 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
           updatedAt: serverTimestamp(),
         })
 
-        // Update client counters
+        // Update client counters (merge ensures locally-created clients upsert cleanly)
         const clientRef = doc(db, COLLECTIONS.CLIENTS, client.id)
-        batch.update(clientRef, {
-          ...clientCountersPayload,
-          updatedAt: serverTimestamp(),
-        })
+        const { id: _clientDocId, ...clientBaseData } = stripUndefinedDeep(client) as Record<string, any>
+        batch.set(
+          clientRef,
+          {
+            ...clientBaseData,
+            ...clientCountersPayload,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        )
 
         await batch.commit()
 

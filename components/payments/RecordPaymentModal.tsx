@@ -240,18 +240,44 @@ export function RecordPaymentModal({
           }
         }
 
+        // Fallback: if project/invoice stored an older legacy clientId, match unambiguously by email or fullName
+        if (!resolvedClient) {
+          const fallbackEmail =
+            (preProj as any)?.clientEmail ||
+            preInv?.clientEmail ||
+            (preInv as any)?.clientInfo?.email ||
+            ''
+          const fallbackName =
+            preProj?.clientName ||
+            preInv?.clientName ||
+            (preInv as any)?.clientInfo?.name ||
+            ''
+          resolvedClient =
+            findMatchingClient(nextClients, fallbackEmail) ||
+            findMatchingClient(nextClients, fallbackName)
+        }
+
         if (!active) return
 
         setClients(nextClients)
         setProjects(nextProjects)
         setInvoices(nextInvoices)
 
+        if (effectiveProjectId && !preProj) {
+          setSelectedProjectId('')
+        }
+        if (effectiveInvoiceId && !preInv) {
+          setSelectedInvoiceId('')
+        }
+
         if (resolvedClient) {
           setSelectedClientId(resolvedClient.id)
+        } else if (effectiveClientId && !nextClients.some((c) => c.id === effectiveClientId)) {
+          setSelectedClientId('')
         }
 
         // Cross-link preselected project <-> invoice if one implies the other
-        if (preProj && !effectiveInvoiceId && preProj.invoiceId) {
+        if (preProj && !preInv && preProj.invoiceId) {
           const linkedInv = nextInvoices.find((i) => i.id === preProj!.invoiceId)
           if (linkedInv) {
             setSelectedInvoiceId(linkedInv.id)
@@ -260,6 +286,9 @@ export function RecordPaymentModal({
               const balStr = String(linkedInv.balanceDue)
               setAmount((prev) => prev || balStr)
             }
+          } else {
+            // Do not keep a stale/deleted invoice ID selected
+            setSelectedInvoiceId('')
           }
         } else if (preInv) {
           if (preInv.currency) setCurrency(preInv.currency)
@@ -268,13 +297,15 @@ export function RecordPaymentModal({
             setAmount((prev) => prev || balStr)
           }
           if (!effectiveProjectId) {
-            const linkedProjId =
+            const candidateProjId =
               (preInv as any).projectId ||
               nextProjects.find((p) => p.invoiceId === preInv!.id)?.id
-            if (linkedProjId) {
-              setSelectedProjectId(linkedProjId)
+            if (candidateProjId && nextProjects.some((p) => p.id === candidateProjId)) {
+              setSelectedProjectId(candidateProjId)
             }
           }
+        } else if (preProj && Number(preProj.outstandingBalance || preProj.price || 0) > 0) {
+          if (preProj.currency) setCurrency(preProj.currency)
         }
       } catch (err) {
         console.error('Failed to load clients/projects for payment recording:', err)
@@ -314,7 +345,6 @@ export function RecordPaymentModal({
         return true
       }
       if (
-        !clean &&
         entityEmail &&
         currentClient.email &&
         entityEmail.trim().toLowerCase() === currentClient.email.trim().toLowerCase()
@@ -322,7 +352,6 @@ export function RecordPaymentModal({
         return true
       }
       if (
-        !clean &&
         entityName &&
         currentClient.fullName &&
         entityName.trim().toLowerCase() === currentClient.fullName.trim().toLowerCase()
@@ -335,7 +364,11 @@ export function RecordPaymentModal({
 
   // Filter projects and invoices for selected client
   const clientProjects = selectedClientId
-    ? projects.filter((p) => matchesSelectedClient(p.clientId, undefined, p.clientName))
+    ? projects.filter(
+        (p) =>
+          p.id === selectedProjectId ||
+          matchesSelectedClient(p.clientId, (p as any).clientEmail, p.clientName)
+      )
     : projects
 
   const clientInvoices = selectedClientId
@@ -389,6 +422,9 @@ export function RecordPaymentModal({
     submittingRef.current = true
     setSubmitting(true)
     try {
+      const verifiedProjectId = currentProject ? currentProject.id : undefined
+      const verifiedInvoiceId = currentInvoice ? currentInvoice.id : undefined
+
       const authHeaders = await getAdminAuthHeaders(true)
       const res = await fetch('/api/payments/record', {
         method: 'POST',
@@ -398,11 +434,19 @@ export function RecordPaymentModal({
         },
         body: JSON.stringify({
           clientId: canonicalClientId,
-          clientName: currentClient?.fullName || currentProject?.clientName || currentInvoice?.clientName || 'Client',
-          projectId: selectedProjectId || undefined,
+          clientName:
+            currentClient?.fullName ||
+            currentProject?.clientName ||
+            currentInvoice?.clientName ||
+            'Client',
+          projectId: verifiedProjectId,
           projectName: currentProject?.name || undefined,
-          invoiceId: selectedInvoiceId || undefined,
+          invoiceId: verifiedInvoiceId,
           invoiceNumber: currentInvoice?.invoiceNumber || undefined,
+          existingClientSnapshot:
+            currentClient && currentClient.id === canonicalClientId ? currentClient : undefined,
+          existingProjectSnapshot: currentProject || undefined,
+          existingInvoiceSnapshot: currentInvoice || undefined,
           amount: numAmount,
           currency,
           paymentType,

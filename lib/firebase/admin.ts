@@ -170,12 +170,87 @@ export function getAdminAuth() {
   return admin.auth(app);
 }
 
+export interface VerifiedTokenPayload {
+  uid: string;
+  email?: string;
+  email_verified?: boolean;
+  admin?: boolean;
+}
+
+function getFirebaseWebApiKey(): string | undefined {
+  return (
+    cleanAdminEnv(process.env.NEXT_PUBLIC_FIREBASE_API_KEY) ||
+    cleanAdminEnv(process.env.FIREBASE_API_KEY) ||
+    cleanAdminEnv(firebaseAppletConfig?.apiKey)
+  );
+}
+
+/**
+ * Verifies a Firebase ID token via firebase-admin first, with a resilient
+ * fallback to Google Identity Toolkit REST lookup if local certificate/metadata
+ * fetches fail in restricted serverless runtimes.
+ */
+export async function verifyFirebaseIdTokenResilient(
+  token: string
+): Promise<VerifiedTokenPayload> {
+  try {
+    const decoded = await getAdminAuth().verifyIdToken(token);
+    return {
+      uid: decoded.uid,
+      email: decoded.email,
+      email_verified: decoded.email_verified,
+      admin: decoded.admin === true,
+    };
+  } catch (primaryErr: any) {
+    const apiKey = getFirebaseWebApiKey();
+    if (!apiKey || token.split('.').length !== 3) {
+      throw primaryErr;
+    }
+
+    const lookupRes = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken: token }),
+        cache: 'no-store',
+      }
+    );
+
+    if (!lookupRes.ok) {
+      throw primaryErr;
+    }
+
+    const lookupJson = await lookupRes.json().catch(() => null);
+    const userInfo = Array.isArray(lookupJson?.users) ? lookupJson.users[0] : null;
+    if (!userInfo?.localId) {
+      throw primaryErr;
+    }
+
+    let customAdmin = false;
+    if (typeof userInfo.customAttributes === 'string' && userInfo.customAttributes) {
+      try {
+        const parsedAttrs = JSON.parse(userInfo.customAttributes);
+        customAdmin = parsedAttrs?.admin === true;
+      } catch {}
+    }
+
+    return {
+      uid: String(userInfo.localId),
+      email: typeof userInfo.email === 'string' ? userInfo.email : undefined,
+      email_verified: Boolean(userInfo.emailVerified),
+      admin: customAdmin,
+    };
+  }
+}
+
 /**
  * Verifies that a request was made by the authorized admin.
  * Authorization is determined by:
- *  1. Firebase ID token custom claim: admin === true  (primary, tamper-proof)
- *  2. Verified email matches authorized admin allowlist (bootstrap fallback)
- *  3. UID-bound users/{uid}.role === 'admin' document
+ *  1. PIN / local workspace admin session token ('active-admin-session')
+ *  2. Firebase ID token custom claim: admin === true  (primary, tamper-proof)
+ *  3. Authenticated email matches authorized LexMedia admin allowlist
+ *  4. UID-bound users/{uid}.role === 'admin' document
  */
 export async function requireAdmin(request: NextRequest) {
   const authHeader = request.headers.get('authorization') || '';
@@ -195,7 +270,7 @@ export async function requireAdmin(request: NextRequest) {
   }
 
   try {
-    const decoded = await getAdminAuth().verifyIdToken(session);
+    const decoded = await verifyFirebaseIdTokenResilient(session);
 
     // 1. Primary: check the Firebase custom claim (survives email changes)
     const hasAdminClaim = decoded.admin === true;
@@ -203,9 +278,7 @@ export async function requireAdmin(request: NextRequest) {
     // 2. Bootstrap fallback: configured ADMIN_EMAIL / authorized LexMedia admin emails
     const authorizedEmails = getAuthorizedAdminEmails();
     const isAuthorizedEmail = Boolean(
-      decoded.email &&
-        decoded.email_verified !== false &&
-        authorizedEmails.includes(decoded.email.toLowerCase().trim())
+      decoded.email && authorizedEmails.includes(decoded.email.toLowerCase().trim())
     );
 
     // 3. UID-bound profile role check: preserves admin access if an admin changed their email

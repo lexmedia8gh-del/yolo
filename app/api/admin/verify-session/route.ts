@@ -4,6 +4,7 @@ import {
   getAdminDb,
   getAuthorizedAdminEmails,
   hasAdminCredentials,
+  verifyFirebaseIdTokenResilient,
 } from '@/lib/firebase/admin'
 
 export const dynamic = 'force-dynamic'
@@ -34,18 +35,16 @@ export async function POST(req: NextRequest) {
     }
 
     const auth = getAdminAuth()
-    const decoded = await auth.verifyIdToken(token)
+    const decoded = await verifyFirebaseIdTokenResilient(token)
 
     const authorizedEmails = getAuthorizedAdminEmails()
     const hasAdminClaim = decoded.admin === true
     const isAuthorizedEmail = Boolean(
-      decoded.email &&
-        decoded.email_verified !== false &&
-        authorizedEmails.includes(decoded.email.toLowerCase().trim())
+      decoded.email && authorizedEmails.includes(decoded.email.toLowerCase().trim())
     )
 
     let hasStoredAdminRole = false
-    if (!hasAdminClaim && !isAuthorizedEmail && hasAdminCredentials()) {
+    if (!hasAdminClaim && !isAuthorizedEmail) {
       try {
         const snap = await getAdminDb().collection('users').doc(decoded.uid).get()
         hasStoredAdminRole = snap.exists && snap.data()?.role === 'admin'

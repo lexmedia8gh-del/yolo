@@ -275,17 +275,168 @@ function setLocalCollection<T>(collectionName: string, items: T[], notify = true
   } catch {}
 }
 
+function getSyncedIdSet(collectionName: string): Set<string> {
+  if (typeof window === 'undefined') return new Set()
+  try {
+    const raw = localStorage.getItem(`lexmedia_synced_${collectionName}`)
+    const arr = raw ? JSON.parse(raw) : []
+    return Array.isArray(arr) ? new Set(arr.filter((v) => typeof v === 'string')) : new Set()
+  } catch {
+    return new Set()
+  }
+}
+
+function markIdsSynced(collectionName: string, ids: string[]) {
+  if (typeof window === 'undefined' || ids.length === 0) return
+  try {
+    const set = getSyncedIdSet(collectionName)
+    let changed = false
+    for (const id of ids) {
+      if (id && !set.has(id)) {
+        set.add(id)
+        changed = true
+      }
+    }
+    if (changed) {
+      localStorage.setItem(`lexmedia_synced_${collectionName}`, JSON.stringify(Array.from(set)))
+    }
+  } catch {}
+}
+
+function getDeletedIdSet(collectionName: string): Set<string> {
+  if (typeof window === 'undefined') return new Set()
+  try {
+    const raw = localStorage.getItem(`lexmedia_deleted_${collectionName}`)
+    const arr = raw ? JSON.parse(raw) : []
+    return Array.isArray(arr) ? new Set(arr.filter((v) => typeof v === 'string')) : new Set()
+  } catch {
+    return new Set()
+  }
+}
+
+function markIdDeleted(collectionName: string, docId: string) {
+  if (typeof window === 'undefined' || !docId) return
+  try {
+    const delSet = getDeletedIdSet(collectionName)
+    delSet.add(docId)
+    localStorage.setItem(`lexmedia_deleted_${collectionName}`, JSON.stringify(Array.from(delSet)))
+    const syncSet = getSyncedIdSet(collectionName)
+    if (syncSet.delete(docId)) {
+      localStorage.setItem(`lexmedia_synced_${collectionName}`, JSON.stringify(Array.from(syncSet)))
+    }
+  } catch {}
+}
+
+function clearIdDeleted(collectionName: string, docId: string) {
+  if (typeof window === 'undefined' || !docId) return
+  try {
+    const delSet = getDeletedIdSet(collectionName)
+    if (delSet.delete(docId)) {
+      localStorage.setItem(`lexmedia_deleted_${collectionName}`, JSON.stringify(Array.from(delSet)))
+    }
+  } catch {}
+}
+
+const migratingDocKeys = new Set<string>()
+
+function backgroundMigrateUnsyncedToCloud<T extends { id?: string }>(
+  collectionName: string,
+  unsyncedDocs: T[]
+) {
+  if (typeof window === 'undefined' || unsyncedDocs.length === 0) return
+  if (!canWriteCloudFirestore(collectionName)) return
+  // Only auto-migrate admin business collections (skip public log collections)
+  if (PUBLIC_WRITE_COLLECTIONS.has(collectionName)) return
+
+  for (const item of unsyncedDocs) {
+    const docId = typeof item?.id === 'string' ? item.id.trim() : ''
+    if (!docId) continue
+    const key = `${collectionName}/${docId}`
+    if (migratingDocKeys.has(key)) continue
+    migratingDocKeys.add(key)
+
+    const { id: _omitId, ...rest } = stripUndefinedDeep(item as Record<string, any>)
+    const docRef = doc(db, collectionName, docId)
+    void setDoc(
+      docRef,
+      {
+        ...rest,
+        updatedAt: rest.updatedAt || serverTimestamp(),
+      },
+      { merge: true }
+    )
+      .then(() => {
+        markIdsSynced(collectionName, [docId])
+      })
+      .catch(() => {})
+      .finally(() => {
+        migratingDocKeys.delete(key)
+      })
+  }
+}
+
+function mergeCloudAndUnsyncedBrowserDocs<T extends { id?: string }>(
+  collectionName: string,
+  cloudDocs: T[],
+  constraints: QueryConstraint[]
+): T[] {
+  const cloudIds = new Set<string>()
+  for (const c of cloudDocs) {
+    if (c?.id) cloudIds.add(c.id)
+  }
+  if (cloudIds.size > 0) {
+    markIdsSynced(collectionName, Array.from(cloudIds))
+  }
+
+  const syncedSet = getSyncedIdSet(collectionName)
+  const deletedSet = getDeletedIdSet(collectionName)
+  const allBrowserDocs = getLocalCollection<T & { id?: string }>(collectionName)
+
+  // Unsynced browser docs are records created locally (e.g. PIN mode or offline/pre-rules)
+  // that have never been confirmed in Cloud Firestore yet and were not locally deleted.
+  const unsyncedBrowserDocs = allBrowserDocs.filter(
+    (b) => b?.id && !cloudIds.has(b.id) && !syncedSet.has(b.id) && !deletedSet.has(b.id)
+  )
+
+  if (unsyncedBrowserDocs.length > 0) {
+    mirrorMissingBrowserDocsToServer(collectionName, cloudDocs, unsyncedBrowserDocs)
+    backgroundMigrateUnsyncedToCloud(collectionName, unsyncedBrowserDocs)
+  }
+
+  const filteredCloud = cloudDocs.filter((c) => !c?.id || !deletedSet.has(c.id))
+  const matchingUnsynced = applyLocalQueryConstraints(unsyncedBrowserDocs as T[], constraints)
+
+  if (matchingUnsynced.length === 0) {
+    return filteredCloud
+  }
+
+  const mergedMap = new Map<string, T>()
+  for (const c of filteredCloud) {
+    if (c?.id) mergedMap.set(c.id, c)
+  }
+  for (const u of matchingUnsynced) {
+    const uid = (u as any)?.id
+    if (uid && !mergedMap.has(uid)) {
+      mergedMap.set(uid, u)
+    }
+  }
+  return Array.from(mergedMap.values())
+}
+
 function mergeServerAndBrowserDocs<T extends { id?: string }>(
+  collectionName: string,
   serverDocs: T[] | null,
   browserDocs: T[]
 ): T[] {
-  if (!serverDocs || serverDocs.length === 0) return browserDocs
+  const deletedSet = getDeletedIdSet(collectionName)
+  const cleanBrowser = browserDocs.filter((b) => !b?.id || !deletedSet.has(b.id))
+  if (!serverDocs || serverDocs.length === 0) return cleanBrowser
   const map = new Map<string, T>()
-  for (const b of browserDocs) {
+  for (const b of cleanBrowser) {
     if (b?.id) map.set(b.id, b)
   }
   for (const s of serverDocs) {
-    if (s?.id) map.set(s.id, s)
+    if (s?.id && !deletedSet.has(s.id)) map.set(s.id, s)
   }
   return Array.from(map.values())
 }
@@ -388,6 +539,7 @@ export async function getDocument<T>(
     const docRef = doc(db, collectionName, cleanId)
     const snap = await getDoc(docRef)
     if (snap.exists()) {
+      markIdsSynced(collectionName, [snap.id])
       const resolved = withCanonicalDocId<T>(snap.id, snap.data())
       void postToServerLocalStore({
         action: 'set',
@@ -401,7 +553,30 @@ export async function getDocument<T>(
     }
     // Also check server local store in case created via PIN mode earlier
     const serverDoc = await fetchServerLocalDoc<T>(collectionName, cleanId)
-    if (serverDoc) return withCanonicalDocId<T>(cleanId, serverDoc as any)
+    if (serverDoc) {
+      const canonical = withCanonicalDocId<T & { id?: string }>(cleanId, serverDoc as any)
+      backgroundMigrateUnsyncedToCloud(collectionName, [canonical])
+      return canonical as T
+    }
+    // Check unsynced browser localStorage record (e.g. created before server restart or PIN mode)
+    const syncedSet = getSyncedIdSet(collectionName)
+    const deletedSet = getDeletedIdSet(collectionName)
+    if (!syncedSet.has(cleanId) && !deletedSet.has(cleanId)) {
+      const local = getLocalCollection<T & { id: string }>(collectionName)
+      const matched = local.find((item) => item.id === cleanId) || null
+      if (matched) {
+        void postToServerLocalStore({
+          action: 'set',
+          collection: collectionName,
+          id: cleanId,
+          data: sanitizeForJsonMirror(matched),
+          merge: true,
+          cloudSynced: false,
+        })
+        backgroundMigrateUnsyncedToCloud(collectionName, [matched])
+        return matched
+      }
+    }
     return null
   } catch (err: any) {
     console.warn(
@@ -411,7 +586,18 @@ export async function getDocument<T>(
     const serverDoc = await fetchServerLocalDoc<T>(collectionName, cleanId)
     if (serverDoc) return withCanonicalDocId<T>(cleanId, serverDoc as any)
     const local = getLocalCollection<T & { id: string }>(collectionName)
-    return local.find((item) => item.id === cleanId) || null
+    const matched = local.find((item) => item.id === cleanId) || null
+    if (matched) {
+      void postToServerLocalStore({
+        action: 'set',
+        collection: collectionName,
+        id: cleanId,
+        data: sanitizeForJsonMirror(matched),
+        merge: true,
+        cloudSynced: false,
+      })
+    }
+    return matched
   }
 }
 
@@ -424,7 +610,7 @@ export async function getDocuments<T>(
     const browserDocs = getLocalCollection<T & { id?: string }>(collectionName)
     const serverDocs = await fetchServerLocalCollection<T & { id?: string }>(collectionName)
     mirrorMissingBrowserDocsToServer(collectionName, serverDocs, browserDocs)
-    const merged = mergeServerAndBrowserDocs(serverDocs, browserDocs)
+    const merged = mergeServerAndBrowserDocs(collectionName, serverDocs, browserDocs)
     if (serverDocs && serverDocs.length > 0) {
       setLocalCollection(collectionName, merged, false)
     }
@@ -435,25 +621,26 @@ export async function getDocuments<T>(
     const colRef = collection(db, collectionName)
     const q = query(colRef, ...constraints)
     const snap = await getDocs(q)
-    const docs = snap.docs.map((d) => withCanonicalDocId<T>(d.id, d.data()))
+    const cloudDocs = snap.docs.map((d) => withCanonicalDocId<T & { id?: string }>(d.id, d.data()))
+    const mergedDocs = mergeCloudAndUnsyncedBrowserDocs(collectionName, cloudDocs, constraints)
     if (constraints.length === 0) {
-      setLocalCollection(collectionName, docs, false)
-      if (docs.length > 0) {
+      setLocalCollection(collectionName, mergedDocs, false)
+      if (mergedDocs.length > 0) {
         void postToServerLocalStore({
           action: 'syncCollection',
           collection: collectionName,
           cloudSynced: true,
-          docs: docs.map((d) => sanitizeForJsonMirror(d)),
+          docs: mergedDocs.map((d) => sanitizeForJsonMirror(d)),
         })
       }
     }
-    return docs
+    return mergedDocs as T[]
   } catch (err: any) {
     console.warn(`[Cloud Firestore] Fallback fetching collection '${collectionName}':`, err?.message || err)
     const browserDocs = getLocalCollection<T & { id?: string }>(collectionName)
     const serverDocs = await fetchServerLocalCollection<T & { id?: string }>(collectionName)
     mirrorMissingBrowserDocsToServer(collectionName, serverDocs, browserDocs)
-    const merged = mergeServerAndBrowserDocs(serverDocs, browserDocs)
+    const merged = mergeServerAndBrowserDocs(collectionName, serverDocs, browserDocs)
     return applyLocalQueryConstraints(merged as T[], constraints)
   }
 }
@@ -548,6 +735,9 @@ export async function addDocument(
       updatedAt: serverTimestamp(),
     })
 
+    markIdsSynced(collectionName, [docRef.id])
+    clearIdDeleted(collectionName, docRef.id)
+
     const nowIso = new Date().toISOString()
     const mirrorData = sanitizeForJsonMirror(cleanData) || {}
     const localRecord = { id: docRef.id, ...mirrorData, createdAt: nowIso, updatedAt: nowIso }
@@ -578,6 +768,7 @@ export async function setDocument(
   merge = false
 ): Promise<void> {
   const cleanData = stripUndefinedDeep(data)
+  clearIdDeleted(collectionName, docId)
 
   if (!canWriteCloudFirestore(collectionName)) {
     const local = getLocalCollection<any>(collectionName)
@@ -617,6 +808,7 @@ export async function setDocument(
   try {
     const docRef = doc(db, collectionName, docId)
     await setDoc(docRef, { ...cleanData, updatedAt: serverTimestamp() }, { merge })
+    markIdsSynced(collectionName, [docId])
 
     const nowIso = new Date().toISOString()
     const mirrorData = sanitizeForJsonMirror(cleanData) || {}
@@ -677,7 +869,25 @@ export async function updateDocument(
 
   try {
     const docRef = doc(db, collectionName, docId)
-    await updateDoc(docRef, { ...cleanData, updatedAt: serverTimestamp() })
+    try {
+      await updateDoc(docRef, { ...cleanData, updatedAt: serverTimestamp() })
+    } catch (updateErr: any) {
+      const code = String(updateErr?.code || '')
+      const msg = String(updateErr?.message || '')
+      if (code === 'not-found' || code.endsWith('/not-found') || msg.includes('No document to update')) {
+        const local = getLocalCollection<any>(collectionName)
+        const existingLocal = local.find((i) => i.id === docId) || {}
+        const { id: _omitId, ...localBase } = stripUndefinedDeep(existingLocal)
+        await setDoc(
+          docRef,
+          { ...localBase, ...cleanData, updatedAt: serverTimestamp() },
+          { merge: true }
+        )
+      } else {
+        throw updateErr
+      }
+    }
+    markIdsSynced(collectionName, [docId])
 
     const nowIso = new Date().toISOString()
     const mirrorData = sanitizeForJsonMirror(cleanData) || {}
@@ -705,6 +915,7 @@ export async function deleteDocument(
   collectionName: string,
   docId: string
 ): Promise<void> {
+  markIdDeleted(collectionName, docId)
   if (!canWriteCloudFirestore(collectionName)) {
     const local = getLocalCollection<any>(collectionName)
     const filtered = local.filter((i) => i.id !== docId)
@@ -854,22 +1065,25 @@ export function subscribeToCollection<T>(
         q,
         (snap: QuerySnapshot) => {
           if (disposed) return
-          const data = snap.docs.map((d) => withCanonicalDocId<T>(d.id, d.data()))
+          const cloudDocs = snap.docs.map((d) => withCanonicalDocId<T & { id?: string }>(d.id, d.data()))
+          const mergedDocs = mergeCloudAndUnsyncedBrowserDocs(collectionName, cloudDocs, constraints)
           if (constraints.length === 0) {
-            setLocalCollection(collectionName, data, false)
-            if (data.length > 0) {
+            setLocalCollection(collectionName, mergedDocs, false)
+            if (mergedDocs.length > 0) {
               void postToServerLocalStore({
                 action: 'syncCollection',
                 collection: collectionName,
                 cloudSynced: true,
-                docs: data.map((d) => sanitizeForJsonMirror(d)),
+                docs: mergedDocs.map((d) => sanitizeForJsonMirror(d)),
               })
             }
           }
-          callback(data)
+          callback(mergedDocs as T[])
         },
         (err) => {
           console.warn(`[Firestore] Subscription fallback for ${collectionName}:`, err?.message || err)
+          const browserDocs = getLocalCollection<T & { id?: string }>(collectionName)
+          mirrorMissingBrowserDocsToServer(collectionName, null, browserDocs)
           emitLocal()
         }
       )
@@ -888,7 +1102,7 @@ export function subscribeToCollection<T>(
       const browserDocs = getLocalCollection<T & { id?: string }>(collectionName)
       mirrorMissingBrowserDocsToServer(collectionName, serverDocs, browserDocs)
       if (!serverDocs) return
-      const merged = mergeServerAndBrowserDocs(serverDocs, browserDocs)
+      const merged = mergeServerAndBrowserDocs(collectionName, serverDocs, browserDocs)
       setLocalCollection(collectionName, merged, false)
       callback(applyLocalQueryConstraints(merged as T[], constraints))
     })
@@ -981,6 +1195,10 @@ export function syncRecordedPaymentToLocalCache(payload: {
 
   const upsertInLocal = (colName: string, item: Record<string, any> | null | undefined, prepend = false) => {
     if (!item || typeof item.id !== 'string' || !item.id.trim()) return
+    clearIdDeleted(colName, item.id)
+    if (hasFirebaseUserSession()) {
+      markIdsSynced(colName, [item.id])
+    }
     const list = getLocalCollection<any>(colName)
     const idx = list.findIndex((entry) => entry?.id === item.id)
     if (idx >= 0) {
@@ -994,6 +1212,7 @@ export function syncRecordedPaymentToLocalCache(payload: {
   }
 
   if (payload.deletedPaymentId) {
+    markIdDeleted(COLLECTIONS.PAYMENTS, payload.deletedPaymentId)
     const list = getLocalCollection<any>(COLLECTIONS.PAYMENTS)
     const next = list.filter((p) => p?.id !== payload.deletedPaymentId)
     setLocalCollection(COLLECTIONS.PAYMENTS, next, true)

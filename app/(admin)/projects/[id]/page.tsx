@@ -617,10 +617,9 @@ export default function ProjectDetailPage() {
           onClose={() => setShowRecordPaymentModal(false)}
           preselectedProjectId={project.id}
           preselectedClientId={client?.id || project.clientId}
-          preselectedInvoiceId={project.invoiceId}
+          preselectedInvoiceId={invoice?.id}
           onSuccess={() => {
             reloadProjectData()
-            toast.success('Payment recorded successfully')
           }}
         />
       )}

@@ -11,8 +11,64 @@ function roundCurrency(val: number): number {
   return Math.round(val * 100) / 100
 }
 
+/**
+ * Sanitizes a browser-cached entity snapshot so it can be safely merged into
+ * Firestore without `undefined` values, client-only sentinels, or redundant `id` keys.
+ */
+function sanitizeSnapshotForFirestore(raw: unknown): Record<string, any> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+
+  const cleanValue = (v: any): any => {
+    if (v === undefined) return undefined
+    if (v === null || typeof v !== 'object') return v
+    if (v instanceof Date) {
+      return Number.isFinite(v.getTime()) ? v.toISOString() : new Date().toISOString()
+    }
+    if (Array.isArray(v)) {
+      return v.map(cleanValue).filter((item) => item !== undefined)
+    }
+    // Convert serialized Firestore Timestamp objects ({ seconds, nanoseconds } or { _seconds, _nanoseconds }) to ISO strings
+    if (
+      (typeof v.seconds === 'number' || typeof v._seconds === 'number') &&
+      Object.keys(v).every(
+        (k) =>
+          k === 'seconds' ||
+          k === 'nanoseconds' ||
+          k === '_seconds' ||
+          k === '_nanoseconds' ||
+          k === 'type'
+      )
+    ) {
+      const sec = typeof v.seconds === 'number' ? v.seconds : v._seconds
+      const nano = typeof v.nanoseconds === 'number' ? v.nanoseconds : v._nanoseconds || 0
+      const d = new Date(sec * 1000 + Math.floor(nano / 1e6))
+      return Number.isFinite(d.getTime()) ? d.toISOString() : new Date().toISOString()
+    }
+    const nested: Record<string, any> = {}
+    for (const [nk, nv] of Object.entries(v)) {
+      const cleaned = cleanValue(nv)
+      if (cleaned !== undefined) {
+        nested[nk] = cleaned
+      }
+    }
+    return nested
+  }
+
+  const out: Record<string, any> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, any>)) {
+    if (k === 'id' || v === undefined) continue
+    const cleaned = cleanValue(v)
+    if (cleaned !== undefined) {
+      out[k] = cleaned
+    }
+  }
+  return out
+}
+
 function doesEntityMatchClient(
   entityClientIdRaw: unknown,
+  entityClientEmailRaw: unknown,
+  entityClientNameRaw: unknown,
   canonicalClientId: string,
   clientData: Record<string, any>,
   rawSubmittedClientId: string
@@ -24,13 +80,30 @@ function doesEntityMatchClient(
   if (typeof clientData.clientId === 'string' && entityClientId === clientData.clientId.trim()) return true
   if (typeof clientData.legacyId === 'string' && entityClientId === clientData.legacyId.trim()) return true
   if (rawSubmittedClientId && entityClientId === rawSubmittedClientId) return true
-  const rawStr = typeof entityClientIdRaw === 'string' ? entityClientIdRaw.trim() : ''
-  if (rawStr && clientData.fullName && rawStr.toLowerCase() === String(clientData.fullName).trim().toLowerCase()) {
+
+  const clientNameLower = String(clientData.fullName || clientData.name || '')
+    .trim()
+    .toLowerCase()
+  const clientEmailLower = String(clientData.email || '')
+    .trim()
+    .toLowerCase()
+
+  const rawIdStr = typeof entityClientIdRaw === 'string' ? entityClientIdRaw.trim().toLowerCase() : ''
+  if (rawIdStr && clientNameLower && rawIdStr === clientNameLower) return true
+  if (rawIdStr && clientEmailLower && rawIdStr === clientEmailLower) return true
+
+  const entityEmailLower =
+    typeof entityClientEmailRaw === 'string' ? entityClientEmailRaw.trim().toLowerCase() : ''
+  if (entityEmailLower && clientEmailLower && entityEmailLower === clientEmailLower) {
     return true
   }
-  if (rawStr && clientData.email && rawStr.toLowerCase() === String(clientData.email).trim().toLowerCase()) {
+
+  const entityNameLower =
+    typeof entityClientNameRaw === 'string' ? entityClientNameRaw.trim().toLowerCase() : ''
+  if (entityNameLower && clientNameLower && entityNameLower === clientNameLower) {
     return true
   }
+
   return false
 }
 
@@ -53,6 +126,9 @@ export async function POST(req: NextRequest) {
       projectName,
       invoiceId,
       invoiceNumber,
+      existingClientSnapshot,
+      existingProjectSnapshot,
+      existingInvoiceSnapshot,
       amount,
       currency = 'GHS',
       paymentType = 'payment', // 'deposit' | 'payment' | 'part_payment' | 'milestone'
@@ -66,6 +142,7 @@ export async function POST(req: NextRequest) {
     } = body
 
     const rawClientStr = typeof clientId === 'string' ? clientId.trim() : ''
+    const normalizedClientId = normalizeEntityId(clientId, COLLECTIONS.CLIENTS)
     const normalizedProjectId = normalizeEntityId(projectId, COLLECTIONS.PROJECTS)
     const normalizedInvoiceId = normalizeEntityId(invoiceId, COLLECTIONS.INVOICES)
 
@@ -139,44 +216,83 @@ export async function POST(req: NextRequest) {
     const nowIso = new Date().toISOString()
     const recordedBy = auth.email || 'admin'
 
-    // 1. Pre-load explicitly selected Invoice and/or Project so their metadata can
-    //    be validated and cross-referenced cleanly.
+    // 1. Pre-load explicitly selected Invoice and/or Project (hydrating verified browser
+    //    records on server cold-start or PIN-mode local storage sessions if needed).
     let invoiceData: Record<string, any> | null = null
     let invoiceRef: any = null
     let resolvedInvoiceId = ''
     let resolvedInvoiceNumber = typeof invoiceNumber === 'string' ? invoiceNumber.trim() : ''
+    let hydratedInvoiceFromSnapshot = false
 
     if (normalizedInvoiceId) {
-      invoiceRef = adminDb.collection(COLLECTIONS.INVOICES).doc(normalizedInvoiceId)
-      const invoiceSnap = await invoiceRef.get()
-      if (!invoiceSnap.exists) {
+      const candidateInvRef = adminDb.collection(COLLECTIONS.INVOICES).doc(normalizedInvoiceId)
+      const invoiceSnap = await candidateInvRef.get()
+      if (invoiceSnap.exists) {
+        const invDocData: Record<string, any> = invoiceSnap.data() || {}
+        invoiceRef = candidateInvRef
+        invoiceData = invDocData
+        resolvedInvoiceId = invoiceSnap.id
+        resolvedInvoiceNumber = invDocData.invoiceNumber || resolvedInvoiceNumber
+      } else if (
+        existingInvoiceSnapshot &&
+        typeof existingInvoiceSnapshot === 'object' &&
+        normalizeEntityId((existingInvoiceSnapshot as any).id, COLLECTIONS.INVOICES) ===
+          normalizedInvoiceId
+      ) {
+        const hydratedInv = sanitizeSnapshotForFirestore(existingInvoiceSnapshot)
+        invoiceRef = candidateInvRef
+        invoiceData = hydratedInv
+        resolvedInvoiceId = normalizedInvoiceId
+        resolvedInvoiceNumber = hydratedInv.invoiceNumber || resolvedInvoiceNumber
+        hydratedInvoiceFromSnapshot = true
+      } else if (!normalizedProjectId && !rawClientStr) {
         return NextResponse.json({ error: 'Selected invoice not found' }, { status: 404 })
+      } else {
+        // Stale or previously deleted invoice reference on a project — do not block the client/project payment
+        console.warn(
+          `[API /api/payments/record] Skipping missing/deleted invoice ${normalizedInvoiceId} while recording payment.`
+        )
+        resolvedInvoiceId = ''
       }
-      const invDocData: Record<string, any> = invoiceSnap.data() || {}
-      invoiceData = invDocData
-      resolvedInvoiceId = invoiceSnap.id
-      resolvedInvoiceNumber = invDocData.invoiceNumber || resolvedInvoiceNumber
     }
 
     let projectData: Record<string, any> | null = null
     let projectRef: any = null
     let resolvedProjectId = ''
     let resolvedProjectName = typeof projectName === 'string' ? projectName.trim() : ''
+    let hydratedProjectFromSnapshot = false
 
     if (normalizedProjectId) {
-      projectRef = adminDb.collection(COLLECTIONS.PROJECTS).doc(normalizedProjectId)
-      const projectSnap = await projectRef.get()
-      if (!projectSnap.exists) {
+      const candidateProjRef = adminDb.collection(COLLECTIONS.PROJECTS).doc(normalizedProjectId)
+      const projectSnap = await candidateProjRef.get()
+      if (projectSnap.exists) {
+        const projDocData: Record<string, any> = projectSnap.data() || {}
+        projectRef = candidateProjRef
+        projectData = projDocData
+        resolvedProjectId = projectSnap.id
+        resolvedProjectName = projDocData.name || resolvedProjectName
+      } else if (
+        existingProjectSnapshot &&
+        typeof existingProjectSnapshot === 'object' &&
+        normalizeEntityId((existingProjectSnapshot as any).id, COLLECTIONS.PROJECTS) ===
+          normalizedProjectId &&
+        typeof (existingProjectSnapshot as any).name === 'string' &&
+        (existingProjectSnapshot as any).name.trim().length > 0
+      ) {
+        const hydratedProj = sanitizeSnapshotForFirestore(existingProjectSnapshot)
+        projectRef = candidateProjRef
+        projectData = hydratedProj
+        resolvedProjectId = normalizedProjectId
+        resolvedProjectName = hydratedProj.name || resolvedProjectName
+        hydratedProjectFromSnapshot = true
+      } else {
         return NextResponse.json({ error: 'Selected project not found' }, { status: 404 })
       }
-      const projDocData: Record<string, any> = projectSnap.data() || {}
-      projectData = projDocData
-      resolvedProjectId = projectSnap.id
-      resolvedProjectName = projDocData.name || resolvedProjectName
     }
 
-    // 2. Resolve canonical Client record (direct doc lookup first, safe fallbacks for legacy IDs)
-    const resolvedClient = await resolveCanonicalClient(adminDb, {
+    // 2. Resolve canonical Client record (direct doc lookup first, safe fallbacks for legacy IDs,
+    //    and verified existing UI client hydration if server instance restarted).
+    let resolvedClient = await resolveCanonicalClient(adminDb, {
       clientsCollection: COLLECTIONS.CLIENTS,
       clientId,
       projectClientId: projectData?.clientId,
@@ -186,6 +302,28 @@ export async function POST(req: NextRequest) {
       linkedClientName:
         invoiceData?.clientName || invoiceData?.clientInfo?.name || projectData?.clientName,
     })
+
+    let hydratedClientFromSnapshot = false
+    if (
+      !resolvedClient &&
+      normalizedClientId &&
+      existingClientSnapshot &&
+      typeof existingClientSnapshot === 'object' &&
+      normalizeEntityId((existingClientSnapshot as any).id, COLLECTIONS.CLIENTS) ===
+        normalizedClientId &&
+      typeof (existingClientSnapshot as any).fullName === 'string' &&
+      (existingClientSnapshot as any).fullName.trim().length > 0
+    ) {
+      const hydratedClientData = sanitizeSnapshotForFirestore(existingClientSnapshot)
+      const hydratedClientRef = adminDb.collection(COLLECTIONS.CLIENTS).doc(normalizedClientId)
+      resolvedClient = {
+        id: normalizedClientId,
+        ref: hydratedClientRef,
+        data: hydratedClientData,
+        matchedBy: 'doc_id',
+      }
+      hydratedClientFromSnapshot = true
+    }
 
     if (!resolvedClient) {
       return NextResponse.json(
@@ -200,37 +338,63 @@ export async function POST(req: NextRequest) {
 
     const canonicalClientId = resolvedClient.id
     const clientRef = resolvedClient.ref
-    const clientData = resolvedClient.data
+    const clientData = sanitizeSnapshotForFirestore(resolvedClient.data)
     const resolvedClientName =
       clientData.fullName ||
       clientData.name ||
       (typeof clientName === 'string' ? clientName.trim() : '') ||
       'Client'
 
-    // Validate ownership of explicitly passed project/invoice
+    // Validate ownership of explicitly passed project/invoice (allowing orphaned legacy clientIds to heal)
     if (
       projectData &&
-      !doesEntityMatchClient(projectData.clientId, canonicalClientId, clientData, rawClientStr)
-    ) {
-      return NextResponse.json(
-        { error: 'The selected project belongs to a different client.' },
-        { status: 400 }
+      !doesEntityMatchClient(
+        projectData.clientId,
+        projectData.clientEmail,
+        projectData.clientName,
+        canonicalClientId,
+        clientData,
+        rawClientStr
       )
+    ) {
+      const otherProjClient = projectData.clientId
+        ? await resolveCanonicalClient(adminDb, {
+            clientsCollection: COLLECTIONS.CLIENTS,
+            clientId: projectData.clientId,
+          })
+        : null
+      if (otherProjClient && otherProjClient.id !== canonicalClientId) {
+        return NextResponse.json(
+          { error: 'The selected project belongs to a different client.' },
+          { status: 400 }
+        )
+      }
     }
 
     if (
       invoiceData &&
       !doesEntityMatchClient(
         invoiceData.clientId || invoiceData?.clientInfo?.id,
+        invoiceData.clientEmail || invoiceData?.clientInfo?.email,
+        invoiceData.clientName || invoiceData?.clientInfo?.name,
         canonicalClientId,
         clientData,
         rawClientStr
       )
     ) {
-      return NextResponse.json(
-        { error: 'The selected invoice belongs to a different client.' },
-        { status: 400 }
-      )
+      const otherInvClientId = invoiceData.clientId || invoiceData?.clientInfo?.id
+      const otherInvClient = otherInvClientId
+        ? await resolveCanonicalClient(adminDb, {
+            clientsCollection: COLLECTIONS.CLIENTS,
+            clientId: otherInvClientId,
+          })
+        : null
+      if (otherInvClient && otherInvClient.id !== canonicalClientId) {
+        return NextResponse.json(
+          { error: 'The selected invoice belongs to a different client.' },
+          { status: 400 }
+        )
+      }
     }
 
     // 3. Auto-resolve linked Invoice <-> Project cross-associations so neither gets out of sync
@@ -278,6 +442,42 @@ export async function POST(req: NextRequest) {
 
     const batch = adminDb.batch()
 
+    // Ensure hydrated records are persisted even when payment status === 'pending'
+    if (status !== 'success') {
+      if (hydratedClientFromSnapshot) {
+        batch.set(
+          clientRef,
+          {
+            ...clientData,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        )
+      }
+      if (hydratedInvoiceFromSnapshot && invoiceRef && invoiceData) {
+        batch.set(
+          invoiceRef,
+          {
+            ...sanitizeSnapshotForFirestore(invoiceData),
+            clientId: canonicalClientId,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        )
+      }
+      if (hydratedProjectFromSnapshot && projectRef && projectData) {
+        batch.set(
+          projectRef,
+          {
+            ...sanitizeSnapshotForFirestore(projectData),
+            clientId: canonicalClientId,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        )
+      }
+    }
+
     // 4. Create Payment Document using canonical identifiers
     const paymentRef = adminDb.collection(COLLECTIONS.PAYMENTS).doc()
     const paymentId = paymentRef.id
@@ -314,20 +514,26 @@ export async function POST(req: NextRequest) {
 
     // Only update financial balances if payment is 'success' (completed)
     if (status === 'success') {
-      // 5. Update Client Balances
+      // 5. Update Client Balances (using set+merge so locally-created clients upsert cleanly)
       const currentTotalPaid = roundCurrency(Number(clientData.totalPaid || 0))
       const currentOutstanding = roundCurrency(Number(clientData.outstandingBalance || 0))
       const currentPaymentCount = Number(clientData.paymentCount || 0)
       const newClientTotalPaid = roundCurrency(currentTotalPaid + parsedAmount)
       const newClientOutstanding = roundCurrency(Math.max(0, currentOutstanding - parsedAmount))
+      const newClientPaymentCount = currentPaymentCount + 1
 
-      batch.update(clientRef, {
-        totalPaid: newClientTotalPaid,
-        outstandingBalance: newClientOutstanding,
-        lastPaymentDate: FieldValue.serverTimestamp(),
-        paymentCount: FieldValue.increment(1),
-        updatedAt: FieldValue.serverTimestamp(),
-      })
+      batch.set(
+        clientRef,
+        {
+          ...clientData,
+          totalPaid: newClientTotalPaid,
+          outstandingBalance: newClientOutstanding,
+          lastPaymentDate: FieldValue.serverTimestamp(),
+          paymentCount: newClientPaymentCount,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      )
 
       updatedClientSnapshot = {
         ...clientData,
@@ -335,14 +541,15 @@ export async function POST(req: NextRequest) {
         totalPaid: newClientTotalPaid,
         outstandingBalance: newClientOutstanding,
         lastPaymentDate: nowIso,
-        paymentCount: currentPaymentCount + 1,
+        paymentCount: newClientPaymentCount,
         updatedAt: nowIso,
       }
 
       // 6. Update Invoice Balances if linked
       if (invoiceRef && invoiceData) {
-        const invTotal = roundCurrency(Number(invoiceData.total || 0))
-        const invCurrentPaid = roundCurrency(Number(invoiceData.amountPaid || 0))
+        const cleanInvoiceBase = sanitizeSnapshotForFirestore(invoiceData)
+        const invTotal = roundCurrency(Number(cleanInvoiceBase.total || 0))
+        const invCurrentPaid = roundCurrency(Number(cleanInvoiceBase.amountPaid || 0))
         const newInvPaid = roundCurrency(invCurrentPaid + parsedAmount)
         const newInvBalance = roundCurrency(Math.max(0, invTotal - newInvPaid))
         const newInvStatus =
@@ -350,9 +557,10 @@ export async function POST(req: NextRequest) {
             ? 'Paid'
             : newInvPaid > 0
             ? 'Partially Paid'
-            : invoiceData.status || 'Sent'
+            : cleanInvoiceBase.status || 'Sent'
 
         const invUpdates: Record<string, any> = {
+          ...cleanInvoiceBase,
           clientId: canonicalClientId,
           amountPaid: newInvPaid,
           balanceDue: newInvBalance,
@@ -368,10 +576,10 @@ export async function POST(req: NextRequest) {
         if (newInvStatus === 'Paid') {
           invUpdates.paidAt = FieldValue.serverTimestamp()
         }
-        batch.update(invoiceRef, invUpdates)
+        batch.set(invoiceRef, invUpdates, { merge: true })
 
         updatedInvoiceSnapshot = {
-          ...invoiceData,
+          ...cleanInvoiceBase,
           id: resolvedInvoiceId,
           clientId: canonicalClientId,
           amountPaid: newInvPaid,
@@ -380,23 +588,29 @@ export async function POST(req: NextRequest) {
           paymentMethod: channel,
           paymentReference: cleanRef,
           paymentDate,
+          ...(typeof notes === 'string' && notes.trim() ? { paymentNotes: notes.trim() } : {}),
           ...(newInvStatus === 'Paid' ? { paidAt: nowIso } : {}),
           updatedAt: nowIso,
         }
 
         // If invoice is now fully paid and has an active payment link, mark it Paid
-        if (newInvStatus === 'Paid' && invoiceData.paymentLinkId) {
-          const linkId = normalizeEntityId(invoiceData.paymentLinkId, COLLECTIONS.CLIENT_LINKS)
+        if (newInvStatus === 'Paid' && cleanInvoiceBase.paymentLinkId) {
+          const linkId = normalizeEntityId(cleanInvoiceBase.paymentLinkId, COLLECTIONS.CLIENT_LINKS)
           if (linkId) {
             const linkRef = adminDb.collection(COLLECTIONS.CLIENT_LINKS).doc(linkId)
             const linkSnap = await linkRef.get()
             if (linkSnap.exists && linkSnap.data()?.status !== 'Paid') {
-              batch.update(linkRef, {
-                status: 'Paid',
-                paymentStatus: 'Paid',
-                paystackReference: cleanRef,
-                updatedAt: FieldValue.serverTimestamp(),
-              })
+              batch.set(
+                linkRef,
+                {
+                  ...sanitizeSnapshotForFirestore(linkSnap.data()),
+                  status: 'Paid',
+                  paymentStatus: 'Paid',
+                  paystackReference: cleanRef,
+                  updatedAt: FieldValue.serverTimestamp(),
+                },
+                { merge: true }
+              )
             }
           }
         }
@@ -404,14 +618,16 @@ export async function POST(req: NextRequest) {
 
       // 7. Update Project Balances if linked
       if (projectRef && projectData) {
-        const projPrice = roundCurrency(Number(projectData.price || 0))
-        const projCurrentPaid = roundCurrency(Number(projectData.amountPaid || 0))
+        const cleanProjectBase = sanitizeSnapshotForFirestore(projectData)
+        const projPrice = roundCurrency(Number(cleanProjectBase.price || 0))
+        const projCurrentPaid = roundCurrency(Number(cleanProjectBase.amountPaid || 0))
         const newProjPaid = roundCurrency(projCurrentPaid + parsedAmount)
         const newProjBalance = roundCurrency(Math.max(0, projPrice - newProjPaid))
         const newProjPaymentStatus =
           projPrice > 0 && newProjBalance <= 0 ? 'Paid' : 'Partially Paid'
 
         const projUpdates: Record<string, any> = {
+          ...cleanProjectBase,
           clientId: canonicalClientId,
           amountPaid: newProjPaid,
           outstandingBalance: newProjBalance,
@@ -420,20 +636,25 @@ export async function POST(req: NextRequest) {
         }
 
         if (effectiveIsDeposit) {
-          projUpdates.depositPaid = roundCurrency(Number(projectData.depositPaid || 0) + parsedAmount)
-          if (projectData.depositAmount === undefined || projectData.depositAmount === null) {
+          projUpdates.depositPaid = roundCurrency(
+            Number(cleanProjectBase.depositPaid || 0) + parsedAmount
+          )
+          if (
+            cleanProjectBase.depositAmount === undefined ||
+            cleanProjectBase.depositAmount === null
+          ) {
             projUpdates.depositAmount = parsedAmount
           }
         }
 
-        if (newProjPaymentStatus === 'Paid' && projectData.status === 'Awaiting Payment') {
+        if (newProjPaymentStatus === 'Paid' && cleanProjectBase.status === 'Awaiting Payment') {
           projUpdates.status = 'In Progress'
         }
 
-        batch.update(projectRef, projUpdates)
+        batch.set(projectRef, projUpdates, { merge: true })
 
         updatedProjectSnapshot = {
-          ...projectData,
+          ...cleanProjectBase,
           id: resolvedProjectId,
           clientId: canonicalClientId,
           amountPaid: newProjPaid,
@@ -556,18 +777,23 @@ export async function DELETE(req: NextRequest) {
           clientId: paymentData.clientId,
         })
         if (resolvedClient) {
-          const clientData = resolvedClient.data
+          const clientData = sanitizeSnapshotForFirestore(resolvedClient.data)
           const currentTotalPaid = roundCurrency(Number(clientData.totalPaid || 0))
           const currentOutstanding = roundCurrency(Number(clientData.outstandingBalance || 0))
           const newTotalPaid = roundCurrency(Math.max(0, currentTotalPaid - amount))
           const newOutstanding = roundCurrency(currentOutstanding + amount)
           const newCount = Math.max(0, Number(clientData.paymentCount || 1) - 1)
-          batch.update(resolvedClient.ref, {
-            totalPaid: newTotalPaid,
-            outstandingBalance: newOutstanding,
-            paymentCount: newCount,
-            updatedAt: FieldValue.serverTimestamp(),
-          })
+          batch.set(
+            resolvedClient.ref,
+            {
+              ...clientData,
+              totalPaid: newTotalPaid,
+              outstandingBalance: newOutstanding,
+              paymentCount: newCount,
+              updatedAt: FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          )
           updatedClientSnapshot = {
             ...clientData,
             id: resolvedClient.id,
@@ -585,18 +811,23 @@ export async function DELETE(req: NextRequest) {
         const invoiceRef = adminDb.collection(COLLECTIONS.INVOICES).doc(invId)
         const invoiceSnap = await invoiceRef.get()
         if (invoiceSnap.exists) {
-          const invoiceData = invoiceSnap.data()!
+          const invoiceData = sanitizeSnapshotForFirestore(invoiceSnap.data())
           const currentPaid = roundCurrency(Number(invoiceData.amountPaid || 0))
           const total = roundCurrency(Number(invoiceData.total || 0))
           const newPaid = roundCurrency(Math.max(0, currentPaid - amount))
           const newBalance = roundCurrency(Math.max(0, total - newPaid))
           const newStatus = newPaid <= 0 ? 'Sent' : newBalance <= 0 && total > 0 ? 'Paid' : 'Partially Paid'
-          batch.update(invoiceRef, {
-            amountPaid: newPaid,
-            balanceDue: newBalance,
-            status: newStatus,
-            updatedAt: FieldValue.serverTimestamp(),
-          })
+          batch.set(
+            invoiceRef,
+            {
+              ...invoiceData,
+              amountPaid: newPaid,
+              balanceDue: newBalance,
+              status: newStatus,
+              updatedAt: FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          )
           updatedInvoiceSnapshot = {
             ...invoiceData,
             id: invId,
@@ -614,22 +845,25 @@ export async function DELETE(req: NextRequest) {
         const projectRef = adminDb.collection(COLLECTIONS.PROJECTS).doc(projId)
         const projectSnap = await projectRef.get()
         if (projectSnap.exists) {
-          const projectData = projectSnap.data()!
+          const projectData = sanitizeSnapshotForFirestore(projectSnap.data())
           const currentPaid = roundCurrency(Number(projectData.amountPaid || 0))
           const price = roundCurrency(Number(projectData.price || 0))
           const newPaid = roundCurrency(Math.max(0, currentPaid - amount))
           const newBalance = roundCurrency(Math.max(0, price - newPaid))
           const newPayStatus = newPaid <= 0 ? 'Unpaid' : newBalance <= 0 && price > 0 ? 'Paid' : 'Partially Paid'
           const projUpdates: Record<string, any> = {
+            ...projectData,
             amountPaid: newPaid,
             outstandingBalance: newBalance,
             paymentStatus: newPayStatus,
             updatedAt: FieldValue.serverTimestamp(),
           }
           if (paymentData.isDeposit && projectData.depositPaid !== undefined) {
-            projUpdates.depositPaid = roundCurrency(Math.max(0, Number(projectData.depositPaid || 0) - amount))
+            projUpdates.depositPaid = roundCurrency(
+              Math.max(0, Number(projectData.depositPaid || 0) - amount)
+            )
           }
-          batch.update(projectRef, projUpdates)
+          batch.set(projectRef, projUpdates, { merge: true })
           updatedProjectSnapshot = {
             ...projectData,
             id: projId,
@@ -673,4 +907,3 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: error?.message || 'Failed to remove payment' }, { status: 500 })
   }
 }
-

@@ -12,8 +12,10 @@ service cloud.firestore {
     // or UID-bound admin role on the user's own profile document.
     function isAdmin() {
       return request.auth != null && (
-        request.auth.token.admin == true ||
+        ('admin' in request.auth.token && request.auth.token.admin == true) ||
         (
+          'email' in request.auth.token &&
+          'email_verified' in request.auth.token &&
           request.auth.token.email_verified == true &&
           request.auth.token.email in [
             'natlexmediah@gmail.com',
@@ -23,6 +25,7 @@ service cloud.firestore {
         ) ||
         (
           exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          'role' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
         )
       );

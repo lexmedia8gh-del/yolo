@@ -67,7 +67,11 @@ const LOCAL_ALLOWED_ADMIN_EMAILS = new Set([
 
 const SESSION_STORAGE_KEY = 'lexmedia_admin_session_email'
 const LOCAL_AUTH_STORAGE_KEY = 'lexmedia_local_admin_auth'
+const PIN_SESSION_STORAGE_KEY = 'lexmedia_pin_session_active'
+const ACTIVE_TOKEN_STORAGE_KEY = 'lexmedia_active_id_token'
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+
+let inMemoryActiveToken = ''
 
 const listeners: Set<(user: User | null) => void> = new Set()
 
@@ -112,6 +116,14 @@ function writeLocalAuthRecord(record: LocalAdminAuthRecord) {
 }
 
 export function setSessionCookie(token: string, maxAgeSeconds = 604800) {
+  if (token) {
+    inMemoryActiveToken = token
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem(ACTIVE_TOKEN_STORAGE_KEY, token)
+      } catch {}
+    }
+  }
   if (typeof document === 'undefined') return
   const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
   const sameSitePart = isHttps ? '; SameSite=None; Secure; Partitioned' : '; SameSite=Lax'
@@ -145,14 +157,22 @@ export async function clearServerSessionCookie(): Promise<void> {
 }
 
 export function clearSessionCookie() {
+  inMemoryActiveToken = ''
+  if (typeof window !== 'undefined') {
+    try {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY)
+      sessionStorage.removeItem(PIN_SESSION_STORAGE_KEY)
+      sessionStorage.removeItem(ACTIVE_TOKEN_STORAGE_KEY)
+    } catch {}
+    try {
+      localStorage.removeItem(PIN_SESSION_STORAGE_KEY)
+    } catch {}
+  }
   if (typeof document === 'undefined') return
   const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
   const sameSitePart = isHttps ? '; SameSite=None; Secure; Partitioned' : '; SameSite=Lax'
   document.cookie = `__session=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT${sameSitePart}`
   document.cookie = `__session=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT`
-  try {
-    sessionStorage.removeItem(SESSION_STORAGE_KEY)
-  } catch {}
 }
 
 function getSessionCookieValue(): string {
@@ -166,18 +186,32 @@ function getSessionCookieValue(): string {
 
 function hasSessionCookie(): boolean {
   if (getSessionCookieValue()) return true
+  if (inMemoryActiveToken) return true
   if (typeof window !== 'undefined') {
     try {
-      return Boolean(sessionStorage.getItem(SESSION_STORAGE_KEY))
-    } catch {
-      return false
-    }
+      if (sessionStorage.getItem(SESSION_STORAGE_KEY)) return true
+      if (sessionStorage.getItem(PIN_SESSION_STORAGE_KEY) === 'true') return true
+      if (sessionStorage.getItem(ACTIVE_TOKEN_STORAGE_KEY)) return true
+    } catch {}
+    try {
+      if (localStorage.getItem(PIN_SESSION_STORAGE_KEY) === 'true') return true
+    } catch {}
   }
   return false
 }
 
 function hasLocalAdminSessionCookie(): boolean {
-  return getSessionCookieValue() === 'active-admin-session'
+  if (getSessionCookieValue() === 'active-admin-session') return true
+  if (inMemoryActiveToken === 'active-admin-session') return true
+  if (typeof window !== 'undefined') {
+    try {
+      if (sessionStorage.getItem(PIN_SESSION_STORAGE_KEY) === 'true') return true
+    } catch {}
+    try {
+      if (localStorage.getItem(PIN_SESSION_STORAGE_KEY) === 'true') return true
+    } catch {}
+  }
+  return false
 }
 
 function getFallbackAdminUser(): User {
@@ -249,14 +283,41 @@ export function hasActiveFirebaseUser(): boolean {
 
 export async function getActiveIdToken(forceRefresh = false): Promise<string | null> {
   const authInstance = getAuthInstance()
-  if (isFirebaseAuthConfigured && authInstance?.currentUser) {
-    const token = await authInstance.currentUser.getIdToken(forceRefresh)
-    if (token) {
-      setSessionCookie(token, 604800)
+  if (isFirebaseAuthConfigured && authInstance) {
+    if (!authInstance.currentUser && typeof (authInstance as any).authStateReady === 'function') {
+      try {
+        await Promise.race([
+          (authInstance as any).authStateReady(),
+          new Promise((resolve) => setTimeout(resolve, 1500)),
+        ])
+      } catch {}
     }
-    return token
+
+    if (authInstance.currentUser) {
+      const token = await authInstance.currentUser.getIdToken(forceRefresh)
+      if (token) {
+        setSessionCookie(token, 604800)
+      }
+      return token
+    }
   }
-  if (hasLocalAdminSessionCookie() || hasSessionCookie()) {
+
+  if (hasLocalAdminSessionCookie()) {
+    return 'active-admin-session'
+  }
+
+  const cookieToken = getSessionCookieValue()
+  if (cookieToken) return cookieToken
+  if (inMemoryActiveToken) return inMemoryActiveToken
+
+  if (typeof window !== 'undefined') {
+    try {
+      const savedToken = sessionStorage.getItem(ACTIVE_TOKEN_STORAGE_KEY)
+      if (savedToken) return savedToken
+    } catch {}
+  }
+
+  if (hasSessionCookie()) {
     return 'active-admin-session'
   }
   return null
@@ -297,9 +358,18 @@ export async function signInWithPin(pin: string): Promise<{ user: User }> {
     )
   }
 
+  const user = getFallbackAdminUser()
+  if (typeof window !== 'undefined') {
+    try {
+      sessionStorage.setItem(PIN_SESSION_STORAGE_KEY, 'true')
+      sessionStorage.setItem(SESSION_STORAGE_KEY, user.email || DEFAULT_ADMIN_USER.email || 'lexmedia8gh@gmail.com')
+    } catch {}
+    try {
+      localStorage.setItem(PIN_SESSION_STORAGE_KEY, 'true')
+    } catch {}
+  }
   setSessionCookie('active-admin-session', 604800)
   await syncServerSessionCookie('active-admin-session', 604800)
-  const user = getFallbackAdminUser()
   notifyListeners(user)
   return { user }
 }

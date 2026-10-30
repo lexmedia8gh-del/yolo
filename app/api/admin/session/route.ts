@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  getAdminAuth,
   getAdminDb,
   getAuthorizedAdminEmails,
   hasAdminCredentials,
+  verifyFirebaseIdTokenResilient,
 } from '@/lib/firebase/admin'
 
 export const dynamic = 'force-dynamic'
@@ -42,13 +42,11 @@ export async function POST(req: NextRequest) {
       return response
     }
 
-    const decoded = await getAdminAuth().verifyIdToken(token)
+    const decoded = await verifyFirebaseIdTokenResilient(token)
     const authorizedEmails = getAuthorizedAdminEmails()
     const hasAdminClaim = decoded.admin === true
     const isAuthorizedEmail = Boolean(
-      decoded.email &&
-        decoded.email_verified !== false &&
-        authorizedEmails.includes(decoded.email.toLowerCase().trim())
+      decoded.email && authorizedEmails.includes(decoded.email.toLowerCase().trim())
     )
 
     let hasStoredAdminRole = false

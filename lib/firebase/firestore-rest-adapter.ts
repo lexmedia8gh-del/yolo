@@ -934,8 +934,9 @@ export class FirestoreRestAdapter {
           cache: 'no-store',
         })
 
-        // If `update` failed with 404 NOT_FOUND because doc was created locally in PIN mode, retry as `merge`
-        if (res.status === 404 && ops.some((o) => o.mode === 'update')) {
+        // If `update` failed with 400 FAILED_PRECONDITION ("No document to update") or 404 NOT_FOUND
+        // because doc was created locally in PIN mode, retry `update` ops as `merge`
+        if ((res.status === 404 || res.status === 400) && ops.some((o) => o.mode === 'update')) {
           const retryWrites = ops.map((op) => {
             const fullDocName = `${basePath}/${op.ref.path}`
             const retryMode = op.mode === 'update' ? 'merge' : op.mode
@@ -954,6 +955,12 @@ export class FirestoreRestAdapter {
             this.applyOpToLocal(op, true)
           }
           return
+        } else {
+          const errText = await res.text().catch(() => '')
+          console.warn(
+            `[FirestoreREST] Commit returned HTTP ${res.status}, persisting locally:`,
+            errText.slice(0, 300)
+          )
         }
       } catch (err) {
         console.warn('[FirestoreREST] Commit network warning, persisting locally:', err)
