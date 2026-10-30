@@ -54,16 +54,24 @@ export function Dashboard() {
 
   useEffect(() => {
     let unsubscribed = false
-    setLoading(true)
 
     const unsubClients = subscribeToCollection<Client>(COLLECTIONS.CLIENTS, [], (data) => {
-      if (!unsubscribed) setClients(data)
+      if (!unsubscribed) {
+        setClients(data)
+        setLoading(false)
+      }
     })
     const unsubProjects = subscribeToCollection<Project>(COLLECTIONS.PROJECTS, [], (data) => {
-      if (!unsubscribed) setProjects(data)
+      if (!unsubscribed) {
+        setProjects(data)
+        setLoading(false)
+      }
     })
     const unsubInvoices = subscribeToCollection<Invoice>(COLLECTIONS.INVOICES, [], (data) => {
-      if (!unsubscribed) setInvoices(data)
+      if (!unsubscribed) {
+        setInvoices(data)
+        setLoading(false)
+      }
     })
     const unsubPayments = subscribeToCollection<Payment>(COLLECTIONS.PAYMENTS, [], (data) => {
       if (!unsubscribed) {
@@ -73,43 +81,22 @@ export function Dashboard() {
           return bDate - aDate
         })
         setPayments(sorted)
+        setLoading(false)
       }
     })
-
-    // Initial fetch fallback
-    Promise.all([
-      getDocuments<Client>(COLLECTIONS.CLIENTS),
-      getDocuments<Project>(COLLECTIONS.PROJECTS),
-      getDocuments<Invoice>(COLLECTIONS.INVOICES),
-      getDocuments<Payment>(COLLECTIONS.PAYMENTS),
-      getDocuments<any>(COLLECTIONS.ACTIVITY_LOGS),
-    ])
-      .then(([c, pr, inv, pmt, acts]) => {
-        if (!unsubscribed) {
-          if (c && c.length) setClients(c)
-          if (pr && pr.length) setProjects(pr)
-          if (inv && inv.length) setInvoices(inv)
-          if (pmt && pmt.length) {
-            setPayments([...pmt].sort((a, b) => {
-              const aDate = a.paidAt ? new Date(a.paidAt as any).getTime() : 0
-              const bDate = b.paidAt ? new Date(b.paidAt as any).getTime() : 0
-              return bDate - aDate
-            }))
-          }
-          if (acts && acts.length) {
-            setActivityLogs([...acts].sort((a, b) => {
-              const aDate = a.createdAt ? new Date(a.createdAt as any).getTime() : 0
-              const bDate = b.createdAt ? new Date(b.createdAt as any).getTime() : 0
-              return bDate - aDate
-            }).slice(0, 10))
-          }
-          setLoading(false)
-        }
-      })
-      .catch((err) => {
-        console.warn('Dashboard fetch warning:', err)
-        if (!unsubscribed) setLoading(false)
-      })
+    const unsubActivity = subscribeToCollection<any>(COLLECTIONS.ACTIVITY_LOGS, [], (data) => {
+      if (!unsubscribed) {
+        const sorted = [...data]
+          .sort((a, b) => {
+            const aDate = a.createdAt ? new Date(a.createdAt as any).getTime() : 0
+            const bDate = b.createdAt ? new Date(b.createdAt as any).getTime() : 0
+            return bDate - aDate
+          })
+          .slice(0, 10)
+        setActivityLogs(sorted)
+        setLoading(false)
+      }
+    })
 
     return () => {
       unsubscribed = true
@@ -117,6 +104,7 @@ export function Dashboard() {
       unsubProjects()
       unsubInvoices()
       unsubPayments()
+      unsubActivity()
     }
   }, [])
 

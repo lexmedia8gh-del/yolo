@@ -63,6 +63,7 @@ export function QuickActions() {
             <Link
               key={action.href}
               href={action.href}
+              prefetch={true}
               className="flex flex-col items-start gap-2.5 p-3 rounded-lg border border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 hover:bg-gray-50/60 dark:hover:bg-gray-850/40 transition-all duration-150 group"
             >
               <div className={`p-2 rounded-md ${action.bg} dark:bg-opacity-10`}>

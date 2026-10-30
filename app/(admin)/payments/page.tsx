@@ -69,7 +69,6 @@ export default function PaymentsPage() {
   }
 
   useEffect(() => {
-    setLoading(true)
     const unsubscribe = subscribeToCollection<Payment>(
       COLLECTIONS.PAYMENTS,
       [],
@@ -83,8 +82,6 @@ export default function PaymentsPage() {
         setLoading(false)
       }
     )
-
-    fetchPayments()
 
     return () => unsubscribe()
   }, [])

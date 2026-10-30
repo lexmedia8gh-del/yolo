@@ -266,12 +266,20 @@ function subscribeLocal(collectionName: string, fn: () => void): () => void {
   }
 }
 
-// Helper for local storage persistence fallback
+// In-memory RAM cache for instant 0ms retrieval during route navigation
+const memoryCollectionCache = new Map<string, any[]>()
+
+// Helper for local storage persistence fallback with instant memory caching
 function getLocalCollection<T>(collectionName: string): T[] {
   if (typeof window === 'undefined') return []
+  if (memoryCollectionCache.has(collectionName)) {
+    return memoryCollectionCache.get(collectionName) as T[]
+  }
   try {
     const raw = localStorage.getItem(`lexmedia_${collectionName}`)
-    return raw ? JSON.parse(raw) : []
+    const parsed = raw ? JSON.parse(raw) : []
+    memoryCollectionCache.set(collectionName, parsed)
+    return parsed as T[]
   } catch {
     return []
   }
@@ -279,6 +287,7 @@ function getLocalCollection<T>(collectionName: string): T[] {
 
 function setLocalCollection<T>(collectionName: string, items: T[], notify = true) {
   if (typeof window === 'undefined') return
+  memoryCollectionCache.set(collectionName, items)
   try {
     localStorage.setItem(`lexmedia_${collectionName}`, JSON.stringify(items))
     if (notify) {
