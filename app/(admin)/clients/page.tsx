@@ -142,8 +142,8 @@ export default function ClientsPage() {
       toast.error('Please enter the client full name')
       return
     }
-    if (!formData.email.trim()) {
-      toast.error('Please enter a valid email address')
+    if (!formData.email.trim() && !formData.phone.trim() && !formData.whatsappNumber.trim()) {
+      toast.error('Please enter at least an email address, phone number, or WhatsApp number')
       return
     }
 
@@ -268,11 +268,13 @@ export default function ClientsPage() {
   // Filtered & sorted clients list
   const filteredClients = clients
     .filter((c) => {
+      const q = search.toLowerCase()
       const matchesSearch =
-        c.fullName.toLowerCase().includes(search.toLowerCase()) ||
-        c.email.toLowerCase().includes(search.toLowerCase()) ||
-        (c.company && c.company.toLowerCase().includes(search.toLowerCase())) ||
-        (c.phone && c.phone.includes(search))
+        (c.fullName || '').toLowerCase().includes(q) ||
+        (c.email || '').toLowerCase().includes(q) ||
+        (c.company && c.company.toLowerCase().includes(q)) ||
+        (c.phone && c.phone.includes(search)) ||
+        (c.whatsappNumber && c.whatsappNumber.includes(search))
 
       const matchesStatus =
         statusFilter === 'all'
@@ -435,7 +437,9 @@ export default function ClientsPage() {
                       <td className="py-3 px-4 space-y-0.5">
                         <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300 text-xs">
                           <Mail size={12} className="text-gray-400 shrink-0" />
-                          <span className="truncate max-w-[180px]">{client.email}</span>
+                          <span className="truncate max-w-[180px]">
+                            {client.email || <span className="text-gray-400 italic">No email</span>}
+                          </span>
                         </div>
                         {client.phone && (
                           <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300 text-xs">
@@ -546,7 +550,7 @@ export default function ClientsPage() {
                   <div className="space-y-1 text-xs text-gray-600 dark:text-gray-300">
                     <div className="flex items-center gap-1.5 truncate">
                       <Mail size={12} className="text-gray-400 shrink-0" />
-                      <span className="truncate">{client.email}</span>
+                      <span className="truncate">{client.email || 'No email'}</span>
                     </div>
                     {client.phone && (
                       <div className="flex items-center gap-1.5">
@@ -651,12 +655,11 @@ export default function ClientsPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
-              label="Email Address *"
+              label="Email Address"
               type="email"
               placeholder="ama@company.com"
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              required
             />
             <Input
               label="Phone Number"
@@ -842,7 +845,7 @@ export default function ClientsPage() {
             company: extractedData.company || '',
             address: extractedData.address || '',
             notes: extractedData.notes
-              ? `${extractedData.notes}${extractedData.serviceOrProject ? `\nRequested Service: ${extractedData.serviceOrProject}` : ''}`
+              ? extractedData.notes
               : extractedData.serviceOrProject
               ? `Requested Service: ${extractedData.serviceOrProject}`
               : '',

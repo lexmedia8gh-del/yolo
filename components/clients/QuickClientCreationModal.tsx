@@ -4,20 +4,18 @@ import React, { useState } from 'react'
 import {
   Sparkles,
   ClipboardPaste,
-  ArrowRight,
   RefreshCw,
-  FileText,
-  CheckCircle2,
-  AlertCircle,
-  HelpCircle,
-  MessageSquare,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
-import { Spinner } from '@/components/ui/Spinner'
 import { QuickInfoCheckCard } from '@/components/clients/QuickInfoCheckCard'
 import { ClientInformationTemplatesModal } from '@/components/clients/ClientInformationTemplatesModal'
-import type { ParsedClientResponse } from '@/app/api/admin/parse-client/route'
+import {
+  composeComprehensiveClientNotes,
+  recomputeFieldAvailability,
+  type ExtractedEntity,
+  type ParsedClientResponse,
+} from '@/lib/extraction/types'
 import toast from 'react-hot-toast'
 
 interface QuickClientCreationModalProps {
@@ -85,8 +83,8 @@ export function QuickClientCreationModal({
   }
 
   const handleAnalyze = async (textToAnalyze?: string) => {
-    const targetText = (textToAnalyze || rawText).trim()
-    if (!targetText) {
+    const sourceText = textToAnalyze !== undefined ? textToAnalyze : rawText
+    if (!sourceText.trim()) {
       toast.error('Please paste or type client information first')
       return
     }
@@ -96,19 +94,20 @@ export function QuickClientCreationModal({
       const res = await fetch('/api/admin/parse-client', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: targetText }),
+        body: JSON.stringify({ text: sourceText }),
       })
 
-      if (!res.ok) {
-        throw new Error('Failed to analyze client text')
+      const payload = await res.json().catch(() => null)
+      if (!res.ok || !payload) {
+        throw new Error(payload?.error || 'Failed to analyze client text')
       }
 
-      const data: ParsedClientResponse = await res.json()
+      const data: ParsedClientResponse = payload
       setParsedData(data)
-      toast.success('Information analyzed successfully!')
+      toast.success('Information extracted & verified!')
     } catch (err: any) {
       console.error('Error analyzing text:', err)
-      toast.error('Could not analyze information automatically.')
+      toast.error(err?.message || 'Could not analyze information automatically.')
     } finally {
       setIsAnalyzing(false)
     }
@@ -116,48 +115,66 @@ export function QuickClientCreationModal({
 
   const handleUpdateField = (field: keyof ParsedClientResponse, value: string) => {
     if (!parsedData) return
-    const updated = { ...parsedData, [field]: value }
-
-    // Recompute available/missing fields dynamically
-    const coreFields: Array<{ key: keyof ParsedClientResponse; label: string }> = [
-      { key: 'fullName', label: 'Client Name' },
-      { key: 'phone', label: 'Phone Number' },
-      { key: 'whatsappNumber', label: 'WhatsApp Number' },
-      { key: 'email', label: 'Email Address' },
-      { key: 'company', label: 'Company / Brand' },
-      { key: 'address', label: 'Location / Address' },
-      { key: 'serviceOrProject', label: 'Service or Project' },
-    ]
-
-    const available: string[] = []
-    const missing: string[] = []
-
-    coreFields.forEach(({ key, label }) => {
-      const val = updated[key]
-      if (typeof val === 'string' && val.trim()) {
-        available.push(label)
-      } else {
-        missing.push(label)
+    const nextMeta = { ...(parsedData.fieldMeta || {}) }
+    if (nextMeta[field as string]) {
+      nextMeta[field as string] = {
+        ...nextMeta[field as string],
+        confidence: value.trim() ? 'explicit' : 'missing',
       }
+    }
+    const updated = recomputeFieldAvailability({
+      ...parsedData,
+      [field]: value,
+      fieldMeta: nextMeta,
     })
-
-    updated.availableFields = available
-    updated.missingFields = missing
-
     setParsedData(updated)
+  }
+
+  const handleSelectEntity = (entity: ExtractedEntity) => {
+    if (!parsedData) return
+    const updated = recomputeFieldAvailability({
+      ...parsedData,
+      fullName: entity.name || parsedData.fullName,
+      email: entity.email ?? parsedData.email,
+      phone: entity.phone ?? parsedData.phone,
+      whatsappNumber: entity.whatsappNumber || entity.phone || parsedData.whatsappNumber,
+      company: entity.company ?? parsedData.company,
+      address: entity.address ?? parsedData.address,
+    })
+    setParsedData(updated)
+    toast.success(`Switched active client to ${entity.name}`)
+  }
+
+  const handleResolveConflict = (field: string, chosenValue: string) => {
+    if (!parsedData) return
+    const remainingConflicts = (parsedData.conflicts || []).filter((c) => c.field !== field)
+    const nextMeta = { ...(parsedData.fieldMeta || {}) }
+    nextMeta[field] = {
+      ...(nextMeta[field] || {}),
+      confidence: 'explicit',
+    }
+    const updated = recomputeFieldAvailability({
+      ...parsedData,
+      [field]: chosenValue,
+      conflicts: remainingConflicts,
+      fieldMeta: nextMeta,
+    })
+    setParsedData(updated)
+    toast.success(`Selected "${chosenValue}"`)
   }
 
   const handleApplyToForm = () => {
     if (!parsedData) return
+    const comprehensiveNotes = composeComprehensiveClientNotes(parsedData)
     onApplyToNormalForm({
-      fullName: parsedData.fullName,
-      email: parsedData.email,
-      phone: parsedData.phone,
-      whatsappNumber: parsedData.whatsappNumber || parsedData.phone,
-      company: parsedData.company,
-      address: parsedData.address,
-      notes: parsedData.notes,
-      serviceOrProject: parsedData.serviceOrProject,
+      fullName: parsedData.fullName.trim(),
+      email: parsedData.email.trim(),
+      phone: parsedData.phone.trim(),
+      whatsappNumber: (parsedData.whatsappNumber || parsedData.phone).trim(),
+      company: parsedData.company.trim(),
+      address: parsedData.address.trim(),
+      notes: comprehensiveNotes,
+      serviceOrProject: parsedData.serviceOrProject.trim(),
     })
     onClose()
   }
@@ -171,14 +188,16 @@ export function QuickClientCreationModal({
 
     setIsSubmittingDirect(true)
     try {
+      const comprehensiveNotes = composeComprehensiveClientNotes(parsedData)
+      // Never fabricate @example.com emails — store exact extracted email or empty string
       const clientPayload = {
         fullName: parsedData.fullName.trim(),
-        email: parsedData.email.trim() || `${parsedData.fullName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'client'}@example.com`,
+        email: parsedData.email.trim(),
         phone: parsedData.phone.trim(),
         whatsappNumber: parsedData.whatsappNumber.trim() || parsedData.phone.trim(),
         company: parsedData.company.trim(),
         address: parsedData.address.trim(),
-        notes: parsedData.notes.trim(),
+        notes: comprehensiveNotes,
         status: 'active',
         projectCount: 0,
         totalBilled: 0,
@@ -228,8 +247,9 @@ export function QuickClientCreationModal({
 
   const handleReset = () => {
     setParsedData(null)
-    setRawText('')
   }
+
+  const lineCount = rawText ? rawText.split(/\r\n|\r|\n/).filter((l) => l.trim()).length : 0
 
   return (
     <>
@@ -241,7 +261,7 @@ export function QuickClientCreationModal({
       >
         <div className="space-y-4">
           <p className="text-xs text-muted -mt-2">
-            Paste unstructured notes, WhatsApp messages, or conversations. The system automatically extracts contact details, project needs, and identifies missing information.
+            Paste unstructured notes, WhatsApp messages, emails, itemized briefs, or conversations. The multi-pass extraction engine analyzes the complete text and preserves every detail.
           </p>
 
           {!parsedData ? (
@@ -251,25 +271,41 @@ export function QuickClientCreationModal({
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1.5">
                     <ClipboardPaste size={15} className="text-accent-600" />
-                    Paste Unstructured Client Information
+                    Paste Complete Client Information
                   </label>
-                  <button
-                    type="button"
-                    onClick={handlePasteClipboard}
-                    className="text-xs font-semibold text-accent-600 hover:text-accent-700 flex items-center gap-1"
-                  >
-                    Paste from Clipboard
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {rawText.length > 0 && (
+                      <span className="text-[11px] text-gray-400">
+                        {lineCount} line{lineCount === 1 ? '' : 's'} · {rawText.length.toLocaleString()} chars
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handlePasteClipboard}
+                      className="text-xs font-semibold text-accent-600 hover:text-accent-700 flex items-center gap-1"
+                    >
+                      Paste from Clipboard
+                    </button>
+                  </div>
                 </div>
 
                 <textarea
-                  rows={8}
+                  rows={9}
                   value={rawText}
                   onChange={(e) => setRawText(e.target.value)}
-                  placeholder={`Paste text here, for example:\n"Hi Lexmedia, this is Ama Mensah from Kumasi (0244123456, ama@company.com). We need a logo and branding for our new retail shop. Budget is 3500 GHS, needed by end of month."`}
+                  placeholder={`Paste any text format (labeled, unlabeled, bullets, numbered lists, or long threads), e.g.:\n"Hi Lexmedia, this is Ama Mensah from Kumasi (0244123456, ama@company.com). We need a logo and 500 business cards for our new retail shop. Budget is GH₵ 3,500 (20% deposit ready), needed by 15/10/2026."`}
                   className="w-full p-4 rounded-xl border border-border bg-gray-50/50 hover:bg-gray-50 focus:bg-white text-xs font-sans focus:ring-2 focus:ring-accent-500 outline-none leading-relaxed transition-all"
                 />
               </div>
+
+              {isAnalyzing && (
+                <div className="p-3 rounded-xl bg-accent-50/70 border border-accent-200/80 text-xs text-accent-900 flex items-center gap-2.5">
+                  <Sparkles size={15} className="text-accent-600 animate-pulse shrink-0" />
+                  <span>
+                    Running multi-pass extraction, semantic field matching, and completeness verification across all pasted content…
+                  </span>
+                </div>
+              )}
 
               {/* Sample Templates Quick-Load */}
               <div className="space-y-2">
@@ -281,11 +317,12 @@ export function QuickClientCreationModal({
                     <button
                       key={sample.title}
                       type="button"
+                      disabled={isAnalyzing}
                       onClick={() => {
                         setRawText(sample.text)
                         handleAnalyze(sample.text)
                       }}
-                      className="px-2.5 py-1.5 rounded-lg border border-border bg-white hover:border-accent-400 hover:bg-accent-50/30 text-xs text-gray-700 transition-colors flex items-center gap-1.5"
+                      className="px-2.5 py-1.5 rounded-lg border border-border bg-white hover:border-accent-400 hover:bg-accent-50/30 text-xs text-gray-700 transition-colors flex items-center gap-1.5 disabled:opacity-50"
                     >
                       <Sparkles size={12} className="text-accent-600" />
                       {sample.title}
@@ -320,20 +357,34 @@ export function QuickClientCreationModal({
                   <Sparkles size={16} className="text-accent-600" />
                   <span className="text-xs font-bold text-gray-900">Extracted Information Overview</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="text-xs text-accent-700 hover:text-accent-900 font-medium flex items-center gap-1"
-                >
-                  <RefreshCw size={13} />
-                  Analyze Different Text
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleReset}
+                    className="text-xs text-accent-700 hover:text-accent-900 font-medium flex items-center gap-1"
+                  >
+                    <RefreshCw size={13} />
+                    Edit Pasted Text
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setParsedData(null)
+                      setRawText('')
+                    }}
+                    className="text-xs text-gray-500 hover:text-gray-800 font-medium"
+                  >
+                    Clear All
+                  </button>
+                </div>
               </div>
 
               {/* Quick Information Check & Field Reviews */}
               <QuickInfoCheckCard
                 parsedData={parsedData}
                 onUpdateField={handleUpdateField}
+                onSelectEntity={handleSelectEntity}
+                onResolveConflict={handleResolveConflict}
                 onRequestMissingInfo={() => setIsTemplateModalOpen(true)}
                 onApplyToForm={handleApplyToForm}
                 onDirectCreate={saveClientDirectly ? handleDirectCreate : undefined}

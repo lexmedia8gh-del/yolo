@@ -372,9 +372,13 @@ function ClientProfilePageContent() {
                 <Mail size={15} className="text-gray-400 mt-0.5 shrink-0" />
                 <div>
                   <p className="text-xs text-gray-500">Email Address</p>
-                  <a href={`mailto:${client.email}`} className="font-medium text-indigo-600 hover:underline">
-                    {client.email}
-                  </a>
+                  {client.email ? (
+                    <a href={`mailto:${client.email}`} className="font-medium text-indigo-600 hover:underline">
+                      {client.email}
+                    </a>
+                  ) : (
+                    <p className="font-medium text-gray-400">Not provided</p>
+                  )}
                 </div>
               </div>
 

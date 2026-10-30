@@ -3,6 +3,8 @@ import { AuthProvider } from '@/lib/contexts/AuthContext'
 import { BrandingProvider } from '@/lib/contexts/BrandingContext'
 import { ThemeProvider } from '@/lib/contexts/ThemeContext'
 import { ToasterWrapper } from '@/components/ui/ToasterWrapper'
+import { getServerInitialBranding } from '@/lib/branding/server-branding'
+import { resolveAuthoritativeSplashLogoUrl } from '@/lib/branding/logo-resolver'
 import '@/app/globals.css'
 
 export const dynamic = 'force-dynamic'
@@ -37,6 +39,20 @@ const themeInitScript = `
     }
   } catch (e) {}
 
+  // Preload cached custom branding logo immediately before hydration if present
+  try {
+    var cachedRaw = localStorage.getItem('lexmedia_branding_cache_v1');
+    if (cachedRaw) {
+      var cached = JSON.parse(cachedRaw);
+      var url = (cached && (cached.logoLightUrl || cached.logoUrl)) || '';
+      if (url && typeof Image !== 'undefined') {
+        var preImg = new Image();
+        preImg.decoding = 'async';
+        preImg.src = url;
+      }
+    }
+  } catch (e) {}
+
   // Auto-recover from stale Next.js/Webpack chunk load failures
   if (typeof window !== 'undefined') {
     window.addEventListener('error', function(e) {
@@ -54,14 +70,23 @@ const themeInitScript = `
 })();
 `
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  const initialBranding = await getServerInitialBranding()
+  const preloadSplashLogoUrl = resolveAuthoritativeSplashLogoUrl(initialBranding)
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <link
+          rel="preload"
+          as="image"
+          href={preloadSplashLogoUrl}
+          fetchPriority="high"
+        />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body
@@ -69,7 +94,7 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <ThemeProvider>
-          <BrandingProvider>
+          <BrandingProvider initialBranding={initialBranding}>
             <AuthProvider>
               {children}
               <ToasterWrapper />

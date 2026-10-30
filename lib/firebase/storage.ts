@@ -1,5 +1,6 @@
 import { ref, deleteObject } from 'firebase/storage'
 import { storage, isFirebaseStorageConfigured, getAuthInstance } from './config'
+import { getAdminAuthHeaders } from './auth'
 import { COLLECTIONS, setDocument } from './firestore'
 import { isSupabaseConfigured, getSupabaseClient } from '../supabase/client'
 import {
@@ -311,8 +312,20 @@ export function startBrandingLogoUpload(options: StartBrandingUploadOptions): {
       reject(new Error(payload?.error || `Logo upload failed (HTTP ${xhr.status}).`))
     }
 
-    xhr.open('POST', '/api/branding/upload')
-    xhr.send(formData)
+    getAdminAuthHeaders()
+      .then((authHeaders) => {
+        if (cancelled) return
+        xhr.open('POST', '/api/branding/upload')
+        if (authHeaders.Authorization) {
+          xhr.setRequestHeader('Authorization', authHeaders.Authorization)
+        }
+        xhr.send(formData)
+      })
+      .catch(() => {
+        if (cancelled) return
+        xhr.open('POST', '/api/branding/upload')
+        xhr.send(formData)
+      })
   })
 
   return { promise, cancel }
@@ -353,9 +366,10 @@ export async function removeBrandingLogo(options: {
   }
 
   try {
+    const authHeaders = await getAdminAuthHeaders().catch(() => ({} as Record<string, string>))
     const res = await fetch('/api/branding/upload', {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({
         fieldKey,
         storagePath,

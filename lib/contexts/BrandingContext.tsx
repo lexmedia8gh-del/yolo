@@ -4,6 +4,10 @@ import React, { createContext, useContext, useEffect, useState } from 'react'
 import { subscribeToDocument, COLLECTIONS } from '@/lib/firebase/firestore'
 import { onAuthChange } from '@/lib/firebase/auth'
 import { sanitizeBrandingLogoUrl } from '@/lib/hooks/useInvoiceBranding'
+import {
+  BRANDING_CACHE_STORAGE_KEY,
+  resolveAuthoritativeSplashLogoUrl,
+} from '@/lib/branding/logo-resolver'
 import type { BrandingSettings, BusinessSettings } from '@/lib/types'
 
 export const DEFAULT_BRANDING: BrandingSettings = {
@@ -30,11 +34,13 @@ export const DEFAULT_BRANDING: BrandingSettings = {
 interface BrandingContextValue {
   branding: BrandingSettings
   loading: boolean
+  isReady: boolean
 }
 
 const BrandingContext = createContext<BrandingContextValue>({
   branding: DEFAULT_BRANDING,
-  loading: true,
+  loading: false,
+  isReady: true,
 })
 
 function sanitizeBrandingFields(
@@ -61,14 +67,85 @@ function sanitizeBrandingFields(
   return cleaned
 }
 
-export function BrandingProvider({ children }: { children: React.ReactNode }) {
-  const [branding, setBranding] = useState<BrandingSettings>(DEFAULT_BRANDING)
-  const [loading, setLoading] = useState(true)
+function persistBrandingCache(branding: BrandingSettings): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(BRANDING_CACHE_STORAGE_KEY, JSON.stringify(branding))
+  } catch {}
+}
+
+function readClientCachedBranding(): Partial<BrandingSettings> | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const fsBrandRaw = localStorage.getItem('lexmedia_fs_doc_settings__branding')
+    const fsBizRaw = localStorage.getItem('lexmedia_fs_doc_settings__business')
+    if (fsBrandRaw || fsBizRaw) {
+      const fsBrand = fsBrandRaw ? JSON.parse(fsBrandRaw) : {}
+      const fsBiz = fsBizRaw ? JSON.parse(fsBizRaw) : {}
+      return sanitizeBrandingFields(fsBrand, fsBiz?.logoURL, fsBiz?.logoStoragePath)
+    }
+
+    const cachedRaw = localStorage.getItem(BRANDING_CACHE_STORAGE_KEY)
+    if (cachedRaw) {
+      const parsed = JSON.parse(cachedRaw)
+      if (parsed && typeof parsed === 'object') {
+        return sanitizeBrandingFields(parsed)
+      }
+    }
+  } catch {}
+  return null
+}
+
+function preloadLogoImage(url: string): void {
+  if (typeof window === 'undefined' || !url) return
+  try {
+    const img = new window.Image()
+    img.decoding = 'async'
+    img.src = url
+  } catch {}
+}
+
+export function BrandingProvider({
+  children,
+  initialBranding,
+}: {
+  children: React.ReactNode
+  initialBranding?: BrandingSettings
+}) {
+  const [branding, setBranding] = useState<BrandingSettings>(() => {
+    const base = initialBranding ? { ...DEFAULT_BRANDING, ...initialBranding } : DEFAULT_BRANDING
+    return base
+  })
+  const [loading, setLoading] = useState(!initialBranding)
+  const [isReady, setIsReady] = useState(Boolean(initialBranding))
 
   useEffect(() => {
     let mounted = true
     let unsubBranding: (() => void) | null = null
     let unsubBusiness: (() => void) | null = null
+
+    // Synchronously hydrate from local client branding cache if SSR had no custom logo yet
+    // and client storage holds an uploaded branding setting
+    const localCached = readClientCachedBranding()
+    if (localCached) {
+      setBranding((prev) => {
+        const next = {
+          ...prev,
+          ...localCached,
+          logoUrl: prev.logoUrl || localCached.logoUrl || '',
+          logoStoragePath: prev.logoStoragePath || localCached.logoStoragePath || '',
+          logoLightUrl: prev.logoLightUrl || localCached.logoLightUrl || '',
+          logoLightStoragePath:
+            prev.logoLightStoragePath || localCached.logoLightStoragePath || '',
+          faviconUrl: prev.logoUrl ? prev.faviconUrl : localCached.faviconUrl || prev.faviconUrl,
+        }
+        preloadLogoImage(resolveAuthoritativeSplashLogoUrl(next))
+        if (next.logoUrl) preloadLogoImage(next.logoUrl)
+        return next
+      })
+    } else {
+      preloadLogoImage(resolveAuthoritativeSplashLogoUrl(branding))
+    }
 
     const clearDocListeners = () => {
       if (unsubBranding) {
@@ -81,7 +158,7 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // 1. Fetch from server API immediately for fast, safe initialization on both public (/login) and admin routes
+    // 1. Confirm latest server branding state
     fetch('/api/branding', { cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
@@ -91,17 +168,28 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
             data?.business?.logoURL,
             data?.business?.logoStoragePath
           )
-          setBranding((prev) => ({ ...prev, ...sanitized }))
+          setBranding((prev) => {
+            const next = { ...prev, ...sanitized }
+            persistBrandingCache(next)
+            preloadLogoImage(resolveAuthoritativeSplashLogoUrl(next))
+            if (next.logoUrl) preloadLogoImage(next.logoUrl)
+            return next
+          })
           setLoading(false)
+          setIsReady(true)
         } else if (mounted) {
           setLoading(false)
+          setIsReady(true)
         }
       })
       .catch(() => {
-        if (mounted) setLoading(false)
+        if (mounted) {
+          setLoading(false)
+          setIsReady(true)
+        }
       })
 
-    // 2. Only attach Firestore real-time listeners once an authenticated session is active
+    // 2. Attach Firestore real-time listeners once an authenticated session is active
     const unsubAuth = onAuthChange((activeUser) => {
       clearDocListeners()
       if (!mounted || !activeUser) return
@@ -113,9 +201,14 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
           if (mounted && data) {
             setBranding((prev) => {
               const sanitized = sanitizeBrandingFields(data, prev.logoUrl, prev.logoStoragePath)
-              return { ...prev, ...sanitized }
+              const next = { ...prev, ...sanitized }
+              persistBrandingCache(next)
+              preloadLogoImage(resolveAuthoritativeSplashLogoUrl(next))
+              if (next.logoUrl) preloadLogoImage(next.logoUrl)
+              return next
             })
             setLoading(false)
+            setIsReady(true)
           }
         }
       )
@@ -129,14 +222,18 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
             if (bizLogo) {
               setBranding((prev) => {
                 if (prev.logoUrl) return prev
-                return {
+                const next = {
                   ...prev,
                   logoUrl: bizLogo,
                   logoStoragePath: bizData.logoStoragePath || prev.logoStoragePath || '',
                 }
+                persistBrandingCache(next)
+                preloadLogoImage(resolveAuthoritativeSplashLogoUrl(next))
+                return next
               })
             }
             setLoading(false)
+            setIsReady(true)
           }
         }
       )
@@ -147,6 +244,7 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
       unsubAuth()
       clearDocListeners()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const cssVars = [
@@ -162,7 +260,7 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
   ].join(';')
 
   return (
-    <BrandingContext.Provider value={{ branding, loading }}>
+    <BrandingContext.Provider value={{ branding, loading, isReady }}>
       <style dangerouslySetInnerHTML={{ __html: `:root{${cssVars}}` }} />
       {children}
     </BrandingContext.Provider>

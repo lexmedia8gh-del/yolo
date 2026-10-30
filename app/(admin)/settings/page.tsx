@@ -36,10 +36,12 @@ import {
   changePin,
   resetPinWithGoogle,
   getActiveIdToken,
+  getAdminAuthHeaders,
   initiateAdminEmailChange,
   reauthenticateAdminWithGoogle,
   updateAdminDisplayName,
 } from '@/lib/firebase/auth'
+import { AUTHORITATIVE_LEXMEDIA_LOGO } from '@/lib/branding/logo-resolver'
 import { getFirebaseErrorMessage } from '@/lib/utils'
 import type { BusinessSettings, BrandingSettings } from '@/lib/types'
 import toast from 'react-hot-toast'
@@ -333,9 +335,10 @@ export default function SettingsPage() {
           true
         )
       }
+      const authHeaders = await getAdminAuthHeaders().catch(() => ({} as Record<string, string>))
       fetch('/api/branding', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ business: syncedSettings }),
       }).catch(() => {})
       toast.success('Settings saved successfully!')
@@ -360,9 +363,10 @@ export default function SettingsPage() {
         },
         true
       )
+      const authHeaders = await getAdminAuthHeaders().catch(() => ({} as Record<string, string>))
       fetch('/api/branding', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
           branding,
           business: {
@@ -1124,13 +1128,12 @@ export default function SettingsPage() {
                     <p className="text-sm text-muted mb-5">Real-time preview of your branding before saving.</p>
                     <div className="rounded-2xl p-6 space-y-4 border" style={{ backgroundColor: branding.backgroundColor, borderColor: branding.primaryColor + '20' }}>
                       <div className="flex items-center gap-3">
-                        {branding.logoUrl ? (
-                          <img src={branding.logoUrl} alt="Logo" referrerPolicy="no-referrer" className="h-10 w-auto max-w-[120px] object-contain" />
-                        ) : (
-                          <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-900 text-white">
-                            <Layers size={18} />
-                          </div>
-                        )}
+                        <img
+                          src={branding.logoUrl || AUTHORITATIVE_LEXMEDIA_LOGO}
+                          alt="Logo"
+                          referrerPolicy="no-referrer"
+                          className="h-10 w-auto max-w-[120px] object-contain"
+                        />
                         <div>
                           <p className="font-bold text-sm" style={{ color: branding.textColor }}>{branding.businessName || 'Your Brand Name'}</p>
                           <p className="text-xs" style={{ color: branding.mutedTextColor }}>{branding.tagline || 'Your tagline here'}</p>
