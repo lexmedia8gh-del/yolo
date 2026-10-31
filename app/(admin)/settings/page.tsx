@@ -43,7 +43,7 @@ import {
   updateAdminDisplayName,
 } from '@/lib/firebase/auth'
 import { AUTHORITATIVE_LEXMEDIA_LOGO } from '@/lib/branding/logo-resolver'
-import { getFirebaseErrorMessage } from '@/lib/utils'
+import { getFirebaseErrorMessage, formatActionError, fetchWithTimeout } from '@/lib/utils'
 import type { BusinessSettings, BrandingSettings } from '@/lib/types'
 import toast from 'react-hot-toast'
 
@@ -181,6 +181,8 @@ export default function SettingsPage() {
   const [needsReauthPrompt, setNeedsReauthPrompt] = useState(false)
   const [checkingPendingEmail, setCheckingPendingEmail] = useState(false)
   const [resendingPendingEmail, setResendingPendingEmail] = useState(false)
+  const [cancellingPendingEmail, setCancellingPendingEmail] = useState(false)
+  const [googleReauthLoading, setGoogleReauthLoading] = useState(false)
 
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -316,6 +318,7 @@ export default function SettingsPage() {
   }
 
   const handleSave = async () => {
+    if (saving) return
     setSaving(true)
     try {
       const syncedSettings: Partial<BusinessSettings> = {
@@ -338,20 +341,22 @@ export default function SettingsPage() {
         )
       }
       const authHeaders = await getAdminAuthHeaders().catch(() => ({} as Record<string, string>))
-      fetch('/api/branding', {
+      await fetchWithTimeout('/api/branding', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ business: syncedSettings }),
-      }).catch(() => {})
+        timeoutMs: 12000,
+      }).catch((e) => console.warn('[Settings] Branding mirror warning:', e))
       toast.success('Settings saved successfully!')
-    } catch {
-      toast.error('Failed to save settings. Please try again.')
+    } catch (err) {
+      toast.error(formatActionError(err, 'Failed to save settings. Please try again.'))
     } finally {
       setSaving(false)
     }
   }
 
   const handleSaveBranding = async () => {
+    if (saving) return
     setSaving(true)
     try {
       await setDocument(COLLECTIONS.SETTINGS, 'branding', branding, true)
@@ -366,7 +371,7 @@ export default function SettingsPage() {
         true
       )
       const authHeaders = await getAdminAuthHeaders().catch(() => ({} as Record<string, string>))
-      fetch('/api/branding', {
+      await fetchWithTimeout('/api/branding', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
@@ -376,10 +381,11 @@ export default function SettingsPage() {
             logoStoragePath: branding.logoStoragePath || '',
           },
         }),
-      }).catch(() => {})
+        timeoutMs: 12000,
+      }).catch((e) => console.warn('[Branding] Mirror warning:', e))
       toast.success('Branding saved successfully!')
-    } catch {
-      toast.error('Failed to save branding. Please try again.')
+    } catch (err) {
+      toast.error(formatActionError(err, 'Failed to save branding. Please try again.'))
     } finally {
       setSaving(false)
     }
@@ -471,7 +477,7 @@ export default function SettingsPage() {
       const latestToken = (await getActiveIdToken(true)) || initialToken
       let patchRes: Response
       try {
-        patchRes = await fetch('/api/admin/account', {
+        patchRes = await fetchWithTimeout('/api/admin/account', {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
@@ -485,6 +491,7 @@ export default function SettingsPage() {
               ? { pendingEmail: null }
               : {}),
           }),
+          timeoutMs: 15000,
         })
       } catch {
         throw Object.assign(
@@ -618,10 +625,11 @@ export default function SettingsPage() {
   }
 
   const handleGoogleReauthAndSave = async () => {
-    if (accountSaving) return
+    if (accountSaving || googleReauthLoading) return
     if (!validateAccountInputs()) return
     setAccountGeneralError('')
     setReauthPasswordError('')
+    setGoogleReauthLoading(true)
     try {
       await reauthenticateAdminWithGoogle()
       setNeedsReauthPrompt(false)
@@ -629,6 +637,8 @@ export default function SettingsPage() {
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code || ''
       setAccountGeneralError(getFirebaseErrorMessage(code))
+    } finally {
+      setGoogleReauthLoading(false)
     }
   }
 
@@ -672,13 +682,14 @@ export default function SettingsPage() {
         )
         const token = await getActiveIdToken(true)
         if (token) {
-          await fetch('/api/admin/account', {
+          await fetchWithTimeout('/api/admin/account', {
             method: 'PATCH',
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${token}`,
             },
             body: JSON.stringify({ pendingEmail: null }),
+            timeoutMs: 15000,
           }).catch(() => {})
         }
         await refreshUser()
@@ -727,18 +738,20 @@ export default function SettingsPage() {
   }
 
   const handleCancelPendingEmail = async () => {
-    if (!user?.uid) return
+    if (!user?.uid || cancellingPendingEmail) return
+    setCancellingPendingEmail(true)
     setAccountGeneralError('')
     try {
       const token = await getActiveIdToken()
       if (token) {
-        const res = await fetch('/api/admin/account', {
+        const res = await fetchWithTimeout('/api/admin/account', {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ pendingEmail: null }),
+          timeoutMs: 15000,
         })
         if (!res.ok) throw new Error('Failed to clear pending email.')
       }
@@ -753,13 +766,18 @@ export default function SettingsPage() {
         true
       )
       await refreshUser()
-      toast.success('Pending email notice cleared.')
-    } catch {
-      setAccountGeneralError('Failed to clear pending email state. Please try again.')
+      toast.success('Pending email change cancelled.')
+    } catch (err) {
+      const msg = formatActionError(err, 'Failed to cancel pending email change. Please try again.')
+      setAccountGeneralError(msg)
+      toast.error(msg)
+    } finally {
+      setCancellingPendingEmail(false)
     }
   }
 
   const handlePasswordChange = async () => {
+    if (passwordLoading) return
     if (newPassword !== confirmPassword) { toast.error('New passwords do not match.'); return }
     if (newPassword.length < 6) { toast.error('Password must be at least 6 characters.'); return }
     if (!user) return
@@ -779,6 +797,7 @@ export default function SettingsPage() {
   }
 
   const handleChangePinSubmit = async () => {
+    if (pinChangeLoading) return
     setPinChangeError('')
     if (pinChangeCurrent.length !== 6) {
       setPinChangeError('Please enter your current 6-digit PIN.')
@@ -801,13 +820,14 @@ export default function SettingsPage() {
       setPinChangeNew('')
       setPinChangeConfirm('')
     } catch (err: any) {
-      setPinChangeError(err?.message || 'Failed to update PIN. Please verify your current PIN.')
+      setPinChangeError(formatActionError(err, 'Failed to update PIN. Please verify your current PIN.'))
     } finally {
       setPinChangeLoading(false)
     }
   }
 
   const handleResetPinSubmit = async () => {
+    if (pinResetLoading) return
     setPinResetError('')
     if (pinResetNew.length !== 6) {
       setPinResetError('New PIN must be exactly 6 digits.')
@@ -825,7 +845,7 @@ export default function SettingsPage() {
       setPinResetNew('')
       setPinResetConfirm('')
     } catch (err: any) {
-      setPinResetError(err?.message || 'Failed to reset PIN with Google.')
+      setPinResetError(formatActionError(err, 'Failed to reset PIN with Google.'))
     } finally {
       setPinResetLoading(false)
     }
@@ -837,11 +857,14 @@ export default function SettingsPage() {
   const updateBranding = (key: keyof BrandingSettings, value: string) =>
     setBranding((prev) => ({ ...prev, [key]: value }))
 
+  const tabHasGlobalSave =
+    activeTab !== 'email' && activeTab !== 'security' && activeTab !== 'data_reset'
   const isHeaderSaving = activeTab === 'account' ? accountSaving : saving
   const isHeaderDisabled =
-    activeTab === 'data_reset' ||
+    !tabHasGlobalSave ||
     (activeTab === 'account' ? accountSaving || !hasAccountChanges : saving)
   const handleHeaderSaveClick = () => {
+    if (!tabHasGlobalSave) return
     if (activeTab === 'account') {
       void executeAccountSave()
     } else if (activeTab === 'branding') {
@@ -857,15 +880,18 @@ export default function SettingsPage() {
         title="Settings"
         subtitle="Configure system settings"
         action={
-          <Button
-            variant="primary"
-            icon={<Save size={16} />}
-            onClick={handleHeaderSaveClick}
-            loading={isHeaderSaving}
-            disabled={isHeaderDisabled}
-          >
-            Save Changes
-          </Button>
+          tabHasGlobalSave ? (
+            <Button
+              variant="primary"
+              icon={<Save size={16} />}
+              onClick={handleHeaderSaveClick}
+              loading={isHeaderSaving}
+              loadingText="Saving..."
+              disabled={isHeaderDisabled}
+            >
+              Save Changes
+            </Button>
+          ) : undefined
         }
       />
 
@@ -1221,6 +1247,7 @@ export default function SettingsPage() {
                           variant="primary"
                           icon={<Save size={15} />}
                           loading={pinChangeLoading}
+                          loadingText="Updating PIN..."
                           onClick={handleChangePinSubmit}
                           disabled={
                             pinChangeCurrent.length !== 6 ||
@@ -1286,6 +1313,7 @@ export default function SettingsPage() {
                           variant="secondary"
                           icon={<ShieldCheck size={15} />}
                           loading={pinResetLoading}
+                          loadingText="Verifying..."
                           onClick={handleResetPinSubmit}
                           disabled={
                             pinResetNew.length !== 6 ||
@@ -1369,6 +1397,7 @@ export default function SettingsPage() {
                               size="sm"
                               icon={<RefreshCw size={13} />}
                               loading={checkingPendingEmail}
+                              loadingText="Checking..."
                               onClick={handleCheckPendingVerification}
                             >
                               Check Verification Status
@@ -1378,6 +1407,7 @@ export default function SettingsPage() {
                               variant="ghost"
                               size="sm"
                               loading={resendingPendingEmail}
+                              loadingText="Resending..."
                               onClick={handleResendPendingVerification}
                             >
                               Resend Link
@@ -1385,9 +1415,11 @@ export default function SettingsPage() {
                             <button
                               type="button"
                               onClick={handleCancelPendingEmail}
-                              className="text-xs font-medium text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 px-2 py-1"
+                              disabled={cancellingPendingEmail}
+                              aria-busy={cancellingPendingEmail || undefined}
+                              className="text-xs font-medium text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 px-2 py-1 disabled:opacity-50 disabled:cursor-wait"
                             >
-                              Dismiss Notice
+                              {cancellingPendingEmail ? 'Dismissing...' : 'Dismiss Notice'}
                             </button>
                           </div>
                         </div>
@@ -1481,8 +1513,10 @@ export default function SettingsPage() {
                                 type="button"
                                 variant="outline"
                                 size="sm"
+                                loading={googleReauthLoading}
+                                loadingText="Verifying..."
                                 onClick={handleGoogleReauthAndSave}
-                                disabled={accountSaving || !hasAccountChanges}
+                                disabled={accountSaving || googleReauthLoading || !hasAccountChanges}
                               >
                                 Verify with Google &amp; Save Email
                               </Button>
@@ -1497,7 +1531,7 @@ export default function SettingsPage() {
                             type="button"
                             variant="ghost"
                             onClick={handleResetAccountChanges}
-                            disabled={accountSaving}
+                            disabled={accountSaving || googleReauthLoading}
                           >
                             Reset
                           </Button>
@@ -1507,7 +1541,8 @@ export default function SettingsPage() {
                           variant="primary"
                           icon={<Save size={15} />}
                           loading={accountSaving}
-                          disabled={accountSaving || !hasAccountChanges}
+                          loadingText="Saving..."
+                          disabled={accountSaving || googleReauthLoading || !hasAccountChanges}
                         >
                           Save Changes
                         </Button>

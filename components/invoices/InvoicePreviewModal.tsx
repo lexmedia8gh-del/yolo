@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { InvoiceDocument } from './InvoiceDocument'
@@ -11,6 +11,7 @@ import {
   getPaymentLink,
   getProductionUrl,
   isVercelPlatformDomain,
+  formatActionError,
 } from '@/lib/utils'
 import type { Invoice } from '@/lib/types'
 import {
@@ -47,6 +48,12 @@ export function InvoicePreviewModal({
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false)
   const [hasCopiedLink, setHasCopiedLink] = useState(false)
 
+  useEffect(() => {
+    if (!isOpen) {
+      setIsGeneratingPdf(false)
+    }
+  }, [isOpen])
+
   if (!invoice) return null
 
   const baseId = `invoice-preview-${invoice.id || 'current'}`
@@ -64,6 +71,7 @@ export function InvoicePreviewModal({
       : ''
 
   const handleDownloadPdf = async () => {
+    if (isGeneratingPdf) return
     setIsGeneratingPdf(true)
     const toastId = toast.loading('Generating A4 invoice PDF...')
     try {
@@ -74,8 +82,8 @@ export function InvoicePreviewModal({
       } else {
         toast.error('Failed to generate PDF. Please try Print.', { id: toastId })
       }
-    } catch {
-      toast.error('Error generating PDF.', { id: toastId })
+    } catch (err) {
+      toast.error(formatActionError(err, 'Error generating PDF.'), { id: toastId })
     } finally {
       setIsGeneratingPdf(false)
     }
@@ -126,7 +134,13 @@ export function InvoicePreviewModal({
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="" size="full">
+    <Modal
+      isOpen={isOpen}
+      onClose={() => !isGeneratingPdf && onClose()}
+      preventClose={isGeneratingPdf}
+      title=""
+      size="full"
+    >
       <div className="space-y-4">
         {/* ─── Top Action & Viewport Control Bar ─── */}
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3.5 border-b border-gray-200">
@@ -197,6 +211,7 @@ export function InvoicePreviewModal({
               size="sm"
               icon={<Download size={13} />}
               loading={isGeneratingPdf}
+              loadingText="Generating PDF..."
               onClick={handleDownloadPdf}
             >
               Download PDF

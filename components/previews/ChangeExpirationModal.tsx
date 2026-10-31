@@ -1,9 +1,10 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
-import { Clock } from 'lucide-react'
+import { getAdminAuthHeaders } from '@/lib/firebase/auth'
+import { fetchWithTimeout, formatActionError } from '@/lib/utils'
 import type { ClientPreview, PreviewExpirationOption } from '@/lib/types'
 import toast from 'react-hot-toast'
 
@@ -26,23 +27,40 @@ export function ChangeExpirationModal({
   const [customDate, setCustomDate] = useState('')
   const [saving, setSaving] = useState(false)
 
+  useEffect(() => {
+    if (!isOpen) {
+      setSaving(false)
+      return
+    }
+    if (preview) {
+      setOption(preview.expirationOption || '7_days')
+      setCustomDate('')
+    }
+  }, [preview, isOpen])
+
   if (!preview) return null
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (saving) return
     setSaving(true)
 
     try {
-      const res = await fetch(`/api/preview/admin/${preview.id}/update-expiration`, {
+      const authHeaders = await getAdminAuthHeaders()
+      const res = await fetchWithTimeout(`/api/preview/admin/${preview.id}/update-expiration`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+        },
         body: JSON.stringify({
           expirationOption: option,
           customExpirationDate: option === 'custom' ? customDate : undefined,
         }),
+        timeoutMs: 15000,
       })
 
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Failed to update expiration')
       }
@@ -51,7 +69,7 @@ export function ChangeExpirationModal({
       onSuccess(data)
       onClose()
     } catch (err: any) {
-      toast.error(err?.message || 'Error updating expiration')
+      toast.error(formatActionError(err, 'Error updating expiration'))
     } finally {
       setSaving(false)
     }
@@ -60,7 +78,8 @@ export function ChangeExpirationModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => !saving && onClose()}
+      preventClose={saving}
       title="Adjust Preview Expiration"
       size="md"
     >
@@ -76,6 +95,7 @@ export function ChangeExpirationModal({
           <select
             value={option}
             onChange={(e: any) => setOption(e.target.value)}
+            disabled={saving}
             className="w-full px-3 py-2 text-xs rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 outline-none"
           >
             <option value="1_hour">1 Hour from now</option>
@@ -96,6 +116,7 @@ export function ChangeExpirationModal({
               type="datetime-local"
               value={customDate}
               onChange={(e) => setCustomDate(e.target.value)}
+              disabled={saving}
               className="w-full px-3 py-2 text-xs rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
               required
             />
@@ -106,8 +127,14 @@ export function ChangeExpirationModal({
           <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" size="sm" disabled={saving}>
-            {saving ? 'Updating...' : 'Save Expiration'}
+          <Button
+            type="submit"
+            variant="primary"
+            size="sm"
+            loading={saving}
+            loadingText="Updating..."
+          >
+            Save Expiration
           </Button>
         </div>
       </form>

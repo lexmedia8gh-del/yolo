@@ -1,10 +1,11 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
-import { Bell, Check, CheckCheck, CreditCard, Download, ExternalLink, Sparkles, X } from 'lucide-react'
+import { Bell, Check, CheckCheck, CreditCard, Download, ExternalLink, Loader2 } from 'lucide-react'
 import Link from 'next/link'
+import toast from 'react-hot-toast'
 import { COLLECTIONS, subscribeToCollection, updateDocument } from '@/lib/firebase/firestore'
-import { formatDate } from '@/lib/utils'
+import { formatDate, formatActionError } from '@/lib/utils'
 
 export interface NotificationItem {
   id: string
@@ -30,6 +31,8 @@ export interface NotificationItem {
 export function NotificationBell() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [isOpen, setIsOpen] = useState(false)
+  const [markingAllRead, setMarkingAllRead] = useState(false)
+  const [markingId, setMarkingId] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -65,26 +68,35 @@ export function NotificationBell() {
 
   const handleMarkAsRead = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
+    if (markingId === id || markingAllRead) return
+    setMarkingId(id)
     try {
       await updateDocument(COLLECTIONS.NOTIFICATIONS, id, { isRead: true })
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
       )
     } catch (err) {
-      console.error('Failed to mark notification as read:', err)
+      toast.error(formatActionError(err, 'Failed to mark notification as read'))
+    } finally {
+      setMarkingId((prev) => (prev === id ? null : prev))
     }
   }
 
   const handleMarkAllRead = async () => {
     const unread = notifications.filter((n) => !n.isRead)
-    for (const n of unread) {
-      try {
-        await updateDocument(COLLECTIONS.NOTIFICATIONS, n.id, { isRead: true })
-      } catch (err) {
-        console.error('Error marking all as read:', err)
-      }
+    if (unread.length === 0 || markingAllRead) return
+    setMarkingAllRead(true)
+    try {
+      await Promise.all(
+        unread.map((n) => updateDocument(COLLECTIONS.NOTIFICATIONS, n.id, { isRead: true }))
+      )
+      setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })))
+      toast.success('All notifications marked as read')
+    } catch (err) {
+      toast.error(formatActionError(err, 'Failed to mark notifications as read'))
+    } finally {
+      setMarkingAllRead(false)
     }
-    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })))
   }
 
   return (
@@ -116,10 +128,12 @@ export function NotificationBell() {
             {unreadCount > 0 && (
               <button
                 onClick={handleMarkAllRead}
-                className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-medium flex items-center gap-1 cursor-pointer"
+                disabled={markingAllRead}
+                aria-busy={markingAllRead || undefined}
+                className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-medium flex items-center gap-1 cursor-pointer disabled:opacity-70 disabled:cursor-wait"
               >
-                <CheckCheck size={14} />
-                Mark all read
+                {markingAllRead ? <Loader2 size={13} className="animate-spin" /> : <CheckCheck size={14} />}
+                {markingAllRead ? 'Marking...' : 'Mark all read'}
               </button>
             )}
           </div>
@@ -187,10 +201,11 @@ export function NotificationBell() {
                     {!n.isRead && (
                       <button
                         onClick={(e) => handleMarkAsRead(n.id, e)}
+                        disabled={markingId === n.id || markingAllRead}
                         title="Mark as read"
-                        className="absolute top-3.5 right-3 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded hover:bg-gray-200/50 dark:hover:bg-gray-700/50"
+                        className="absolute top-3.5 right-3 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded hover:bg-gray-200/50 dark:hover:bg-gray-700/50 disabled:opacity-60"
                       >
-                        <Check size={13} />
+                        {markingId === n.id ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
                       </button>
                     )}
                   </div>

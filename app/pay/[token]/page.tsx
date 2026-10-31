@@ -25,7 +25,7 @@ import {
   getDocuments,
 } from '@/lib/firebase/firestore'
 import type { ClientLink, Invoice } from '@/lib/types'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, fetchWithTimeout, formatActionError } from '@/lib/utils'
 import { BrandingProvider, useBranding } from '@/lib/contexts/BrandingContext'
 import toast from 'react-hot-toast'
 import {
@@ -168,13 +168,14 @@ function PublicPaymentPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, refQuery])
 
-  const verifyPaystackTransaction = async (reference: string, link: ClientLink) => {
+  const verifyPaystackTransaction = async (reference: string, _link: ClientLink) => {
     setIsProcessing(true)
     try {
-      const res = await fetch(
-        `/api/paystack/verify?reference=${encodeURIComponent(reference)}&token=${encodeURIComponent(token)}`
+      const res = await fetchWithTimeout(
+        `/api/paystack/verify?reference=${encodeURIComponent(reference)}&token=${encodeURIComponent(token)}`,
+        { timeoutMs: 15000 }
       )
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
 
       if (res.ok && data.status === 'success') {
         setPaymentSuccess(true)
@@ -184,9 +185,11 @@ function PublicPaymentPageInner() {
         toast.success('Payment verified successfully!')
 
         // Fetch latest updated client/payment data before rendering Thank You page
-        const refreshRes = await fetch(`/api/pay/${encodeURIComponent(token)}`)
+        const refreshRes = await fetchWithTimeout(`/api/pay/${encodeURIComponent(token)}`, {
+          timeoutMs: 12000,
+        })
         if (refreshRes.ok) {
-          const refreshData = await refreshRes.json()
+          const refreshData = await refreshRes.json().catch(() => ({}))
           if (refreshData?.success && refreshData.link) {
             setLinkData(refreshData.link)
             if (refreshData.invoice) {
@@ -199,18 +202,19 @@ function PublicPaymentPageInner() {
       }
     } catch (err) {
       console.error('Verification error:', err)
-      toast.error('An error occurred during verification')
+      toast.error(formatActionError(err, 'An error occurred during verification'))
     } finally {
       setIsProcessing(false)
     }
   }
 
   const handlePayNow = async () => {
-    if (!linkData) return
+    if (!linkData || isProcessing) return
 
     setIsProcessing(true)
+    let redirecting = false
     try {
-      const res = await fetch('/api/paystack/initialize', {
+      const res = await fetchWithTimeout('/api/paystack/initialize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -222,20 +226,26 @@ function PublicPaymentPageInner() {
           invoiceNumber: linkData.invoiceNumber,
           clientName: linkData.clientName,
         }),
+        timeoutMs: 15000,
       })
 
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
 
       if (data.status && data.authorization_url) {
+        redirecting = true
         window.location.href = data.authorization_url
       } else {
-        toast.error('Failed to initialize payment gateway')
+        toast.error(data.error || 'Failed to initialize payment gateway')
       }
     } catch (err) {
       console.error('Pay error:', err)
-      toast.error('Payment initialization failed. Please try again.')
+      toast.error(formatActionError(err, 'Payment initialization failed. Please try again.'))
     } finally {
-      setIsProcessing(false)
+      if (!redirecting) {
+        setIsProcessing(false)
+      } else {
+        window.setTimeout(() => setIsProcessing(false), 8000)
+      }
     }
   }
 
@@ -702,20 +712,12 @@ function PublicPaymentPageInner() {
                         backgroundColor: branding.buttonColor || '#0A0A0A',
                         color: branding.buttonTextColor || '#FFFFFF',
                       }}
+                      icon={<Lock size={18} />}
+                      loading={isProcessing}
+                      loadingText="Connecting to Paystack..."
                       onClick={handlePayNow}
-                      disabled={isProcessing}
                     >
-                      {isProcessing ? (
-                        <>
-                          <Spinner size="sm" className="mr-2" />
-                          Connecting to Paystack...
-                        </>
-                      ) : (
-                        <>
-                          <Lock size={18} />
-                          Proceed to Pay {formatCurrency(linkData.amount || invoiceData?.balanceDue || 0, linkData.currency || invoiceData?.currency)}
-                        </>
-                      )}
+                      Proceed to Pay {formatCurrency(linkData.amount || invoiceData?.balanceDue || 0, linkData.currency || invoiceData?.currency)}
                     </Button>
                   )}
                 </div>

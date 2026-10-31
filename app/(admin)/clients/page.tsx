@@ -45,7 +45,7 @@ import {
   subscribeToCollection,
 } from '@/lib/firebase/firestore'
 import type { Client, ClientStatus } from '@/lib/types'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, formatActionError, fetchWithTimeout } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 export default function ClientsPage() {
@@ -64,6 +64,8 @@ export default function ClientsPage() {
   const [deactivatingClient, setDeactivatingClient] = useState<Client | null>(null)
   const [deletingClient, setDeletingClient] = useState<Client | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isTogglingStatus, setIsTogglingStatus] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   // Form State
   const [formData, setFormData] = useState({
@@ -138,6 +140,7 @@ export default function ClientsPage() {
 
   const handleSaveClient = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
     if (!formData.fullName.trim()) {
       toast.error('Please enter the client full name')
       return
@@ -186,7 +189,7 @@ export default function ClientsPage() {
         if (sendWelcomeSms && targetPhone) {
           const smsToastId = toast.loading('Sending welcome SMS...')
           try {
-            const smsRes = await fetch('/api/sms/welcome', {
+            const smsRes = await fetchWithTimeout('/api/sms/welcome', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -194,8 +197,9 @@ export default function ClientsPage() {
                 clientName: formData.fullName.trim(),
                 clientId: newClientId,
               }),
+              timeoutMs: 12000,
             })
-            const smsData = await smsRes.json()
+            const smsData = await smsRes.json().catch(() => ({}))
 
             if (smsRes.ok && smsData.success === true) {
               toast.success(smsData.message || 'Welcome SMS request accepted by provider', { id: smsToastId })
@@ -205,7 +209,7 @@ export default function ClientsPage() {
             }
           } catch (smsErr) {
             console.error('SMS sending error:', smsErr)
-            toast.error('Welcome SMS notice: Network error sending SMS', { id: smsToastId, duration: 4000 })
+            toast.error(`Welcome SMS notice: ${formatActionError(smsErr, 'Network error sending SMS')}`, { id: smsToastId, duration: 4000 })
           }
         } else if (sendWelcomeSms && !targetPhone) {
           toast('Welcome SMS skipped: No phone number entered', { icon: 'ℹ️' })
@@ -217,16 +221,16 @@ export default function ClientsPage() {
       }
     } catch (err) {
       console.error('Error saving client:', err)
-      toast.error('Failed to save client details.')
+      toast.error(formatActionError(err, 'Failed to save client details.'))
     } finally {
       setIsSubmitting(false)
     }
   }
 
   const handleToggleStatus = async () => {
-    if (!deactivatingClient) return
+    if (!deactivatingClient || isTogglingStatus) return
     const newStatus: ClientStatus = deactivatingClient.status === 'active' ? 'inactive' : 'active'
-    setIsSubmitting(true)
+    setIsTogglingStatus(true)
     try {
       await updateDocument(COLLECTIONS.CLIENTS, deactivatingClient.id, {
         status: newStatus,
@@ -239,24 +243,24 @@ export default function ClientsPage() {
       setDeactivatingClient(null)
     } catch (err) {
       console.error('Status update failed:', err)
-      toast.error('Failed to update client status.')
+      toast.error(formatActionError(err, 'Failed to update client status.'))
     } finally {
-      setIsSubmitting(false)
+      setIsTogglingStatus(false)
     }
   }
 
   const handleDeleteClient = async () => {
-    if (!deletingClient) return
-    setIsSubmitting(true)
+    if (!deletingClient || isDeleting) return
+    setIsDeleting(true)
     try {
       await deleteDocument(COLLECTIONS.CLIENTS, deletingClient.id)
       toast.success('Client deleted successfully.')
       setDeletingClient(null)
     } catch (err) {
       console.error('Failed to delete client:', err)
-      toast.error('Failed to delete client.')
+      toast.error(formatActionError(err, 'Failed to delete client.'))
     } finally {
-      setIsSubmitting(false)
+      setIsDeleting(false)
     }
   }
 
@@ -624,6 +628,7 @@ export default function ClientsPage() {
         onClose={() => setIsAddModalOpen(false)}
         title={editingClient ? 'Edit Client Details' : 'Add New Client'}
         size="md"
+        preventClose={isSubmitting}
       >
         <form onSubmit={handleSaveClient} className="space-y-4">
           {!editingClient && (
@@ -744,10 +749,15 @@ export default function ClientsPage() {
           )}
 
           <div className="flex justify-end gap-3 pt-4 border-t border-border">
-            <Button type="button" variant="outline" onClick={() => setIsAddModalOpen(false)}>
+            <Button type="button" variant="outline" onClick={() => setIsAddModalOpen(false)} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary" loading={isSubmitting}>
+            <Button
+              type="submit"
+              variant="primary"
+              loading={isSubmitting}
+              loadingText={editingClient ? 'Updating...' : 'Creating...'}
+            >
               {editingClient ? 'Update Client' : 'Create Client'}
             </Button>
           </div>
@@ -760,6 +770,7 @@ export default function ClientsPage() {
         onClose={() => setDeactivatingClient(null)}
         title={deactivatingClient?.status === 'active' ? 'Deactivate Client' : 'Activate Client'}
         size="sm"
+        preventClose={isTogglingStatus}
       >
         <div className="space-y-4 text-center py-2">
           <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto ${
@@ -782,13 +793,14 @@ export default function ClientsPage() {
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t border-border">
-            <Button variant="outline" onClick={() => setDeactivatingClient(null)}>
+            <Button variant="outline" onClick={() => setDeactivatingClient(null)} disabled={isTogglingStatus}>
               Cancel
             </Button>
             <Button
               variant={deactivatingClient?.status === 'active' ? 'danger' : 'primary'}
               onClick={handleToggleStatus}
-              loading={isSubmitting}
+              loading={isTogglingStatus}
+              loadingText={deactivatingClient?.status === 'active' ? 'Deactivating...' : 'Activating...'}
             >
               {deactivatingClient?.status === 'active' ? 'Deactivate Client' : 'Activate Client'}
             </Button>
@@ -802,6 +814,7 @@ export default function ClientsPage() {
         onClose={() => setDeletingClient(null)}
         title="Delete Client"
         size="sm"
+        preventClose={isDeleting}
       >
         <div className="space-y-4 text-center py-2">
           <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto bg-danger-50 text-danger-600">
@@ -818,13 +831,14 @@ export default function ClientsPage() {
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t border-border">
-            <Button variant="outline" onClick={() => setDeletingClient(null)}>
+            <Button variant="outline" onClick={() => setDeletingClient(null)} disabled={isDeleting}>
               Cancel
             </Button>
             <Button
               variant="danger"
               onClick={handleDeleteClient}
-              loading={isSubmitting}
+              loading={isDeleting}
+              loadingText="Deleting..."
             >
               Delete Client
             </Button>

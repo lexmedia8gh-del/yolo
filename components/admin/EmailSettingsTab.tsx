@@ -21,6 +21,8 @@ import { Button } from '@/components/ui/Button'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import { DEFAULT_DISPATCH_TEMPLATES, MessageTemplate, substitutePlaceholders, validateTemplateVariables } from '@/lib/templates/dispatchTemplates'
+import { getAdminAuthHeaders } from '@/lib/firebase/auth'
+import { fetchWithTimeout, formatActionError } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 export function EmailSettingsTab() {
@@ -51,11 +53,15 @@ export function EmailSettingsTab() {
   const fetchBrevoStatus = async () => {
     setLoadingStatus(true)
     try {
-      const res = await fetch('/api/admin/brevo/status')
-      const data = await res.json()
+      const authHeaders = await getAdminAuthHeaders().catch(() => ({} as Record<string, string>))
+      const res = await fetchWithTimeout('/api/admin/brevo/status', {
+        headers: authHeaders,
+        timeoutMs: 12000,
+      })
+      const data = await res.json().catch(() => ({}))
       setBrevoStatus(data)
-    } catch {
-      setBrevoStatus({ ok: false, error: 'Failed to connect to status endpoint' })
+    } catch (err) {
+      setBrevoStatus({ ok: false, error: formatActionError(err, 'Failed to connect to status endpoint') })
     } finally {
       setLoadingStatus(false)
     }
@@ -66,6 +72,7 @@ export function EmailSettingsTab() {
   }, [])
 
   const handleSendTestEmail = async () => {
+    if (sendingTest) return
     if (!testEmailRecipient || !testEmailRecipient.includes('@')) {
       toast.error('Please enter a valid test recipient email address.')
       return
@@ -73,9 +80,10 @@ export function EmailSettingsTab() {
 
     setSendingTest(true)
     try {
-      const res = await fetch('/api/dispatch', {
+      const authHeaders = await getAdminAuthHeaders().catch(() => ({} as Record<string, string>))
+      const res = await fetchWithTimeout('/api/dispatch', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
           channel: 'email',
           recipientEmail: testEmailRecipient,
@@ -84,16 +92,17 @@ export function EmailSettingsTab() {
           body: testEmailBody,
           companyName: 'LEXMEDIA.GH',
         }),
+        timeoutMs: 20000,
       })
 
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (res.ok && data.ok) {
         toast.success(`Test email successfully sent to ${testEmailRecipient}!`)
       } else {
         toast.error(data.error || 'Failed to send test email.')
       }
-    } catch (err: any) {
-      toast.error(err?.message || 'Error executing test dispatch.')
+    } catch (err: unknown) {
+      toast.error(formatActionError(err, 'Error executing test dispatch.'))
     } finally {
       setSendingTest(false)
     }
@@ -163,7 +172,14 @@ export function EmailSettingsTab() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={fetchBrevoStatus} loading={loadingStatus}>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<RefreshCw size={14} />}
+              onClick={fetchBrevoStatus}
+              loading={loadingStatus}
+              loadingText="Checking..."
+            >
               Check Connection
             </Button>
           </div>
@@ -256,6 +272,7 @@ export function EmailSettingsTab() {
               icon={<Send size={15} />}
               onClick={handleSendTestEmail}
               loading={sendingTest}
+              loadingText="Sending..."
             >
               Dispatch Test Email
             </Button>

@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { updateDocument, COLLECTIONS } from '@/lib/firebase/firestore'
 import type { Project, ClientLink } from '@/lib/types'
-import { formatCurrency, formatDate, copyToClipboard, openExternalUrl, getPaymentLink } from '@/lib/utils'
+import { formatCurrency, formatDate, copyToClipboard, openExternalUrl, getPaymentLink, formatActionError } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface ProjectPaymentRequestsProps {
@@ -39,10 +39,14 @@ export function ProjectPaymentRequests({
 
   const handleCopyLink = async (token: string) => {
     const url = getPaymentLink(token)
-    await copyToClipboard(url)
-    setCopiedToken(token)
-    setTimeout(() => setCopiedToken(null), 2000)
-    toast.success('Payment link copied to clipboard!')
+    const ok = await copyToClipboard(url)
+    if (ok) {
+      setCopiedToken(token)
+      setTimeout(() => setCopiedToken(null), 2000)
+      toast.success('Payment link copied to clipboard!')
+    } else {
+      toast.error('Failed to copy payment link')
+    }
   }
 
   const handleShareWhatsApp = (link: ClientLink) => {
@@ -53,7 +57,7 @@ export function ProjectPaymentRequests({
   }
 
   const handleCancelRequest = async () => {
-    if (!cancellingLink) return
+    if (!cancellingLink || isCancelling) return
     setIsCancelling(true)
     try {
       await updateDocument(COLLECTIONS.CLIENT_LINKS, cancellingLink.id, {
@@ -66,7 +70,7 @@ export function ProjectPaymentRequests({
       onRefresh()
     } catch (err: any) {
       console.error('Error cancelling payment request:', err)
-      toast.error('Failed to cancel payment request.')
+      toast.error(formatActionError(err, 'Failed to cancel payment request.'))
     } finally {
       setIsCancelling(false)
     }
@@ -276,6 +280,7 @@ export function ProjectPaymentRequests({
           onClose={() => setCancellingLink(null)}
           title="Cancel Payment Request"
           size="sm"
+          preventClose={isCancelling}
         >
           <div className="space-y-4 text-xs sm:text-sm">
             <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-800 flex items-start gap-2.5">
@@ -302,6 +307,7 @@ export function ProjectPaymentRequests({
                 size="sm"
                 onClick={handleCancelRequest}
                 loading={isCancelling}
+                loadingText="Cancelling..."
                 icon={<Ban size={14} />}
               >
                 Confirm Cancellation

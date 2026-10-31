@@ -1,5 +1,11 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app'
-import { doc, getDocFromServer, getFirestore, type Firestore } from 'firebase/firestore'
+import {
+  doc,
+  getDocFromServer,
+  getFirestore,
+  initializeFirestore,
+  type Firestore,
+} from 'firebase/firestore'
 import { getStorage, type FirebaseStorage } from 'firebase/storage'
 import { getAuth, type Auth } from 'firebase/auth'
 import firebaseAppletConfig from '@/firebase-applet-config.json'
@@ -86,9 +92,25 @@ if (hasValidConfig) {
 
   if (app) {
     try {
-      dbInstance = resolvedFirestoreDatabaseId
-        ? getFirestore(app, resolvedFirestoreDatabaseId)
-        : getFirestore(app)
+      if (typeof window !== 'undefined') {
+        try {
+          dbInstance = resolvedFirestoreDatabaseId
+            ? initializeFirestore(
+                app,
+                { experimentalAutoDetectLongPolling: true },
+                resolvedFirestoreDatabaseId
+              )
+            : initializeFirestore(app, { experimentalAutoDetectLongPolling: true })
+        } catch {
+          dbInstance = resolvedFirestoreDatabaseId
+            ? getFirestore(app, resolvedFirestoreDatabaseId)
+            : getFirestore(app)
+        }
+      } else {
+        dbInstance = resolvedFirestoreDatabaseId
+          ? getFirestore(app, resolvedFirestoreDatabaseId)
+          : getFirestore(app)
+      }
     } catch (err) {
       console.warn('[Firebase] Firestore initialization skipped:', err)
       dbInstance = null

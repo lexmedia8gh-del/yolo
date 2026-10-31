@@ -44,8 +44,15 @@ import { Spinner } from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Badge } from '@/components/ui/Badge'
-import { formatFileSize, formatDate, copyToClipboard, getFileCategory } from '@/lib/utils'
-import toast, { Toaster } from 'react-hot-toast'
+import {
+  formatFileSize,
+  formatDate,
+  copyToClipboard,
+  getFileCategory,
+  fetchWithTimeout,
+  formatActionError,
+} from '@/lib/utils'
+import toast from 'react-hot-toast'
 
 interface PreviewAssetDTO {
   id: string
@@ -142,6 +149,7 @@ function ClientPreviewPortalInner() {
   const [imageLoading, setImageLoading] = useState<boolean>(true)
   const [imageError, setImageError] = useState<boolean>(false)
   const [hasTriedFailover, setHasTriedFailover] = useState<boolean>(false)
+  const [retryingImage, setRetryingImage] = useState<boolean>(false)
 
   // Floating watermark dynamic shifting state
   const [watermarkOffset, setWatermarkOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -235,7 +243,7 @@ function ClientPreviewPortalInner() {
     async (event: string, assetName?: string, assetId?: string, metadata?: any) => {
       if (!token) return
       try {
-        await fetch(`/api/client-preview/${encodeURIComponent(token)}/log`, {
+        await fetchWithTimeout(`/api/client-preview/${encodeURIComponent(token)}/log`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -245,6 +253,7 @@ function ClientPreviewPortalInner() {
             sessionId,
             metadata,
           }),
+          timeoutMs: 8000,
         })
       } catch {
         // Non-blocking telemetry
@@ -268,12 +277,13 @@ function ClientPreviewPortalInner() {
       const generatedSession = `ses_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36)}`
       setSessionId(generatedSession)
 
-      const res = await fetch(`/api/client-preview/${encodeURIComponent(token)}`, {
+      const res = await fetchWithTimeout(`/api/client-preview/${encodeURIComponent(token)}`, {
         headers: {
           'x-preview-session': generatedSession,
         },
+        timeoutMs: 15000,
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
 
       if (data.state === 'invalid' || res.status === 404) {
         setState('invalid')
@@ -309,7 +319,9 @@ function ClientPreviewPortalInner() {
     } catch (err: any) {
       console.error('[Client Preview Load Error]:', err)
       setState('error')
-      setErrorMessage('Unable to connect to the preview server. Please try again.')
+      setErrorMessage(
+        formatActionError(err, 'Unable to connect to the preview server. Please try again.')
+      )
     }
   }, [token])
 
@@ -505,14 +517,18 @@ function ClientPreviewPortalInner() {
   }
 
   const handleRetryImage = async () => {
+    if (retryingImage) return
+    setRetryingImage(true)
     setImageLoading(true)
     setImageError(false)
     setHasTriedFailover(false)
 
     try {
       if (token) {
-        const res = await fetch(`/api/client-preview/${encodeURIComponent(token)}`)
-        const data = await res.json()
+        const res = await fetchWithTimeout(`/api/client-preview/${encodeURIComponent(token)}`, {
+          timeoutMs: 12000,
+        })
+        const data = await res.json().catch(() => ({}))
         if (data.success && data.preview) {
           setPreview(data.preview)
           const refreshedAsset = data.preview.assets?.[activeAssetIndex] || data.preview.assets?.[0]
@@ -524,14 +540,21 @@ function ClientPreviewPortalInner() {
           }
         }
       }
+
+      const base = activeAsset?.streamUrl || activeAsset?.previewUrl || ''
+      if (base) {
+        const sep = base.includes('?') ? '&' : '?'
+        setCurrentImageSrc(`${base}${sep}_retry=${Date.now()}`)
+      }
     } catch (refreshErr) {
       console.warn('[Client Preview] In-place refresh warning:', refreshErr)
-    }
-
-    const base = activeAsset?.streamUrl || activeAsset?.previewUrl || ''
-    if (base) {
-      const sep = base.includes('?') ? '&' : '?'
-      setCurrentImageSrc(`${base}${sep}_retry=${Date.now()}`)
+      const base = activeAsset?.streamUrl || activeAsset?.previewUrl || ''
+      if (base) {
+        const sep = base.includes('?') ? '&' : '?'
+        setCurrentImageSrc(`${base}${sep}_retry=${Date.now()}`)
+      }
+    } finally {
+      setRetryingImage(false)
     }
   }
 
@@ -565,17 +588,33 @@ function ClientPreviewPortalInner() {
 
   // Handle client approval
   const handleApproveProof = async () => {
+    if (isSubmittingFeedback || !token) return
     setIsSubmittingFeedback(true)
     try {
-      await logAuditActivity('feedback_submitted', activeAsset?.name, activeAsset?.id, {
-        type: 'approval',
-        notes: approvalNote,
+      const res = await fetchWithTimeout(`/api/client-preview/${encodeURIComponent(token)}/log`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'feedback_submitted',
+          assetId: activeAsset?.id,
+          assetName: activeAsset?.name,
+          sessionId,
+          metadata: {
+            type: 'approval',
+            notes: approvalNote,
+          },
+        }),
+        timeoutMs: 15000,
       })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Unable to submit approval.')
+      }
       setIsApproved(true)
       setIsApprovalModalOpen(false)
       toast.success('Thank you! Deliverable proof approved successfully.')
-    } catch {
-      toast.error('Unable to send approval. Please try again.')
+    } catch (err) {
+      toast.error(formatActionError(err, 'Unable to send approval. Please try again.'))
     } finally {
       setIsSubmittingFeedback(false)
     }
@@ -583,21 +622,37 @@ function ClientPreviewPortalInner() {
 
   // Handle client revision request
   const handleRequestRevision = async () => {
+    if (isSubmittingFeedback || !token) return
     if (!revisionNotes.trim()) {
       toast.error('Please enter your revision notes.')
       return
     }
     setIsSubmittingFeedback(true)
     try {
-      await logAuditActivity('feedback_submitted', activeAsset?.name, activeAsset?.id, {
-        type: 'revision_request',
-        notes: revisionNotes,
+      const res = await fetchWithTimeout(`/api/client-preview/${encodeURIComponent(token)}/log`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'feedback_submitted',
+          assetId: activeAsset?.id,
+          assetName: activeAsset?.name,
+          sessionId,
+          metadata: {
+            type: 'revision_request',
+            notes: revisionNotes,
+          },
+        }),
+        timeoutMs: 15000,
       })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Unable to submit revision request.')
+      }
       setIsRevisionModalOpen(false)
       setRevisionNotes('')
       toast.success('Revision request sent to the studio!')
-    } catch {
-      toast.error('Unable to send revision request.')
+    } catch (err) {
+      toast.error(formatActionError(err, 'Unable to send revision request.'))
     } finally {
       setIsSubmittingFeedback(false)
     }
@@ -839,8 +894,6 @@ function ClientPreviewPortalInner() {
         isFullscreen ? 'fixed inset-0 z-50 overflow-hidden' : ''
       }`}
     >
-      <Toaster position="top-center" />
-
       {/* Print protection media query: ensures completely blank page if client attempts Ctrl+P */}
       <style>{`
         @media print {
@@ -1061,6 +1114,8 @@ function ClientPreviewPortalInner() {
                           variant="outline"
                           size="sm"
                           icon={<RefreshCw size={12} />}
+                          loading={retryingImage}
+                          loadingText="Refreshing..."
                           onClick={handleRetryImage}
                           className="w-full"
                           aria-label="Refresh preview"
@@ -1293,7 +1348,8 @@ function ClientPreviewPortalInner() {
       {/* Approval Confirmation Modal */}
       <Modal
         isOpen={isApprovalModalOpen}
-        onClose={() => setIsApprovalModalOpen(false)}
+        onClose={() => !isSubmittingFeedback && setIsApprovalModalOpen(false)}
+        preventClose={isSubmittingFeedback}
         title="Approve Deliverable Proof"
         size="md"
       >
@@ -1309,8 +1365,9 @@ function ClientPreviewPortalInner() {
             <textarea
               value={approvalNote}
               onChange={(e) => setApprovalNote(e.target.value)}
+              disabled={isSubmittingFeedback}
               placeholder="e.g. Looks fantastic! Ready for the finalized master files."
-              className="w-full px-3 py-2 text-xs rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 outline-none resize-none h-20"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 outline-none resize-none h-20 disabled:opacity-60"
             />
           </div>
 
@@ -1330,9 +1387,10 @@ function ClientPreviewPortalInner() {
               size="sm"
               icon={<ThumbsUp size={13} />}
               onClick={handleApproveProof}
-              disabled={isSubmittingFeedback}
+              loading={isSubmittingFeedback}
+              loadingText="Approving..."
             >
-              {isSubmittingFeedback ? 'Sending...' : 'Confirm Approval'}
+              Confirm Approval
             </Button>
           </div>
         </div>
@@ -1341,7 +1399,8 @@ function ClientPreviewPortalInner() {
       {/* Revision Request Modal */}
       <Modal
         isOpen={isRevisionModalOpen}
-        onClose={() => setIsRevisionModalOpen(false)}
+        onClose={() => !isSubmittingFeedback && setIsRevisionModalOpen(false)}
+        preventClose={isSubmittingFeedback}
         title="Request Revisions"
         size="md"
       >
@@ -1357,8 +1416,9 @@ function ClientPreviewPortalInner() {
             <textarea
               value={revisionNotes}
               onChange={(e) => setRevisionNotes(e.target.value)}
+              disabled={isSubmittingFeedback}
               placeholder="Detail your requested revisions, timestamps, or color/copy adjustments..."
-              className="w-full px-3 py-2 text-xs rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 outline-none resize-none h-28"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 outline-none resize-none h-28 disabled:opacity-60"
               required
             />
           </div>
@@ -1379,9 +1439,10 @@ function ClientPreviewPortalInner() {
               size="sm"
               icon={<Send size={13} />}
               onClick={handleRequestRevision}
-              disabled={isSubmittingFeedback}
+              loading={isSubmittingFeedback}
+              loadingText="Submitting..."
             >
-              {isSubmittingFeedback ? 'Submitting...' : 'Send Revision Request'}
+              Send Revision Request
             </Button>
           </div>
         </div>

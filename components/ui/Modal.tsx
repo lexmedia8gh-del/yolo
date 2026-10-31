@@ -14,6 +14,7 @@ interface ModalProps {
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
   footer?: React.ReactNode
   hideClose?: boolean
+  preventClose?: boolean
   className?: string
 }
 
@@ -34,19 +35,22 @@ export function Modal({
   size = 'md',
   footer,
   hideClose = false,
+  preventClose = false,
   className,
 }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null)
 
-  // Close on Escape
+  // Close on Escape unless close is prevented
   useEffect(() => {
     if (!isOpen) return
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape' && !preventClose && !hideClose) {
+        onClose()
+      }
     }
     document.addEventListener('keydown', handleKey)
     return () => document.removeEventListener('keydown', handleKey)
-  }, [isOpen, onClose])
+  }, [isOpen, onClose, preventClose, hideClose])
 
   // Lock scroll
   useEffect(() => {
@@ -72,7 +76,9 @@ export function Modal({
       <div
         ref={overlayRef}
         className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-fade-in"
-        onClick={onClose}
+        onClick={() => {
+          if (!preventClose && !hideClose) onClose()
+        }}
       />
 
       {/* Modal */}
@@ -98,8 +104,15 @@ export function Modal({
             </div>
             {!hideClose && (
               <button
-                onClick={onClose}
-                className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-muted dark:text-gray-400 transition-colors shrink-0 ml-4"
+                type="button"
+                disabled={preventClose}
+                onClick={() => {
+                  if (!preventClose) onClose()
+                }}
+                className={cn(
+                  'p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-muted dark:text-gray-400 transition-colors shrink-0 ml-4',
+                  preventClose && 'opacity-50 cursor-not-allowed pointer-events-none'
+                )}
                 aria-label="Close"
               >
                 <X size={18} />
@@ -130,6 +143,7 @@ interface ConfirmModalProps {
   title: string
   message: string
   confirmLabel?: string
+  loadingText?: string
   cancelLabel?: string
   variant?: 'danger' | 'primary'
   loading?: boolean
@@ -142,21 +156,34 @@ export function ConfirmModal({
   title,
   message,
   confirmLabel = 'Confirm',
+  loadingText,
   cancelLabel = 'Cancel',
   variant = 'danger',
   loading = false,
 }: ConfirmModalProps) {
+  const defaultLoadingText =
+    loadingText ||
+    (confirmLabel.toLowerCase().includes('delete')
+      ? 'Deleting...'
+      : confirmLabel.toLowerCase().includes('revoke')
+      ? 'Revoking...'
+      : variant === 'danger'
+      ? 'Deleting...'
+      : 'Processing...')
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={title} size="sm">
+    <Modal isOpen={isOpen} onClose={onClose} preventClose={loading} title={title} size="sm">
       <p className="text-sm text-gray-600 dark:text-gray-300">{message}</p>
       <div className="flex gap-3 mt-6 justify-end">
-        <Button variant="outline" onClick={onClose} disabled={loading}>
+        <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
           {cancelLabel}
         </Button>
         <Button
+          type="button"
           variant={variant}
           onClick={onConfirm}
           loading={loading}
+          loadingText={defaultLoadingText}
         >
           {confirmLabel}
         </Button>

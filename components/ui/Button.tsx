@@ -9,6 +9,7 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
   size?: ButtonSize
   loading?: boolean
+  loadingText?: string
   icon?: React.ReactNode
   iconPosition?: 'left' | 'right'
   fullWidth?: boolean
@@ -42,24 +43,42 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       variant = 'primary',
       size = 'md',
       loading = false,
+      loadingText,
       icon,
       iconPosition = 'left',
       fullWidth = false,
       className,
       children,
       disabled,
+      onClick,
       ...props
     },
     ref
   ) => {
-    const isDisabled = disabled || loading
+    const isDisabled = Boolean(disabled || loading)
+    const displayContent = loading && loadingText ? loadingText : children
+
+    const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (isDisabled) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
+      onClick?.(e)
+    }
 
     return (
       <button
         ref={ref}
         disabled={isDisabled}
+        aria-busy={loading || undefined}
+        onClick={onClick ? handleClick : undefined}
         className={cn(
-          'inline-flex items-center justify-center font-medium whitespace-nowrap shrink-0 transition-all duration-150 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed select-none',
+          'inline-flex items-center justify-center font-medium whitespace-nowrap shrink-0 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 select-none',
+          !isDisabled && 'active:scale-[0.98]',
+          loading
+            ? 'disabled:opacity-80 disabled:cursor-wait'
+            : 'disabled:opacity-55 disabled:cursor-not-allowed',
           variantClasses[variant],
           sizeClasses[size],
           fullWidth && 'w-full',
@@ -73,6 +92,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
             viewBox="0 0 24 24"
+            aria-hidden="true"
           >
             <circle
               className="opacity-25"
@@ -92,7 +112,9 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         {!loading && icon && iconPosition === 'left' && (
           <span className="shrink-0 inline-flex items-center justify-center">{icon}</span>
         )}
-        {children && <span className="inline-flex items-center justify-center gap-2">{children}</span>}
+        {displayContent && (
+          <span className="inline-flex items-center justify-center gap-2">{displayContent}</span>
+        )}
         {!loading && icon && iconPosition === 'right' && (
           <span className="shrink-0 inline-flex items-center justify-center">{icon}</span>
         )}

@@ -29,6 +29,7 @@ import {
   openExternalUrl,
   generateSecureToken,
   getPaymentLink,
+  formatActionError,
 } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
@@ -68,6 +69,7 @@ export function ProjectPaymentLinkModal({
   // Initial populate / sync
   useEffect(() => {
     if (!isOpen) {
+      setIsSubmitting(false)
       setCreatedLink(null)
       setCopied(false)
       return
@@ -110,6 +112,7 @@ export function ProjectPaymentLinkModal({
 
   const handleCreatePaymentLink = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
 
     if (!isValid) {
       if (isProjectFullyPaid) {
@@ -156,7 +159,7 @@ export function ProjectPaymentLinkModal({
       if (onSuccess) onSuccess(savedLink)
     } catch (err: any) {
       console.error('Failed to create project payment link:', err)
-      toast.error(err?.message || 'Failed to generate payment link.')
+      toast.error(formatActionError(err, 'Failed to generate payment link.'))
     } finally {
       setIsSubmitting(false)
     }
@@ -165,10 +168,14 @@ export function ProjectPaymentLinkModal({
   const handleCopy = async () => {
     if (!createdLink) return
     const url = getPaymentLink(createdLink.token)
-    await copyToClipboard(url)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-    toast.success('Payment link copied to clipboard!')
+    const ok = await copyToClipboard(url)
+    if (ok) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+      toast.success('Payment link copied to clipboard!')
+    } else {
+      toast.error('Failed to copy payment link')
+    }
   }
 
   const handleShareWhatsApp = () => {
@@ -191,6 +198,7 @@ export function ProjectPaymentLinkModal({
       onClose={onClose}
       title={createdLink ? 'Payment Link Ready' : 'Create Project Payment Link'}
       size="md"
+      preventClose={isSubmitting}
     >
       {createdLink ? (
         // ── Success State ──────────────────────────────────────────────
@@ -481,6 +489,7 @@ export function ProjectPaymentLinkModal({
               variant="primary"
               size="sm"
               loading={isSubmitting}
+              loadingText="Generating..."
               disabled={!isValid || isSubmitting}
               icon={<Link2 size={14} />}
             >

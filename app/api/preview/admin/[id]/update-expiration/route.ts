@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
-import { db, isFirebaseConfigured } from '@/lib/firebase/config'
-import { doc, updateDoc, getDoc } from 'firebase/firestore'
 import { FieldValue, Timestamp as AdminTimestamp } from 'firebase-admin/firestore'
 import type { PreviewExpirationOption } from '@/lib/types'
 
@@ -24,10 +22,11 @@ function calculateExpiration(option: PreviewExpirationOption, customDate?: strin
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> | { id: string } }
 ) {
   try {
-    const id = params?.id
+    const resolvedParams = await Promise.resolve(params)
+    const id = resolvedParams?.id
     if (!id) {
       return NextResponse.json({ error: 'Preview ID is required' }, { status: 400 })
     }
@@ -37,37 +36,22 @@ export async function POST(
 
     const expiresAt = calculateExpiration(expirationOption as PreviewExpirationOption, customExpirationDate)
 
-    try {
-      const adminDb = getAdminDb()
-      await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).update({
+    const adminDb = getAdminDb()
+    await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).set(
+      {
         expirationOption,
         expiresAt,
         status: 'Active',
         updatedAt: FieldValue.serverTimestamp(),
-      })
+      },
+      { merge: true }
+    )
 
-      const snap = await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).get()
-      return NextResponse.json({
-        success: true,
-        preview: { id, ...snap.data() },
-      })
-    } catch {
-      if (!isFirebaseConfigured) {
-        return NextResponse.json({ error: 'Firebase database is not configured.' }, { status: 503 })
-      }
-      // Client SDK fallback
-      const docRef = doc(db, COLLECTIONS.CLIENT_PREVIEWS, id)
-      await updateDoc(docRef, {
-        expirationOption,
-        expiresAt: expiresAt ? expiresAt.toDate() : null,
-        status: 'Active',
-      })
-      const snap = await getDoc(docRef)
-      return NextResponse.json({
-        success: true,
-        preview: { id, ...snap.data() },
-      })
-    }
+    const snap = await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).get()
+    return NextResponse.json({
+      success: true,
+      preview: { id, ...(snap.data() || { expirationOption, expiresAt, status: 'Active' }) },
+    })
   } catch (err: any) {
     console.error('[Update Preview Expiration Error]:', err)
     return NextResponse.json(

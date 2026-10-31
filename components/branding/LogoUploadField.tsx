@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useRef, useEffect } from 'react'
-import { Upload, X, Image as ImageIcon, CheckCircle2, AlertCircle, Ban } from 'lucide-react'
+import { Upload, X, Image as ImageIcon, CheckCircle2, AlertCircle, Ban, Loader2 } from 'lucide-react'
 import {
   startBrandingLogoUpload,
   removeBrandingLogo,
@@ -9,6 +9,7 @@ import {
   type BrandingFieldKey,
 } from '@/lib/firebase/storage'
 import { sanitizeBrandingLogoUrl } from '@/lib/hooks/useInvoiceBranding'
+import { formatActionError } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface LogoUploadFieldProps {
@@ -74,7 +75,7 @@ export function LogoUploadField({
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (inputRef.current) inputRef.current.value = ''
-    if (!file) return
+    if (!file || status === 'uploading' || isRemoving) return
 
     const validationError = validateBrandingImageFile(file, fieldKey, maxMB)
     if (validationError) {
@@ -113,7 +114,7 @@ export function LogoUploadField({
         setErrorMsg('')
         toast('Logo upload cancelled.')
       } else {
-        const message = err?.message || 'Logo upload failed. Please try again.'
+        const message = formatActionError(err, 'Logo upload failed. Please try again.')
         setStatus('error')
         setProgress(0)
         setErrorMsg(message)
@@ -131,6 +132,7 @@ export function LogoUploadField({
   }
 
   const handleRemove = async () => {
+    if (isRemoving) return
     setIsRemoving(true)
     setErrorMsg('')
     try {
@@ -143,8 +145,8 @@ export function LogoUploadField({
       setProgress(0)
       onRemoved()
       toast.success(`${label} removed.`)
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to remove logo.')
+    } catch (err: unknown) {
+      toast.error(formatActionError(err, 'Failed to remove logo.'))
     } finally {
       setIsRemoving(false)
     }
@@ -223,9 +225,10 @@ export function LogoUploadField({
                 type="button"
                 onClick={handleRemove}
                 disabled={isRemoving}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-200 bg-white text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
+                aria-busy={isRemoving || undefined}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-200 bg-white text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors whitespace-nowrap shrink-0 disabled:opacity-60 disabled:cursor-wait"
               >
-                <X size={13} />
+                {isRemoving ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
                 {isRemoving ? 'Removing...' : 'Remove'}
               </button>
             )}

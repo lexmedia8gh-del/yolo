@@ -29,6 +29,8 @@ import {
   DataCountsSummary,
   ResetCategorySelection,
 } from '@/lib/services/dataReset'
+import { getAdminAuthHeaders } from '@/lib/firebase/auth'
+import { fetchWithTimeout, formatActionError } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 const CONFIRMATION_PHRASE = 'RESET DATA'
@@ -137,6 +139,7 @@ export function DataResetManager() {
   }
 
   const handleExecuteReset = async () => {
+    if (isResetting) return
     if (confirmInput.trim().toUpperCase() !== CONFIRMATION_PHRASE) {
       toast.error(`Please type "${CONFIRMATION_PHRASE}" exactly to confirm`)
       return
@@ -151,13 +154,15 @@ export function DataResetManager() {
 
       // 2. Trigger server-side Supabase cascade endpoint
       try {
-        await fetch('/api/admin/reset-data', {
+        const authHeaders = await getAdminAuthHeaders().catch(() => ({} as Record<string, string>))
+        await fetchWithTimeout('/api/admin/reset-data', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
           body: JSON.stringify({
             selection,
             confirmationPhrase: CONFIRMATION_PHRASE,
           }),
+          timeoutMs: 25000,
         })
       } catch (sbErr) {
         console.warn('Server-side cascade cleanup note:', sbErr)
@@ -177,9 +182,11 @@ export function DataResetManager() {
           duration: 5000,
         })
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error during data reset:', err)
-      toast.error(`Failed to complete reset: ${err?.message || 'Server error'}`, { id: toastId })
+      toast.error(`Failed to complete reset: ${formatActionError(err, 'Server error')}`, {
+        id: toastId,
+      })
     } finally {
       setIsResetting(false)
     }
@@ -206,7 +213,8 @@ export function DataResetManager() {
             size="sm"
             onClick={loadCounts}
             loading={loadingCounts}
-            icon={<RefreshCw size={13} className={loadingCounts ? 'animate-spin' : ''} />}
+            loadingText="Refreshing..."
+            icon={<RefreshCw size={13} />}
           >
             Refresh Counts
           </Button>
@@ -559,6 +567,7 @@ export function DataResetManager() {
       <Modal
         isOpen={isModalOpen}
         onClose={() => !isResetting && setIsModalOpen(false)}
+        preventClose={isResetting}
         title="Confirm Destructive Data Reset"
         size="md"
       >
@@ -620,6 +629,7 @@ export function DataResetManager() {
               variant="danger"
               disabled={confirmInput.trim().toUpperCase() !== CONFIRMATION_PHRASE || isResetting}
               loading={isResetting}
+              loadingText="Erasing Data..."
               onClick={handleExecuteReset}
               icon={<RotateCcw size={14} />}
             >

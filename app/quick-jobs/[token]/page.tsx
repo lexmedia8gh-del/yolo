@@ -21,7 +21,13 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { BrandingProvider, useBranding } from '@/lib/contexts/BrandingContext'
-import { formatCurrency, formatFileSize, copyToClipboard } from '@/lib/utils'
+import {
+  formatCurrency,
+  formatFileSize,
+  copyToClipboard,
+  fetchWithTimeout,
+  formatActionError,
+} from '@/lib/utils'
 import { Spinner } from '@/components/ui/Spinner'
 import { getSupabaseClient, isSupabaseConfigured } from '@/lib/supabase/client'
 import toast from 'react-hot-toast'
@@ -84,22 +90,29 @@ function QuickJobPortalContent() {
   const verifyPayment = React.useCallback(async (reference: string, payToken: string) => {
     setIsProcessingPayment(true)
     try {
-      const res = await fetch(
-        `/api/paystack/verify?reference=${encodeURIComponent(reference)}&token=${encodeURIComponent(payToken)}`
+      const res = await fetchWithTimeout(
+        `/api/paystack/verify?reference=${encodeURIComponent(reference)}&token=${encodeURIComponent(payToken)}`,
+        { timeoutMs: 15000 }
       )
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (res.ok && data.status === 'success') {
         toast.success('Payment verified! Uploads are now unlocked.')
         // Reload details to update payment state
-        const reloadRes = await fetch(`/api/quick-jobs/portal/${encodeURIComponent(token)}`)
-        const reloadData = await reloadRes.json()
+        const reloadRes = await fetchWithTimeout(
+          `/api/quick-jobs/portal/${encodeURIComponent(token)}`,
+          { timeoutMs: 12000 }
+        )
+        const reloadData = await reloadRes.json().catch(() => ({}))
         if (reloadRes.ok && reloadData.job) {
           setJob(reloadData.job)
           setFiles(reloadData.files || [])
         }
+      } else {
+        toast.error(data.error || 'Payment verification failed.')
       }
     } catch (err) {
       console.error('Payment verification error:', err)
+      toast.error(formatActionError(err, 'Payment verification failed.'))
     } finally {
       setIsProcessingPayment(false)
     }
@@ -109,8 +122,11 @@ function QuickJobPortalContent() {
   const fetchJobDetails = React.useCallback(async () => {
     if (!token) return
     try {
-      const res = await fetch(`/api/quick-jobs/portal/${encodeURIComponent(token)}`)
-      const data = await res.json()
+      const res = await fetchWithTimeout(
+        `/api/quick-jobs/portal/${encodeURIComponent(token)}`,
+        { timeoutMs: 15000 }
+      )
+      const data = await res.json().catch(() => ({}))
 
       if (res.ok && data.success && data.job) {
         setJob(data.job)
@@ -123,9 +139,9 @@ function QuickJobPortalContent() {
       } else {
         setErrorMsg(data.error || 'This Quick Job link is invalid or has expired.')
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error fetching quick job:', err)
-      setErrorMsg('Failed to load Quick Job details. Please try again.')
+      setErrorMsg(formatActionError(err, 'Failed to load Quick Job details. Please try again.'))
     } finally {
       setLoading(false)
     }
@@ -137,8 +153,9 @@ function QuickJobPortalContent() {
 
   // 3. Initiate Paystack Payment
   const handlePayNow = async () => {
-    if (!job) return
+    if (!job || isProcessingPayment) return
     setIsProcessingPayment(true)
+    let redirecting = false
 
     try {
       const payToken = job.paymentToken || job.token || token
@@ -147,7 +164,7 @@ function QuickJobPortalContent() {
           ? job.paymentRequestAmount
           : (job.outstandingBalance > 0 ? job.outstandingBalance : job.originalAgreedPrice)
 
-      const res = await fetch('/api/paystack/initialize', {
+      const res = await fetchWithTimeout('/api/paystack/initialize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -158,24 +175,31 @@ function QuickJobPortalContent() {
           clientName: job.clientName,
           callbackPath: `/quick-jobs/`,
         }),
+        timeoutMs: 15000,
       })
 
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (data.status && data.authorization_url) {
+        redirecting = true
         window.location.href = data.authorization_url
       } else {
         toast.error(data.error || 'Failed to initialize payment gateway')
       }
     } catch (err) {
       console.error('Pay error:', err)
-      toast.error('Payment initialization failed. Please try again.')
+      toast.error(formatActionError(err, 'Payment initialization failed. Please try again.'))
     } finally {
-      setIsProcessingPayment(false)
+      if (!redirecting) {
+        setIsProcessingPayment(false)
+      } else {
+        window.setTimeout(() => setIsProcessingPayment(false), 8000)
+      }
     }
   }
 
   // 4. Handle File Upload (Unlocked only after verified payment)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isUploading) return
     if (!job?.isPaid) {
       toast.error('Uploads are locked until payment is verified.')
       return
@@ -223,7 +247,7 @@ function QuickJobPortalContent() {
 
         let recordRes: Response
         if (uploadedDirectly && directUrl) {
-          recordRes = await fetch('/api/quick-jobs/upload', {
+          recordRes = await fetchWithTimeout('/api/quick-jobs/upload', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -236,6 +260,7 @@ function QuickJobPortalContent() {
               fileSize: file.size,
               fileType: file.type || 'application/octet-stream',
             }),
+            timeoutMs: 30000,
           })
         } else {
           const formData = new FormData()
@@ -248,9 +273,10 @@ function QuickJobPortalContent() {
           formData.append('fileSize', String(file.size))
           formData.append('fileType', file.type || 'application/octet-stream')
 
-          recordRes = await fetch('/api/quick-jobs/upload', {
+          recordRes = await fetchWithTimeout('/api/quick-jobs/upload', {
             method: 'POST',
             body: formData,
+            timeoutMs: 30000,
           })
         }
 
@@ -265,9 +291,9 @@ function QuickJobPortalContent() {
       toast.success('File(s) uploaded successfully!')
       // Refresh files list
       await fetchJobDetails()
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('File upload error:', err)
-      toast.error(err.message || 'File upload failed.')
+      toast.error(formatActionError(err, 'File upload failed.'))
     } finally {
       setIsUploading(false)
       setUploadProgress(0)
@@ -277,6 +303,7 @@ function QuickJobPortalContent() {
 
   // 5. Submit Deliverables & Trigger Brevo Notification
   const handleSubmitDeliverables = async () => {
+    if (isSubmitting) return
     if (!job?.isPaid) {
       toast.error('Payment must be confirmed before submitting.')
       return
@@ -289,12 +316,13 @@ function QuickJobPortalContent() {
 
     setIsSubmitting(true)
     try {
-      const res = await fetch(`/api/quick-jobs/portal/${encodeURIComponent(token)}`, {
+      const res = await fetchWithTimeout(`/api/quick-jobs/portal/${encodeURIComponent(token)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        timeoutMs: 20000,
       })
 
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (res.ok && data.success) {
         setIsSubmitted(true)
         if (data.deliveryLink) {
@@ -304,9 +332,9 @@ function QuickJobPortalContent() {
       } else {
         toast.error(data.error || 'Failed to submit deliverables.')
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Submission error:', err)
-      toast.error(err.message || 'Submission failed.')
+      toast.error(formatActionError(err, 'Submission failed.'))
     } finally {
       setIsSubmitting(false)
     }
@@ -482,7 +510,8 @@ function QuickJobPortalContent() {
                 <button
                   onClick={handlePayNow}
                   disabled={isProcessingPayment}
-                  className="w-full py-3.5 px-5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  aria-busy={isProcessingPayment || undefined}
+                  className="w-full py-3.5 px-5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-65 disabled:cursor-wait"
                 >
                   {isProcessingPayment ? (
                     <>
@@ -641,11 +670,15 @@ function QuickJobPortalContent() {
                         className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-300"
                       />
                       <button
-                        onClick={() => {
-                          copyToClipboard(finalDeliveryLink)
-                          toast.success('Delivery link copied!')
+                        onClick={async () => {
+                          const ok = await copyToClipboard(finalDeliveryLink)
+                          if (ok) {
+                            toast.success('Delivery link copied!')
+                          } else {
+                            toast.error('Failed to copy delivery link.')
+                          }
                         }}
-                        className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-500"
+                        className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-500 cursor-pointer"
                       >
                         Copy
                       </button>
@@ -656,7 +689,8 @@ function QuickJobPortalContent() {
                 <button
                   onClick={handleSubmitDeliverables}
                   disabled={isSubmitting || files.length === 0}
-                  className="w-full py-4 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-sm transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-busy={isSubmitting || undefined}
+                  className="w-full py-4 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-sm transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-65 disabled:cursor-not-allowed"
                 >
                   {isSubmitting ? (
                     <>

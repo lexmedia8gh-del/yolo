@@ -10,6 +10,7 @@ import {
   uploadBrandingAssetToSupabase,
 } from '../supabase/storage'
 import { ResumableUploadTask, UploadTaskProgress } from '../supabase/resumable'
+import { fetchWithTimeout } from '../utils'
 
 export interface UploadProgressCallback {
   (progress: number, bytesTransferred: number, totalBytes: number): void
@@ -223,6 +224,7 @@ export function startBrandingLogoUpload(options: StartBrandingUploadOptions): {
     }
 
     const xhr = new XMLHttpRequest()
+    xhr.timeout = 45000
     activeXhr = xhr
 
     xhr.upload.addEventListener('progress', (event) => {
@@ -236,6 +238,20 @@ export function startBrandingLogoUpload(options: StartBrandingUploadOptions): {
       const abortErr = new Error('Upload cancelled')
       ;(abortErr as any).cancelled = true
       reject(abortErr)
+    }
+
+    xhr.ontimeout = () => {
+      if (cancelled) {
+        const abortErr = new Error('Upload cancelled')
+        ;(abortErr as any).cancelled = true
+        reject(abortErr)
+        return
+      }
+      if (isSupabaseConfigured()) {
+        uploadViaClientSupabase().then(resolve).catch(reject)
+      } else {
+        reject(new Error('Logo upload timed out. Please check your connection and try again.'))
+      }
     }
 
     xhr.onerror = () => {
@@ -367,7 +383,7 @@ export async function removeBrandingLogo(options: {
 
   try {
     const authHeaders = await getAdminAuthHeaders().catch(() => ({} as Record<string, string>))
-    const res = await fetch('/api/branding/upload', {
+    const res = await fetchWithTimeout('/api/branding/upload', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({
@@ -375,6 +391,7 @@ export async function removeBrandingLogo(options: {
         storagePath,
         persistSettings,
       }),
+      timeoutMs: 15000,
     })
 
     if (!res.ok && isSupabaseConfigured() && isSafeBrandingStoragePath(storagePath)) {

@@ -7,9 +7,6 @@ import {
   query,
   where,
   getDocs,
-  doc,
-  updateDoc,
-  serverTimestamp as clientServerTimestamp,
   Timestamp as ClientTimestamp,
 } from 'firebase/firestore'
 import { FieldValue, Timestamp as AdminTimestamp } from 'firebase-admin/firestore'
@@ -221,10 +218,13 @@ export async function handleGetClientPreview(
         await adminDb
           .collection(COLLECTIONS.CLIENT_PREVIEWS)
           .doc(previewId)
-          .update({
-            viewCount: FieldValue.increment(1),
-            lastViewedAt: FieldValue.serverTimestamp(),
-          })
+          .set(
+            {
+              viewCount: FieldValue.increment(1),
+              lastViewedAt: FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          )
 
         await adminDb.collection(COLLECTIONS.PREVIEW_LOGS).add({
           previewId,
@@ -238,11 +238,6 @@ export async function handleGetClientPreview(
           userAgent,
           ipSnippet,
           timestamp: FieldValue.serverTimestamp(),
-        })
-      } else if (isFirebaseConfigured) {
-        const docRef = doc(db, COLLECTIONS.CLIENT_PREVIEWS, previewId)
-        await updateDoc(docRef, {
-          lastViewedAt: clientServerTimestamp(),
         })
       }
     } catch (metricErr: any) {
@@ -457,10 +452,20 @@ export async function handleLogClientPreview(
       })
 
       return NextResponse.json({ success: true })
-    } catch {
+    } catch (err: any) {
+      if (event === 'feedback_submitted') {
+        console.error('[Client Preview Feedback Log Error]:', err)
+        return NextResponse.json(
+          { success: false, error: err?.message || 'Failed to save client feedback.' },
+          { status: 500 }
+        )
+      }
       return NextResponse.json({ success: true })
     }
-  } catch {
-    return NextResponse.json({ success: false }, { status: 500 })
+  } catch (err: any) {
+    return NextResponse.json(
+      { success: false, error: err?.message || 'Failed to process preview log.' },
+      { status: 500 }
+    )
   }
 }

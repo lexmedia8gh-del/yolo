@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Sparkles,
   ClipboardPaste,
@@ -16,6 +16,7 @@ import {
   type ExtractedEntity,
   type ParsedClientResponse,
 } from '@/lib/extraction/types'
+import { formatActionError, fetchWithTimeout } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface QuickClientCreationModalProps {
@@ -70,6 +71,13 @@ export function QuickClientCreationModal({
   // Template follow-up modal state
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false)
 
+  useEffect(() => {
+    if (!isOpen) {
+      setIsAnalyzing(false)
+      setIsSubmittingDirect(false)
+    }
+  }, [isOpen])
+
   const handlePasteClipboard = async () => {
     try {
       const text = await navigator.clipboard.readText()
@@ -83,6 +91,7 @@ export function QuickClientCreationModal({
   }
 
   const handleAnalyze = async (textToAnalyze?: string) => {
+    if (isAnalyzing) return
     const sourceText = textToAnalyze !== undefined ? textToAnalyze : rawText
     if (!sourceText.trim()) {
       toast.error('Please paste or type client information first')
@@ -91,10 +100,11 @@ export function QuickClientCreationModal({
 
     setIsAnalyzing(true)
     try {
-      const res = await fetch('/api/admin/parse-client', {
+      const res = await fetchWithTimeout('/api/admin/parse-client', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: sourceText }),
+        timeoutMs: 25000,
       })
 
       const payload = await res.json().catch(() => null)
@@ -107,7 +117,7 @@ export function QuickClientCreationModal({
       toast.success('Information extracted & verified!')
     } catch (err: any) {
       console.error('Error analyzing text:', err)
-      toast.error(err?.message || 'Could not analyze information automatically.')
+      toast.error(formatActionError(err, 'Could not analyze information automatically.'))
     } finally {
       setIsAnalyzing(false)
     }
@@ -180,7 +190,7 @@ export function QuickClientCreationModal({
   }
 
   const handleDirectCreate = async () => {
-    if (!parsedData || !saveClientDirectly) return
+    if (!parsedData || !saveClientDirectly || isSubmittingDirect) return
     if (!parsedData.fullName.trim()) {
       toast.error('Client name is required')
       return
@@ -208,12 +218,11 @@ export function QuickClientCreationModal({
 
       const newId = await saveClientDirectly(clientPayload)
       toast.success('Client created successfully!')
-      onClose()
 
       // Automatically dispatch Onboarding Welcome Email if client email is available
       if (clientPayload.email && clientPayload.email.includes('@')) {
         try {
-          const emailRes = await fetch('/api/clients/send-welcome-email', {
+          const emailRes = await fetchWithTimeout('/api/clients/send-welcome-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -221,10 +230,13 @@ export function QuickClientCreationModal({
               email: clientPayload.email,
               name: clientPayload.fullName,
             }),
+            timeoutMs: 12000,
           })
-          const emailData = await emailRes.json()
+          const emailData = await emailRes.json().catch(() => ({}))
           if (emailRes.ok && emailData.ok) {
             toast.success(`Onboarding welcome email sent to ${clientPayload.email}`)
+          } else if (emailData?.error) {
+            toast.error(`Welcome email notice: ${emailData.error}`)
           }
         } catch (emailErr) {
           console.warn('Welcome email dispatch warning:', emailErr)
@@ -235,7 +247,7 @@ export function QuickClientCreationModal({
       const targetPhone = clientPayload.phone || clientPayload.whatsappNumber
       if (targetPhone) {
         try {
-          const smsRes = await fetch('/api/sms/welcome', {
+          const smsRes = await fetchWithTimeout('/api/sms/welcome', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -243,22 +255,26 @@ export function QuickClientCreationModal({
               clientName: clientPayload.fullName,
               clientId: newId,
             }),
+            timeoutMs: 12000,
           })
-          const smsData = await smsRes.json()
+          const smsData = await smsRes.json().catch(() => ({}))
           if (smsRes.ok && smsData.success === true) {
             toast.success(smsData.message || 'Welcome SMS request accepted by provider')
+          } else if (smsData?.error) {
+            toast.error(`Welcome SMS notice: ${smsData.error}`)
           }
         } catch (smsErr) {
           console.warn('Welcome SMS dispatch error:', smsErr)
         }
       }
 
+      onClose()
       if (onClientCreatedDirectly) {
         onClientCreatedDirectly(newId)
       }
     } catch (err: any) {
       console.error('Direct creation failed:', err)
-      toast.error('Failed to create client record')
+      toast.error(formatActionError(err, 'Failed to create client record.'))
     } finally {
       setIsSubmittingDirect(false)
     }
@@ -277,6 +293,7 @@ export function QuickClientCreationModal({
         onClose={onClose}
         title="Quick Client Creation"
         size="xl"
+        preventClose={isAnalyzing || isSubmittingDirect}
       >
         <div className="space-y-4">
           <p className="text-xs text-muted -mt-2">
@@ -352,7 +369,7 @@ export function QuickClientCreationModal({
 
               {/* Action Buttons */}
               <div className="flex items-center justify-between pt-4 border-t border-border">
-                <Button type="button" variant="outline" onClick={onClose}>
+                <Button type="button" variant="outline" onClick={onClose} disabled={isAnalyzing}>
                   Cancel
                 </Button>
 
@@ -361,6 +378,7 @@ export function QuickClientCreationModal({
                   variant="primary"
                   disabled={!rawText.trim() || isAnalyzing}
                   loading={isAnalyzing}
+                  loadingText="Analyzing..."
                   onClick={() => handleAnalyze()}
                   icon={<Sparkles size={15} />}
                 >

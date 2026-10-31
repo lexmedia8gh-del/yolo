@@ -46,6 +46,7 @@ import type {
   ReminderCategory,
   ReminderPriority,
 } from '@/lib/types'
+import { formatActionError } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 type MainTab = 'all' | 'reminders' | 'tasks' | 'timeline'
@@ -70,6 +71,7 @@ export default function RemindersPage() {
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
   const [reminderToEdit, setReminderToEdit] = useState<SmartReminder | null>(null)
   const [taskToEdit, setTaskToEdit] = useState<TaskItem | null>(null)
+  const [processingIds, setProcessingIds] = useState<string[]>([])
 
   // Delete confirmation
   const [itemToDelete, setItemToDelete] = useState<{
@@ -77,6 +79,7 @@ export default function RemindersPage() {
     id: string
     title: string
   } | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   // Load Firestore data with real-time listeners
   useEffect(() => {
@@ -221,6 +224,8 @@ export default function RemindersPage() {
 
   // Toggle Reminder completion
   const handleToggleReminder = async (reminder: SmartReminder) => {
+    if (processingIds.includes(reminder.id)) return
+    setProcessingIds((prev) => [...prev, reminder.id])
     const newStatus = reminder.status === 'completed' ? 'pending' : 'completed'
     const updated = {
       ...reminder,
@@ -241,12 +246,18 @@ export default function RemindersPage() {
       toast.success(newStatus === 'completed' ? 'Reminder marked as completed!' : 'Reminder reopened')
     } catch (err) {
       console.error('Error updating reminder:', err)
-      toast.error('Failed to update reminder')
+      toast.error(formatActionError(err, 'Failed to update reminder'))
+      // Rollback optimistic update on error
+      setReminders((prev) => prev.map((r) => (r.id === reminder.id ? reminder : r)))
+    } finally {
+      setProcessingIds((prev) => prev.filter((id) => id !== reminder.id))
     }
   }
 
   // Toggle Task completion
   const handleToggleTask = async (task: TaskItem) => {
+    if (processingIds.includes(task.id)) return
+    setProcessingIds((prev) => [...prev, task.id])
     const newStatus = task.status === 'completed' ? 'todo' : 'completed'
     const updated = {
       ...task,
@@ -267,30 +278,36 @@ export default function RemindersPage() {
       toast.success(newStatus === 'completed' ? 'Task marked as completed!' : 'Task reopened')
     } catch (err) {
       console.error('Error updating task:', err)
-      toast.error('Failed to update task')
+      toast.error(formatActionError(err, 'Failed to update task'))
+      // Rollback
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)))
+    } finally {
+      setProcessingIds((prev) => prev.filter((id) => id !== task.id))
     }
   }
 
   // Delete Action
   const handleConfirmDelete = async () => {
-    if (!itemToDelete) return
+    if (!itemToDelete || isDeleting) return
     const { type, id } = itemToDelete
 
+    setIsDeleting(true)
     try {
       if (type === 'reminder') {
-        setReminders((prev) => prev.filter((r) => r.id !== id))
         await deleteDocument(COLLECTIONS.REMINDERS, id)
+        setReminders((prev) => prev.filter((r) => r.id !== id))
         toast.success('Reminder deleted')
       } else {
-        setTasks((prev) => prev.filter((t) => t.id !== id))
         await deleteDocument(COLLECTIONS.TASKS, id)
+        setTasks((prev) => prev.filter((t) => t.id !== id))
         toast.success('Task deleted')
       }
+      setItemToDelete(null)
     } catch (err) {
       console.error('Error deleting item:', err)
-      toast.error('Failed to delete item')
+      toast.error(formatActionError(err, `Failed to delete ${type}`))
     } finally {
-      setItemToDelete(null)
+      setIsDeleting(false)
     }
   }
 
@@ -598,6 +615,7 @@ export default function RemindersPage() {
                               setReminderToEdit(r)
                               setIsReminderModalOpen(true)
                             }}
+                            isLoading={processingIds.includes(reminder.id)}
                             onDelete={(r) =>
                               setItemToDelete({ type: 'reminder', id: r.id, title: r.title })
                             }
@@ -637,6 +655,7 @@ export default function RemindersPage() {
                               setTaskToEdit(t)
                               setIsTaskModalOpen(true)
                             }}
+                            isLoading={processingIds.includes(task.id)}
                             onDelete={(t) =>
                               setItemToDelete({ type: 'task', id: t.id, title: t.title })
                             }
@@ -692,6 +711,7 @@ export default function RemindersPage() {
                         setReminderToEdit(r)
                         setIsReminderModalOpen(true)
                       }}
+                      isLoading={processingIds.includes(reminder.id)}
                       onDelete={(r) =>
                         setItemToDelete({ type: 'reminder', id: r.id, title: r.title })
                       }
@@ -739,6 +759,7 @@ export default function RemindersPage() {
                         setTaskToEdit(t)
                         setIsTaskModalOpen(true)
                       }}
+                      isLoading={processingIds.includes(task.id)}
                       onDelete={(t) =>
                         setItemToDelete({ type: 'task', id: t.id, title: t.title })
                       }
@@ -788,6 +809,7 @@ export default function RemindersPage() {
                             setTaskToEdit(t)
                             setIsTaskModalOpen(true)
                           }}
+                          isLoading={processingIds.includes(item.data.id)}
                           onDelete={(t) =>
                             setItemToDelete({ type: 'task', id: t.id, title: t.title })
                           }
@@ -980,13 +1002,16 @@ export default function RemindersPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setItemToDelete(null)}
+                disabled={isDeleting}
+                onClick={() => !isDeleting && setItemToDelete(null)}
               >
                 Cancel
               </Button>
               <Button
                 variant="danger"
                 size="sm"
+                loading={isDeleting}
+                loadingText="Deleting..."
                 onClick={handleConfirmDelete}
               >
                 Confirm Delete

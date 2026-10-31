@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input, Textarea } from '@/components/ui/Input'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, fetchWithTimeout, formatActionError } from '@/lib/utils'
 import {
   updateDocument,
   addDocument,
@@ -62,6 +62,7 @@ export function RecordPaymentModal({
   useEffect(() => {
     if (!isOpen) {
       submittingRef.current = false
+      setIsSubmitting(false)
       return
     }
     if (invoice) {
@@ -167,7 +168,7 @@ export function RecordPaymentModal({
         // Client-linked invoice: use canonical server payment endpoint so client, project,
         // invoice, payment history, and payment links all update atomically.
         const authHeaders = await getAdminAuthHeaders(true)
-        const res = await fetch('/api/payments/record', {
+        const res = await fetchWithTimeout('/api/payments/record', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -193,6 +194,7 @@ export function RecordPaymentModal({
             status: 'success',
             notes: notes.trim(),
           }),
+          timeoutMs: 15000,
         })
 
         const data = await res.json().catch(() => ({}))
@@ -252,7 +254,7 @@ export function RecordPaymentModal({
       onClose()
     } catch (err: any) {
       console.error('Failed to record payment:', err)
-      toast.error(err.message || 'Failed to record payment', { id: toastId })
+      toast.error(formatActionError(err, 'Failed to record payment'), { id: toastId })
     } finally {
       submittingRef.current = false
       setIsSubmitting(false)
@@ -262,7 +264,8 @@ export function RecordPaymentModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => !isSubmitting && onClose()}
+      preventClose={isSubmitting}
       title="Record Payment for Invoice"
       size="sm"
     >
@@ -373,6 +376,7 @@ export function RecordPaymentModal({
             type="submit"
             variant="primary"
             loading={isSubmitting}
+            loadingText="Recording..."
             icon={<CheckCircle2 size={14} />}
           >
             Confirm &amp; Record Payment

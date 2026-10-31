@@ -72,6 +72,7 @@ function LoginFormContent() {
   const [authError, setAuthError] = useState('')
   const [isPinLoading, setIsPinLoading] = useState(false)
   const [isGoogleLoading, setIsGoogleLoading] = useState(false)
+  const [redirectSource, setRedirectSource] = useState<'pin' | 'google' | null>(null)
 
   const autoRedirectedRef = useRef(false)
 
@@ -165,6 +166,7 @@ function LoginFormContent() {
   // Submit 6-digit PIN login
   const handlePinSubmit = async (e?: React.FormEvent, submittedPin?: string) => {
     if (e) e.preventDefault()
+    if (isPinLoading || isGoogleLoading || redirectSource !== null) return
     const targetPin = (submittedPin || pin).trim()
 
     if (targetPin.length !== 6 || !/^[0-9]{6}$/.test(targetPin)) {
@@ -172,11 +174,12 @@ function LoginFormContent() {
       return
     }
 
-    setAuthError('')
     setIsPinLoading(true)
+    setAuthError('')
 
     try {
       await signInWithPin(targetPin)
+      setRedirectSource('pin')
       window.location.replace(safeRedirectTo)
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code ?? ''
@@ -187,17 +190,18 @@ function LoginFormContent() {
       } else {
         setAuthError(getFirebaseErrorMessage(code) || 'Incorrect 6-digit PIN.')
       }
-    } finally {
+      setRedirectSource(null)
       setIsPinLoading(false)
     }
   }
 
-  // Google Sign-In trigger
-  const handleGoogleLogin = async () => {
+  const handleGoogleLoginAndRedirect = async () => {
+    if (isPinLoading || isGoogleLoading || redirectSource !== null) return
     setAuthError('')
     setIsGoogleLoading(true)
     try {
       await signInWithGoogle()
+      setRedirectSource('google')
       window.location.assign(safeRedirectTo)
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code ?? ''
@@ -211,9 +215,9 @@ function LoginFormContent() {
       ) {
         setAuthError(message || 'Google Sign-In is not available right now.')
       } else {
-        setAuthError(getFirebaseErrorMessage(code) || 'Failed to sign in with Google.')
+        setAuthError(getFirebaseErrorMessage(code) || message || 'Failed to sign in with Google.')
       }
-    } finally {
+      setRedirectSource(null)
       setIsGoogleLoading(false)
     }
   }
@@ -307,7 +311,7 @@ function LoginFormContent() {
                       if (authError) setAuthError('')
                     }}
                     onComplete={(completedPin) => handlePinSubmit(undefined, completedPin)}
-                    disabled={isPinLoading || isGoogleLoading}
+                    disabled={isPinLoading || isGoogleLoading || redirectSource !== null}
                     hasError={Boolean(authError)}
                     autoFocus
                   />
@@ -316,15 +320,16 @@ function LoginFormContent() {
                 <button
                   id="pin-submit-button"
                   type="submit"
-                  disabled={isPinLoading || isGoogleLoading || pin.length !== 6}
-                  className="w-full h-12 px-5 rounded-xl bg-[#1D63ED] hover:bg-[#1550C7] text-white font-semibold text-sm shadow-[0_6px_18px_-4px_rgba(29,99,237,0.30)] transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D63ED] focus-visible:ring-offset-2"
+                  aria-busy={isPinLoading || redirectSource === 'pin' || undefined}
+                  disabled={isPinLoading || isGoogleLoading || redirectSource !== null || pin.length !== 6}
+                  className="w-full h-12 px-5 rounded-xl bg-[#1D63ED] hover:bg-[#1550C7] text-white font-semibold text-sm shadow-[0_6px_18px_-4px_rgba(29,99,237,0.30)] transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D63ED] focus-visible:ring-offset-2"
                 >
-                  {isPinLoading ? (
+                  {isPinLoading || redirectSource === 'pin' ? (
                     <span className="flex items-center gap-2">
                       <span
                         className={`w-4 h-4 border-2 ${primarySpinnerBorder} rounded-full animate-spin`}
                       />
-                      <span>Verifying PIN...</span>
+                      <span>{redirectSource === 'pin' ? 'Redirecting...' : 'Verifying PIN...'}</span>
                     </span>
                   ) : (
                     <>
@@ -347,14 +352,15 @@ function LoginFormContent() {
               <button
                 id="google-login-button"
                 type="button"
-                disabled={isPinLoading || isGoogleLoading}
-                onClick={handleGoogleLogin}
-                className="w-full h-12 px-5 rounded-xl bg-white border border-[var(--login-border)] hover:bg-[#F8FAFC] hover:border-[var(--login-border-hover)] text-[var(--login-heading)] font-semibold text-sm transition-colors flex items-center justify-center gap-2.5 disabled:opacity-60 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)] focus-visible:ring-offset-2"
+                aria-busy={isGoogleLoading || redirectSource === 'google' || undefined}
+                disabled={isPinLoading || isGoogleLoading || redirectSource !== null}
+                onClick={handleGoogleLoginAndRedirect}
+                className="w-full h-12 px-5 rounded-xl bg-white border border-[var(--login-border)] hover:bg-[#F8FAFC] hover:border-[var(--login-border-hover)] text-[var(--login-heading)] font-semibold text-sm transition-colors flex items-center justify-center gap-2.5 disabled:opacity-65 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--login-accent)] focus-visible:ring-offset-2"
               >
-                {isGoogleLoading ? (
+                {isGoogleLoading || redirectSource === 'google' ? (
                   <span className="flex items-center gap-2">
                     <span className="w-4 h-4 border-2 border-slate-300 border-t-slate-900 rounded-full animate-spin" />
-                    <span>Connecting to Google...</span>
+                    <span>{redirectSource === 'google' ? 'Redirecting...' : 'Connecting to Google...'}</span>
                   </span>
                 ) : (
                   <>

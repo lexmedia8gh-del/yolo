@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   CreditCard,
   DollarSign,
@@ -22,7 +22,7 @@ import { Badge } from '@/components/ui/Badge'
 import { getAdminAuthHeaders } from '@/lib/firebase/auth'
 import { syncRecordedPaymentToLocalCache } from '@/lib/firebase/firestore'
 import type { Payment } from '@/lib/types'
-import { formatCurrency, formatDate, copyToClipboard } from '@/lib/utils'
+import { formatCurrency, formatDate, copyToClipboard, fetchWithTimeout, formatActionError } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface PaymentDetailsModalProps {
@@ -43,6 +43,13 @@ export function PaymentDetailsModal({
   const [copied, setCopied] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [showConfirmDelete, setShowConfirmDelete] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen) {
+      setDeleting(false)
+      setShowConfirmDelete(false)
+    }
+  }, [isOpen, payment?.id])
 
   const handleDeletedCallback = () => {
     if (onPaymentDeleted) onPaymentDeleted()
@@ -72,10 +79,14 @@ export function PaymentDetailsModal({
       .filter(Boolean)
       .join('\n')
 
-    await copyToClipboard(summary)
-    setCopied(true)
-    toast.success('Receipt details copied!')
-    setTimeout(() => setCopied(false), 2500)
+    const ok = await copyToClipboard(summary)
+    if (ok) {
+      setCopied(true)
+      toast.success('Receipt details copied!')
+      setTimeout(() => setCopied(false), 2500)
+    } else {
+      toast.error('Failed to copy receipt details.')
+    }
   }
 
   const handleDelete = async () => {
@@ -83,11 +94,12 @@ export function PaymentDetailsModal({
     setDeleting(true)
     try {
       const authHeaders = await getAdminAuthHeaders(true)
-      const res = await fetch(`/api/payments/record?paymentId=${encodeURIComponent(payment.id)}&revertBalances=true`, {
+      const res = await fetchWithTimeout(`/api/payments/record?paymentId=${encodeURIComponent(payment.id)}&revertBalances=true`, {
         method: 'DELETE',
         headers: {
           ...authHeaders,
         },
+        timeoutMs: 15000,
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || 'Failed to remove payment')
@@ -105,7 +117,7 @@ export function PaymentDetailsModal({
       onClose()
     } catch (err: any) {
       console.error('Error deleting payment:', err)
-      toast.error(err.message || 'Failed to delete payment.')
+      toast.error(formatActionError(err, 'Failed to delete payment.'))
     } finally {
       setDeleting(false)
     }
@@ -114,7 +126,8 @@ export function PaymentDetailsModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => !deleting && onClose()}
+      preventClose={deleting}
       title={isDeposit ? 'Deposit Details' : 'Payment Details'}
       subtitle={`Reference: ${refCode}`}
       size="md"
@@ -182,9 +195,10 @@ export function PaymentDetailsModal({
               <span>{refCode}</span>
               <button
                 type="button"
-                onClick={() => {
-                  copyToClipboard(refCode)
-                  toast.success('Reference copied!')
+                onClick={async () => {
+                  const ok = await copyToClipboard(refCode)
+                  if (ok) toast.success('Reference copied!')
+                  else toast.error('Failed to copy reference.')
                 }}
                 className="p-1 text-gray-400 hover:text-gray-600 rounded"
               >
@@ -234,6 +248,7 @@ export function PaymentDetailsModal({
                 variant="danger"
                 size="sm"
                 loading={deleting}
+                loadingText="Deleting..."
                 onClick={handleDelete}
                 icon={<Trash2 size={13} />}
               >

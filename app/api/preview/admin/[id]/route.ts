@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 import { db, isFirebaseConfigured } from '@/lib/firebase/config'
-import { doc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore'
+import { doc, getDoc } from 'firebase/firestore'
 import { FieldValue } from 'firebase-admin/firestore'
 import type { PreviewStatus } from '@/lib/types'
 
@@ -10,10 +10,11 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> | { id: string } }
 ) {
   try {
-    const id = params?.id
+    const resolvedParams = await Promise.resolve(params)
+    const id = resolvedParams?.id
     if (!id) return NextResponse.json({ error: 'Missing ID' }, { status: 400 })
 
     try {
@@ -41,10 +42,11 @@ export async function GET(
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> | { id: string } }
 ) {
   try {
-    const id = params?.id
+    const resolvedParams = await Promise.resolve(params)
+    const id = resolvedParams?.id
     if (!id) return NextResponse.json({ error: 'Missing ID' }, { status: 400 })
 
     const body = await req.json().catch(() => ({}))
@@ -65,23 +67,10 @@ export async function PATCH(
       }
     }
 
-    try {
-      const adminDb = getAdminDb()
-      await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).update(updatePayload)
-      const snap = await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).get()
-      return NextResponse.json({ success: true, preview: { id: snap.id, ...snap.data() } })
-    } catch {
-      if (!isFirebaseConfigured) {
-        return NextResponse.json({ error: 'Firebase database is not configured.' }, { status: 503 })
-      }
-      const docRef = doc(db, COLLECTIONS.CLIENT_PREVIEWS, id)
-      const clientPayload: any = {}
-      if (status) clientPayload.status = status
-      if (status === 'Revoked') clientPayload.revokedReason = revokedReason || 'Access revoked'
-      await updateDoc(docRef, clientPayload)
-      const snap = await getDoc(docRef)
-      return NextResponse.json({ success: true, preview: { id: snap.id, ...snap.data() } })
-    }
+    const adminDb = getAdminDb()
+    await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).set(updatePayload, { merge: true })
+    const snap = await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).get()
+    return NextResponse.json({ success: true, preview: { id: snap.id, ...(snap.data() || updatePayload) } })
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || 'Failed to update preview' }, { status: 500 })
   }
@@ -89,21 +78,15 @@ export async function PATCH(
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> | { id: string } }
 ) {
   try {
-    const id = params?.id
+    const resolvedParams = await Promise.resolve(params)
+    const id = resolvedParams?.id
     if (!id) return NextResponse.json({ error: 'Missing ID' }, { status: 400 })
 
-    try {
-      const adminDb = getAdminDb()
-      await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).delete()
-    } catch {
-      if (isFirebaseConfigured) {
-        const docRef = doc(db, COLLECTIONS.CLIENT_PREVIEWS, id)
-        await deleteDoc(docRef)
-      }
-    }
+    const adminDb = getAdminDb()
+    await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).delete()
 
     return NextResponse.json({ success: true, message: 'Preview deleted' })
   } catch (err: any) {

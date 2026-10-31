@@ -57,6 +57,7 @@ import {
   getProductionUrl,
   isVercelPlatformDomain,
   copyToClipboard,
+  formatActionError,
 } from '@/lib/utils'
 import { downloadInvoicePdf } from '@/lib/utils/pdfGenerator'
 import toast from 'react-hot-toast'
@@ -86,6 +87,7 @@ export default function InvoicesPage() {
 
   // Copied link toast feedback tracker
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null)
+  const [processingLinkIds, setProcessingLinkIds] = useState<string[]>([])
 
   // Real-time listener for Invoices
   useEffect(() => {
@@ -293,15 +295,18 @@ export default function InvoicesPage() {
   }
 
   const handleCopyPaymentLink = async (inv: Invoice) => {
-    let link = (inv.paymentLinkToken
-      ? getPaymentLink(inv.paymentLinkToken)
-      : (inv.paymentLinkUrl && !isVercelPlatformDomain(inv.paymentLinkUrl)
-          ? getProductionUrl(inv.paymentLinkUrl)
-          : ''))
+    if (processingLinkIds.includes(inv.id)) return
+    setProcessingLinkIds((prev) => [...prev, inv.id])
 
-    if (!link) {
-      // Generate one on the fly and persist
-      try {
+    try {
+      let link = (inv.paymentLinkToken
+        ? getPaymentLink(inv.paymentLinkToken)
+        : (inv.paymentLinkUrl && !isVercelPlatformDomain(inv.paymentLinkUrl)
+            ? getProductionUrl(inv.paymentLinkUrl)
+            : ''))
+
+      if (!link) {
+        // Generate one on the fly and persist
         const token = generateSecureToken('pay_')
         link = getPaymentLink(token)
 
@@ -323,26 +328,30 @@ export default function InvoicesPage() {
           paymentLinkToken: token,
           paymentLinkUrl: link,
         })
-      } catch (err) {
-        console.warn('Could not generate payment link:', err)
-        link = getPaymentLink(inv.invoiceNumber)
       }
-    }
 
-    if (link) {
-      const success = await copyToClipboard(link)
-      if (success) {
-        setCopiedLinkId(inv.id)
-        toast.success(`Payment link copied for ${inv.invoiceNumber}!`)
-        setTimeout(() => setCopiedLinkId(null), 2500)
+      if (link) {
+        const success = await copyToClipboard(link)
+        if (success) {
+          setCopiedLinkId(inv.id)
+          toast.success(`Payment link copied for ${inv.invoiceNumber}!`)
+          setTimeout(() => setCopiedLinkId(null), 2500)
+        } else {
+          toast.error('Failed to copy payment link.')
+        }
+      } else {
+        toast.error('Could not generate payment link.')
       }
-    } else {
-      toast.error('Could not generate payment link.')
+    } catch (err) {
+      console.error('Could not generate payment link:', err)
+      toast.error(formatActionError(err, 'Failed to generate or copy payment link.'))
+    } finally {
+      setProcessingLinkIds((prev) => prev.filter((id) => id !== inv.id))
     }
   }
 
   const handleDeleteConfirm = async () => {
-    if (!deletingInvoice) return
+    if (!deletingInvoice || isDeleting) return
     setIsDeleting(true)
     const toastId = toast.loading('Deleting invoice...')
     try {
@@ -350,7 +359,7 @@ export default function InvoicesPage() {
       toast.success(`Invoice ${deletingInvoice.invoiceNumber} deleted!`, { id: toastId })
       setDeletingInvoice(null)
     } catch (err: any) {
-      toast.error(err.message || 'Failed to delete invoice', { id: toastId })
+      toast.error(formatActionError(err, 'Failed to delete invoice'), { id: toastId })
     } finally {
       setIsDeleting(false)
     }
@@ -739,10 +748,13 @@ export default function InvoicesPage() {
                             <button
                               type="button"
                               title="Copy Payment Link"
+                              disabled={processingLinkIds.includes(inv.id)}
                               onClick={() => handleCopyPaymentLink(inv)}
-                              className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-blue-600 transition-colors"
+                              className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 hover:text-blue-600 transition-colors disabled:opacity-50"
                             >
-                              {copiedLinkId === inv.id ? (
+                              {processingLinkIds.includes(inv.id) ? (
+                                <RefreshCw size={14} className="animate-spin text-indigo-600" />
+                              ) : copiedLinkId === inv.id ? (
                                 <Check size={14} className="text-emerald-600" />
                               ) : (
                                 <Link2 size={14} />
@@ -847,13 +859,20 @@ export default function InvoicesPage() {
                         <Send size={13} /> Email
                       </button>
 
-                      <button
+                       <button
                         type="button"
+                        disabled={processingLinkIds.includes(inv.id)}
                         onClick={() => handleCopyPaymentLink(inv)}
-                        className="h-9 w-9 rounded-lg border border-gray-200 bg-white text-gray-600 flex items-center justify-center hover:bg-gray-50"
+                        className="h-9 w-9 rounded-lg border border-gray-200 bg-white text-gray-600 flex items-center justify-center hover:bg-gray-50 disabled:opacity-50"
                         title="Copy Payment Link"
                       >
-                        {copiedLinkId === inv.id ? <Check size={14} className="text-emerald-600" /> : <Link2 size={14} />}
+                        {processingLinkIds.includes(inv.id) ? (
+                          <RefreshCw size={14} className="animate-spin text-indigo-600" />
+                        ) : copiedLinkId === inv.id ? (
+                          <Check size={14} className="text-emerald-600" />
+                        ) : (
+                          <Link2 size={14} />
+                        )}
                       </button>
 
                       <button
@@ -936,7 +955,8 @@ export default function InvoicesPage() {
       {/* ─── MODAL 5: Delete Confirmation Modal ─── */}
       <Modal
         isOpen={!!deletingInvoice}
-        onClose={() => setDeletingInvoice(null)}
+        onClose={() => !isDeleting && setDeletingInvoice(null)}
+        preventClose={isDeleting}
         title="Confirm Delete Invoice"
         size="sm"
       >
@@ -962,6 +982,7 @@ export default function InvoicesPage() {
             <Button
               variant="danger"
               loading={isDeleting}
+              loadingText="Deleting..."
               icon={<Trash2 size={14} />}
               onClick={handleDeleteConfirm}
             >

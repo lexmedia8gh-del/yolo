@@ -51,6 +51,8 @@ import {
   copyToClipboard,
   appUrl,
   getPaymentLink,
+  formatActionError,
+  fetchWithTimeout,
 } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
@@ -154,15 +156,15 @@ export default function ProjectDetailPage() {
   }, [id, reloadProjectData])
 
   const handleUpdateStatus = async () => {
-    if (!project) return
+    if (!project || updatingStatus) return
     setUpdatingStatus(true)
     try {
       await updateDocument(COLLECTIONS.PROJECTS, project.id, { status: newStatus })
       setProject({ ...project, status: newStatus })
       toast.success('Project status updated.')
       setShowStatusModal(false)
-    } catch {
-      toast.error('Failed to update status.')
+    } catch (err) {
+      toast.error(formatActionError(err, 'Failed to update status.'))
     } finally {
       setUpdatingStatus(false)
     }
@@ -174,6 +176,7 @@ export default function ProjectDetailPage() {
   const depositAmount = project?.depositAmount ?? Math.round((project?.price || 0) * 0.4)
 
   const handleWhatsApp = async () => {
+    if (sendingWA || waSent) return
     if (!project || !client?.whatsappNumber || !paymentLink) {
       toast.error('Missing WhatsApp number or payment link.')
       return
@@ -183,7 +186,7 @@ export default function ProjectDetailPage() {
     try {
       const msg = `Hello ${project.clientName}! 👋\n\nYour invoice ${project.invoiceNumber} is ready.\n\n📋 Service: ${project.serviceName}\n📦 Package: ${project.packageTitle}\n💰 Total: ${formatCurrency(project.price)}\n🔐 Deposit Due: ${formatCurrency(project.depositAmount || 0)}\n\nClick the link below to pay securely:\n${paymentUrl}\n\nThank you for choosing LEXMEDIA.GH! 🙏`
       
-      const res = await fetch('/api/whatsapp/send', {
+      const res = await fetchWithTimeout('/api/whatsapp/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -193,16 +196,17 @@ export default function ProjectDetailPage() {
           messageBody: msg,
           toNumber: client.whatsappNumber,
         }),
+        timeoutMs: 15000,
       })
 
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || 'Failed to send WhatsApp message')
 
       setWaSent(true)
       toast.success('WhatsApp message sent!')
     } catch (err: any) {
       console.error('WhatsApp Error:', err)
-      toast.error(err.message || 'Failed to send WhatsApp message.')
+      toast.error(formatActionError(err, 'Failed to send WhatsApp message.'))
     } finally {
       setSendingWA(false)
     }
@@ -400,10 +404,14 @@ export default function ProjectDetailPage() {
                 <code className="text-xs text-gray-600 flex-1 truncate">{paymentUrl}</code>
                 <button
                   onClick={async () => {
-                    await copyToClipboard(paymentUrl)
-                    setLinkCopied(true)
-                    toast.success('Copied!')
-                    setTimeout(() => setLinkCopied(false), 2000)
+                    const copied = await copyToClipboard(paymentUrl)
+                    if (copied) {
+                      setLinkCopied(true)
+                      toast.success('Copied!')
+                      setTimeout(() => setLinkCopied(false), 2000)
+                    } else {
+                      toast.error('Failed to copy link')
+                    }
                   }}
                   className="p-1 rounded-md hover:bg-gray-200 transition-colors text-gray-500 shrink-0"
                 >
@@ -423,14 +431,16 @@ export default function ProjectDetailPage() {
                 {client?.whatsappNumber && (
                   <Button
                     size="sm"
-                    variant={waSent ? 'outline' : 'outline'}
+                    variant="outline"
                     fullWidth
-                    icon={sendingWA ? <Spinner size="sm" /> : waSent ? <CheckCircle2 size={13} className="text-emerald-600" /> : <MessageSquare size={13} />}
+                    loading={sendingWA}
+                    loadingText="Sending..."
+                    icon={waSent ? <CheckCircle2 size={13} className="text-emerald-600" /> : <MessageSquare size={13} />}
                     className={waSent ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-emerald-200 text-emerald-700 hover:bg-emerald-50"}
                     onClick={handleWhatsApp}
                     disabled={sendingWA || waSent}
                   >
-                    {sendingWA ? 'Sending...' : waSent ? 'Sent' : 'WhatsApp'}
+                    {waSent ? 'Sent' : 'WhatsApp'}
                   </Button>
                 )}
               </div>
@@ -587,6 +597,7 @@ export default function ProjectDetailPage() {
         onClose={() => setShowStatusModal(false)}
         title="Update Project Status"
         size="sm"
+        preventClose={updatingStatus}
       >
         <div className="space-y-4">
           <div className="space-y-1.5">
@@ -594,6 +605,7 @@ export default function ProjectDetailPage() {
             <select
               value={newStatus}
               onChange={(e: any) => setNewStatus(e.target.value)}
+              disabled={updatingStatus}
               className="w-full h-9 px-3 rounded-lg border border-gray-300 bg-white text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-colors"
             >
               {PROJECT_STATUSES.map((s) => (
@@ -602,8 +614,8 @@ export default function ProjectDetailPage() {
             </select>
           </div>
           <div className="flex justify-end gap-2.5 pt-3 border-t border-gray-100">
-            <Button variant="outline" size="sm" onClick={() => setShowStatusModal(false)}>Cancel</Button>
-            <Button variant="primary" size="sm" onClick={handleUpdateStatus} loading={updatingStatus}>
+            <Button variant="outline" size="sm" onClick={() => setShowStatusModal(false)} disabled={updatingStatus}>Cancel</Button>
+            <Button variant="primary" size="sm" onClick={handleUpdateStatus} loading={updatingStatus} loadingText="Updating...">
               Update Status
             </Button>
           </div>

@@ -63,12 +63,12 @@ const PUBLIC_WRITE_COLLECTIONS = new Set<string>([
   COLLECTIONS.PREVIEW_LOGS,
 ])
 
-function hasFirebaseUserSession(): boolean {
+export function hasFirebaseUserSession(): boolean {
   if (typeof window === 'undefined') return false
   return Boolean(getAuthInstance()?.currentUser)
 }
 
-function hasActiveAdminSession(): boolean {
+export function hasActiveAdminSession(): boolean {
   if (typeof window === 'undefined') return false
   try {
     if (sessionStorage.getItem('lexmedia_pin_session_active') === 'true') return true
@@ -83,13 +83,36 @@ function hasActiveAdminSession(): boolean {
 function canReadCloudFirestore(collectionName: string): boolean {
   if (!isFirebaseConfigured) return false
   if (PUBLIC_READ_COLLECTIONS.has(collectionName)) return true
-  return hasFirebaseUserSession() || hasActiveAdminSession()
+  return hasFirebaseUserSession()
 }
 
 function canWriteCloudFirestore(collectionName: string): boolean {
   if (!isFirebaseConfigured) return false
   if (PUBLIC_WRITE_COLLECTIONS.has(collectionName)) return true
-  return hasFirebaseUserSession() || hasActiveAdminSession()
+  return hasFirebaseUserSession()
+}
+
+function withFirestoreTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs = 12000,
+  label = 'Firestore request'
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`))
+    }, timeoutMs)
+
+    promise.then(
+      (val) => {
+        clearTimeout(timer)
+        resolve(val)
+      },
+      (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+    )
+  })
 }
 
 /**
@@ -164,19 +187,40 @@ function sanitizeForJsonMirror(input: any): any {
   return out
 }
 
-async function postToServerLocalStore(payload: Record<string, any>): Promise<void> {
+async function postToServerLocalStore(
+  payload: Record<string, any>,
+  options?: { strict?: boolean }
+): Promise<void> {
   if (typeof window === 'undefined') return
+  const strict = Boolean(options?.strict)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(new Error('Request timed out')), 12000)
+
   try {
     const authHeaders = await getAdminAuthHeaders()
-    await fetch('/api/admin/local-store', {
+    const res = await fetch('/api/admin/local-store', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...authHeaders,
       },
       body: JSON.stringify(payload),
+      signal: controller.signal,
     })
-  } catch {}
+
+    if (!res.ok && strict) {
+      const errBody = await res.json().catch(() => ({}))
+      throw new Error(
+        errBody?.error || `Failed to save changes (HTTP ${res.status}). Please verify your admin session.`
+      )
+    }
+  } catch (err) {
+    if (strict) {
+      throw err
+    }
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 export async function syncBatchToServerLocalStore(
@@ -194,14 +238,19 @@ export async function syncBatchToServerLocalStore(
     ...op,
     data: op.data ? sanitizeForJsonMirror(op.data) : undefined,
   }))
-  await postToServerLocalStore({
-    action: 'batch',
-    operations: sanitizedOps,
-  })
+  await postToServerLocalStore(
+    {
+      action: 'batch',
+      operations: sanitizedOps,
+    },
+    { strict: !hasFirebaseUserSession() }
+  )
 }
 
 async function fetchServerLocalCollection<T extends { id?: string }>(collectionName: string): Promise<T[] | null> {
   if (typeof window === 'undefined') return null
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 10000)
   try {
     const authHeaders = await getAdminAuthHeaders()
     const res = await fetch(
@@ -209,6 +258,7 @@ async function fetchServerLocalCollection<T extends { id?: string }>(collectionN
       {
         cache: 'no-store',
         headers: authHeaders,
+        signal: controller.signal,
       }
     )
     if (!res.ok) return null
@@ -216,12 +266,18 @@ async function fetchServerLocalCollection<T extends { id?: string }>(collectionN
     if (json?.ok && Array.isArray(json.docs)) {
       return json.docs as T[]
     }
-  } catch {}
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
   return null
 }
 
 async function fetchServerLocalDoc<T>(collectionName: string, docId: string): Promise<T | null> {
   if (typeof window === 'undefined') return null
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 10000)
   try {
     const authHeaders = await getAdminAuthHeaders()
     const res = await fetch(
@@ -229,6 +285,7 @@ async function fetchServerLocalDoc<T>(collectionName: string, docId: string): Pr
       {
         cache: 'no-store',
         headers: authHeaders,
+        signal: controller.signal,
       }
     )
     if (!res.ok) return null
@@ -236,7 +293,11 @@ async function fetchServerLocalDoc<T>(collectionName: string, docId: string): Pr
     if (json?.ok && json.doc) {
       return json.doc as T
     }
-  } catch {}
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
   return null
 }
 
@@ -558,7 +619,7 @@ export async function getDocument<T>(
 
   try {
     const docRef = doc(db, collectionName, cleanId)
-    const snap = await getDoc(docRef)
+    const snap = await withFirestoreTimeout(getDoc(docRef), 10000, `Fetch ${collectionName}/${cleanId}`)
     if (snap.exists()) {
       markIdsSynced(collectionName, [snap.id])
       const resolved = withCanonicalDocId<T>(snap.id, snap.data())
@@ -641,7 +702,7 @@ export async function getDocuments<T>(
   try {
     const colRef = collection(db, collectionName)
     const q = query(colRef, ...constraints)
-    const snap = await getDocs(q)
+    const snap = await withFirestoreTimeout(getDocs(q), 10000, `Query ${collectionName}`)
     const cloudDocs = snap.docs.map((d) => withCanonicalDocId<T & { id?: string }>(d.id, d.data()))
     const mergedDocs = mergeCloudAndUnsyncedBrowserDocs(collectionName, cloudDocs, constraints)
     if (constraints.length === 0) {
@@ -734,27 +795,34 @@ export async function addDocument(
       createdAt: mirrorData.createdAt ?? nowIso,
       updatedAt: nowIso,
     }
+    await postToServerLocalStore(
+      {
+        action: 'add',
+        collection: collectionName,
+        id,
+        data: newRecord,
+        merge: false,
+        cloudSynced: false,
+      },
+      { strict: !PUBLIC_WRITE_COLLECTIONS.has(collectionName) }
+    )
     const local = getLocalCollection<any>(collectionName)
     local.unshift(newRecord)
     setLocalCollection(collectionName, local)
-    await postToServerLocalStore({
-      action: 'add',
-      collection: collectionName,
-      id,
-      data: newRecord,
-      merge: false,
-      cloudSynced: false,
-    })
     return id
   }
 
   try {
     const colRef = collection(db, collectionName)
-    const docRef = await addDoc(colRef, {
-      ...cleanData,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    })
+    const docRef = await withFirestoreTimeout(
+      addDoc(colRef, {
+        ...cleanData,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+      12000,
+      `Create ${collectionName}`
+    )
 
     markIdsSynced(collectionName, [docRef.id])
     clearIdDeleted(collectionName, docRef.id)
@@ -809,26 +877,33 @@ export async function setDocument(
           createdAt: existingIdx >= 0 ? local[existingIdx]?.createdAt ?? nowIso : nowIso,
           updatedAt: nowIso,
         }
+    await postToServerLocalStore(
+      {
+        action: 'set',
+        collection: collectionName,
+        id: docId,
+        data: updatedItem,
+        merge,
+        cloudSynced: false,
+      },
+      { strict: !PUBLIC_WRITE_COLLECTIONS.has(collectionName) }
+    )
     if (existingIdx >= 0) {
       local[existingIdx] = updatedItem
     } else {
       local.push(updatedItem)
     }
     setLocalCollection(collectionName, local)
-    await postToServerLocalStore({
-      action: 'set',
-      collection: collectionName,
-      id: docId,
-      data: updatedItem,
-      merge,
-      cloudSynced: false,
-    })
     return
   }
 
   try {
     const docRef = doc(db, collectionName, docId)
-    await setDoc(docRef, { ...cleanData, updatedAt: serverTimestamp() }, { merge })
+    await withFirestoreTimeout(
+      setDoc(docRef, { ...cleanData, updatedAt: serverTimestamp() }, { merge }),
+      12000,
+      `Write ${collectionName}/${docId}`
+    )
     markIdsSynced(collectionName, [docId])
 
     const nowIso = new Date().toISOString()
@@ -874,24 +949,31 @@ export async function updateDocument(
     const idx = local.findIndex((i) => i.id === docId)
     const nowIso = new Date().toISOString()
     const mirrorData = sanitizeForJsonMirror(cleanData) || {}
+    await postToServerLocalStore(
+      {
+        action: 'update',
+        collection: collectionName,
+        id: docId,
+        data: { ...mirrorData, updatedAt: nowIso },
+        cloudSynced: false,
+      },
+      { strict: !PUBLIC_WRITE_COLLECTIONS.has(collectionName) }
+    )
     if (idx >= 0) {
       local[idx] = { ...local[idx], ...mirrorData, id: docId, updatedAt: nowIso }
       setLocalCollection(collectionName, local)
     }
-    await postToServerLocalStore({
-      action: 'update',
-      collection: collectionName,
-      id: docId,
-      data: { ...mirrorData, updatedAt: nowIso },
-      cloudSynced: false,
-    })
     return
   }
 
   try {
     const docRef = doc(db, collectionName, docId)
     try {
-      await updateDoc(docRef, { ...cleanData, updatedAt: serverTimestamp() })
+      await withFirestoreTimeout(
+        updateDoc(docRef, { ...cleanData, updatedAt: serverTimestamp() }),
+        12000,
+        `Update ${collectionName}/${docId}`
+      )
     } catch (updateErr: any) {
       const code = String(updateErr?.code || '')
       const msg = String(updateErr?.message || '')
@@ -899,10 +981,14 @@ export async function updateDocument(
         const local = getLocalCollection<any>(collectionName)
         const existingLocal = local.find((i) => i.id === docId) || {}
         const { id: _omitId, ...localBase } = stripUndefinedDeep(existingLocal)
-        await setDoc(
-          docRef,
-          { ...localBase, ...cleanData, updatedAt: serverTimestamp() },
-          { merge: true }
+        await withFirestoreTimeout(
+          setDoc(
+            docRef,
+            { ...localBase, ...cleanData, updatedAt: serverTimestamp() },
+            { merge: true }
+          ),
+          12000,
+          `Merge ${collectionName}/${docId}`
         )
       } else {
         throw updateErr
@@ -936,23 +1022,31 @@ export async function deleteDocument(
   collectionName: string,
   docId: string
 ): Promise<void> {
-  markIdDeleted(collectionName, docId)
   if (!canWriteCloudFirestore(collectionName)) {
+    await postToServerLocalStore(
+      {
+        action: 'delete',
+        collection: collectionName,
+        id: docId,
+        cloudSynced: false,
+      },
+      { strict: !PUBLIC_WRITE_COLLECTIONS.has(collectionName) }
+    )
+    markIdDeleted(collectionName, docId)
     const local = getLocalCollection<any>(collectionName)
     const filtered = local.filter((i) => i.id !== docId)
     setLocalCollection(collectionName, filtered)
-    await postToServerLocalStore({
-      action: 'delete',
-      collection: collectionName,
-      id: docId,
-      cloudSynced: false,
-    })
     return
   }
 
   try {
     const docRef = doc(db, collectionName, docId)
-    await deleteDoc(docRef)
+    await withFirestoreTimeout(
+      deleteDoc(docRef),
+      12000,
+      `Delete ${collectionName}/${docId}`
+    )
+    markIdDeleted(collectionName, docId)
 
     const local = getLocalCollection<any>(collectionName)
     const filtered = local.filter((i) => i.id !== docId)

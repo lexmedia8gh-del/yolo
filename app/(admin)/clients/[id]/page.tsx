@@ -42,7 +42,7 @@ import {
 } from '@/lib/firebase/firestore'
 import { where, orderBy } from '@/lib/firebase/firestore'
 import type { Client, Project, Invoice, Payment, ClientLink } from '@/lib/types'
-import { formatCurrency, formatDate, getStatusColor, copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone, appUrl, getPaymentLink, getProductionUrl, isVercelPlatformDomain } from '@/lib/utils'
+import { formatCurrency, formatDate, getStatusColor, copyToClipboard, generateWhatsAppLink, formatWhatsAppPhone, appUrl, getPaymentLink, getProductionUrl, isVercelPlatformDomain, formatActionError, fetchWithTimeout } from '@/lib/utils'
 import { NewProjectWizard } from '@/components/projects/NewProjectWizard'
 import { ClientInformationTemplatesModal } from '@/components/clients/ClientInformationTemplatesModal'
 import { RecordPaymentModal } from '@/components/payments/RecordPaymentModal'
@@ -78,6 +78,7 @@ function ClientProfilePageContent() {
   const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false)
   const [showWelcomeSmsModal, setShowWelcomeSmsModal] = useState(false)
   const [showDispatchModal, setShowDispatchModal] = useState(false)
+  const [sendingOnboardingEmail, setSendingOnboardingEmail] = useState(false)
 
   // Payment & Link Modals
   const [showRecordPaymentModal, setShowRecordPaymentModal] = useState(false)
@@ -267,14 +268,18 @@ function ClientProfilePageContent() {
           <Button
             variant="outline"
             icon={<Mail size={15} />}
+            loading={sendingOnboardingEmail}
+            loadingText="Sending..."
             onClick={async () => {
+              if (sendingOnboardingEmail) return
               if (!client.email) {
                 toast.error('Client does not have an email address.')
                 return
               }
+              setSendingOnboardingEmail(true)
               const toastId = toast.loading('Sending welcome email...')
               try {
-                const res = await fetch('/api/clients/send-welcome-email', {
+                const res = await fetchWithTimeout('/api/clients/send-welcome-email', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -282,15 +287,18 @@ function ClientProfilePageContent() {
                     email: client.email,
                     name: client.fullName,
                   }),
+                  timeoutMs: 15000,
                 })
-                const data = await res.json()
+                const data = await res.json().catch(() => ({}))
                 if (res.ok && data.ok) {
                   toast.success(`Welcome onboarding email sent to ${client.email}`, { id: toastId })
                 } else {
                   toast.error(data.error || 'Failed to send welcome email.', { id: toastId })
                 }
-              } catch {
-                toast.error('Network error sending welcome email.', { id: toastId })
+              } catch (err) {
+                toast.error(formatActionError(err, 'Network error sending welcome email.'), { id: toastId })
+              } finally {
+                setSendingOnboardingEmail(false)
               }
             }}
           >
@@ -847,8 +855,9 @@ function ClientProfilePageContent() {
                                   <div className="flex items-center gap-1.5 shrink-0">
                                     <button
                                       onClick={async () => {
-                                        await copyToClipboard(payUrl)
-                                        toast.success('Link copied!')
+                                        const copied = await copyToClipboard(payUrl)
+                                        if (copied) toast.success('Link copied!')
+                                        else toast.error('Failed to copy link')
                                       }}
                                       className="px-2 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors text-gray-600 inline-flex items-center gap-1 text-xs font-medium"
                                       title="Copy link"
@@ -1094,7 +1103,6 @@ function ClientProfilePageContent() {
           preselectedClientId={client.id}
           onSuccess={() => {
             reloadFinancials()
-            toast.success('Payment successfully recorded')
           }}
         />
       )}
@@ -1117,7 +1125,6 @@ function ClientProfilePageContent() {
           preselectedClientId={client.id}
           onSuccess={() => {
             reloadFinancials()
-            toast.success('Payment link added')
           }}
         />
       )}
@@ -1167,7 +1174,7 @@ function ClientProfilePageContent() {
             companyName: client.company,
           }}
           onSuccess={() => {
-            toast.success('Dispatch sent successfully')
+            reloadFinancials()
           }}
         />
       )}

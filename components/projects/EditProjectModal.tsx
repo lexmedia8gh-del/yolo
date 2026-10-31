@@ -28,7 +28,7 @@ import type {
   Payment,
   ClientLink,
 } from '@/lib/types'
-import { formatCurrency, resolveDateValue } from '@/lib/utils'
+import { formatCurrency, resolveDateValue, formatActionError, fetchWithTimeout } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface Props {
@@ -108,6 +108,10 @@ export function EditProjectModal({
 
   // Populate form whenever modal opens or target project changes
   useEffect(() => {
+    if (!isOpen) {
+      setIsSubmitting(false)
+      return
+    }
     if (!project) return
     setFormData({
       name: project.name || '',
@@ -254,6 +258,7 @@ export function EditProjectModal({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
 
     if (!validateForm()) {
       toast.error('Please fix the highlighted fields before saving.')
@@ -308,10 +313,11 @@ export function EditProjectModal({
       }
 
       // 1. Validate & authorize on server first
-      const res = await fetch(`/api/projects/${encodeURIComponent(project.id)}`, {
+      const res = await fetchWithTimeout(`/api/projects/${encodeURIComponent(project.id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        timeoutMs: 15000,
       })
 
       const serverResult = await res.json().catch(() => ({}))
@@ -387,7 +393,7 @@ export function EditProjectModal({
       onClose()
     } catch (err: any) {
       console.error('Failed to update project:', err)
-      toast.error(err?.message || 'Failed to save project changes.')
+      toast.error(formatActionError(err, 'Failed to save project changes.'))
     } finally {
       setIsSubmitting(false)
     }
@@ -402,6 +408,7 @@ export function EditProjectModal({
       title="Edit Project"
       subtitle={project.invoiceNumber ? `Ref: ${project.invoiceNumber}` : 'Update project details, schedule, and pricing'}
       size="lg"
+      preventClose={isSubmitting}
     >
       <form onSubmit={handleSave} className="space-y-6">
         {/* Section 1: Project Information */}
@@ -707,7 +714,7 @@ export function EditProjectModal({
           <Button variant="outline" onClick={onClose} type="button" disabled={isSubmitting}>
             Cancel
           </Button>
-          <Button variant="primary" type="submit" loading={isSubmitting}>
+          <Button variant="primary" type="submit" loading={isSubmitting} loadingText="Saving...">
             {confirmPriceChange && priceChanged && hasExistingPayments
               ? 'Confirm & Save Changes'
               : 'Save Changes'}

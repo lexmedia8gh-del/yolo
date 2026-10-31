@@ -27,7 +27,7 @@ import {
 } from '@/lib/firebase/firestore'
 import { getAdminAuthHeaders } from '@/lib/firebase/auth'
 import type { Client, Project, Invoice } from '@/lib/types'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, fetchWithTimeout, formatActionError } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface RecordPaymentModalProps {
@@ -137,6 +137,7 @@ export function RecordPaymentModal({
     if (!isOpen) {
       wasOpenRef.current = false
       submittingRef.current = false
+      setSubmitting(false)
       return
     }
 
@@ -426,7 +427,7 @@ export function RecordPaymentModal({
       const verifiedInvoiceId = currentInvoice ? currentInvoice.id : undefined
 
       const authHeaders = await getAdminAuthHeaders(true)
-      const res = await fetch('/api/payments/record', {
+      const res = await fetchWithTimeout('/api/payments/record', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -458,6 +459,7 @@ export function RecordPaymentModal({
           status,
           notes: notes.trim(),
         }),
+        timeoutMs: 15000,
       })
 
       const data = await res.json().catch(() => ({}))
@@ -475,7 +477,7 @@ export function RecordPaymentModal({
       onClose()
     } catch (err: any) {
       console.error('Error recording payment:', err)
-      toast.error(err.message || 'Failed to record payment.')
+      toast.error(formatActionError(err, 'Failed to record payment.'))
     } finally {
       submittingRef.current = false
       setSubmitting(false)
@@ -485,7 +487,8 @@ export function RecordPaymentModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => !submitting && onClose()}
+      preventClose={submitting}
       title={paymentType === 'deposit' ? 'Record Client Deposit' : 'Record Client Payment'}
       subtitle="Record offline, mobile money, cash, or bank payments directly to client accounts."
       size="lg"
@@ -800,6 +803,7 @@ export function RecordPaymentModal({
             size="sm"
             type="submit"
             loading={submitting}
+            loadingText="Recording..."
             icon={<CheckCircle2 size={15} />}
           >
             {paymentType === 'deposit' ? 'Record Deposit' : 'Record Payment'}

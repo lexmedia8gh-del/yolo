@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 import { db, isFirebaseConfigured } from '@/lib/firebase/config'
-import { collection, getDocs, addDoc, updateDoc, doc, Timestamp as ClientTimestamp } from 'firebase/firestore'
+import { collection, getDocs } from 'firebase/firestore'
 import { FieldValue, Timestamp as AdminTimestamp } from 'firebase-admin/firestore'
 import { generateSecureToken } from '@/lib/utils'
 import type { PreviewExpirationOption, PreviewStatus } from '@/lib/types'
@@ -127,12 +127,12 @@ export async function POST(req: NextRequest) {
       order: a.order ?? idx,
     }))
 
-    try {
-      const adminDb = getAdminDb()
+    const adminDb = getAdminDb()
 
-      if (id) {
-        // Update existing preview
-        await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).update({
+    if (id) {
+      // Update existing preview safely with merge
+      await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).set(
+        {
           clientId: clientId || '',
           clientName: clientName || '',
           clientEmail: clientEmail || '',
@@ -147,113 +147,51 @@ export async function POST(req: NextRequest) {
           watermark: watermarkConfig,
           assets: formattedAssets,
           updatedAt: FieldValue.serverTimestamp(),
-        })
+        },
+        { merge: true }
+      )
 
-        const updatedSnap = await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).get()
-        return NextResponse.json({
-          success: true,
-          preview: { id, ...updatedSnap.data() },
-        })
-      } else {
-        // Create new preview
-        const token = generateSecureToken('prev_')
+      const updatedSnap = await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).doc(id).get()
+      return NextResponse.json({
+        success: true,
+        preview: { id, ...updatedSnap.data() },
+      })
+    } else {
+      // Create new preview
+      const token = generateSecureToken('prev_')
 
-        const newPreviewData = {
-          token,
-          clientId: clientId || '',
-          clientName: clientName || 'Client',
-          clientEmail: clientEmail || '',
-          projectId: projectId || '',
-          projectName: projectName || 'Deliverable',
-          quickJobId: quickJobId || '',
-          title: title.trim(),
-          description: (description || '').trim(),
-          status: (status as PreviewStatus) || 'Active',
-          expirationOption,
-          expiresAt,
-          watermark: watermarkConfig,
-          assets: formattedAssets,
-          viewCount: 0,
-          lastViewedAt: null,
-          revokedAt: null,
-          revokedReason: '',
-          createdAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-          createdBy: 'admin',
-        }
-
-        const docRef = await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).add(newPreviewData)
-
-        return NextResponse.json({
-          success: true,
-          previewId: docRef.id,
-          token,
-          preview: { id: docRef.id, ...newPreviewData },
-        })
+      const newPreviewData = {
+        token,
+        clientId: clientId || '',
+        clientName: clientName || 'Client',
+        clientEmail: clientEmail || '',
+        projectId: projectId || '',
+        projectName: projectName || 'Deliverable',
+        quickJobId: quickJobId || '',
+        title: title.trim(),
+        description: (description || '').trim(),
+        status: (status as PreviewStatus) || 'Active',
+        expirationOption,
+        expiresAt,
+        watermark: watermarkConfig,
+        assets: formattedAssets,
+        viewCount: 0,
+        lastViewedAt: null,
+        revokedAt: null,
+        revokedReason: '',
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+        createdBy: 'admin',
       }
-    } catch {
-      if (!isFirebaseConfigured) {
-        return NextResponse.json(
-          { error: 'Firebase database is not configured.' },
-          { status: 503 }
-        )
-      }
-      // Client SDK fallback when Admin SDK is not configured in current runtime
-      if (id) {
-        const docRef = doc(db, COLLECTIONS.CLIENT_PREVIEWS, id)
-        await updateDoc(docRef, {
-          clientId: clientId || '',
-          clientName: clientName || '',
-          clientEmail: clientEmail || '',
-          projectId: projectId || '',
-          projectName: projectName || '',
-          quickJobId: quickJobId || '',
-          title: title.trim(),
-          description: (description || '').trim(),
-          status: (status as PreviewStatus) || 'Active',
-          expirationOption,
-          expiresAt: expiresAt ? ClientTimestamp.fromMillis(expiresAt.toMillis()) : null,
-          watermark: watermarkConfig,
-          assets: formattedAssets,
-        })
 
-        return NextResponse.json({
-          success: true,
-          preview: { id, title: title.trim(), status, assets: formattedAssets },
-        })
-      } else {
-        const token = generateSecureToken('prev_')
-        const newPreviewData = {
-          token,
-          clientId: clientId || '',
-          clientName: clientName || 'Client',
-          clientEmail: clientEmail || '',
-          projectId: projectId || '',
-          projectName: projectName || 'Deliverable',
-          quickJobId: quickJobId || '',
-          title: title.trim(),
-          description: (description || '').trim(),
-          status: (status as PreviewStatus) || 'Active',
-          expirationOption,
-          expiresAt: expiresAt ? ClientTimestamp.fromMillis(expiresAt.toMillis()) : null,
-          watermark: watermarkConfig,
-          assets: formattedAssets,
-          viewCount: 0,
-          lastViewedAt: null,
-          revokedAt: null,
-          revokedReason: '',
-          createdBy: 'admin',
-        }
+      const docRef = await adminDb.collection(COLLECTIONS.CLIENT_PREVIEWS).add(newPreviewData)
 
-        const docRef = await addDoc(collection(db, COLLECTIONS.CLIENT_PREVIEWS), newPreviewData)
-
-        return NextResponse.json({
-          success: true,
-          previewId: docRef.id,
-          token,
-          preview: { id: docRef.id, ...newPreviewData },
-        })
-      }
+      return NextResponse.json({
+        success: true,
+        previewId: docRef.id,
+        token,
+        preview: { id: docRef.id, ...newPreviewData },
+      })
     }
   } catch (err: any) {
     console.error('[Preview Admin POST Error]:', err)

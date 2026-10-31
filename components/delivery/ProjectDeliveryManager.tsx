@@ -73,6 +73,8 @@ import {
   copyToClipboard,
   openExternalUrl,
   getDeliveryLink,
+  fetchWithTimeout,
+  formatActionError,
 } from '@/lib/utils'
 import { Timestamp } from 'firebase/firestore'
 import toast from 'react-hot-toast'
@@ -141,8 +143,10 @@ export function ProjectDeliveryManager({
   const [showExpireModal, setShowExpireModal] = useState(false)
   const [selectedExpOption, setSelectedExpOption] = useState<DeliveryExpirationOption>('never')
   const [customDays, setCustomDays] = useState<number>(14)
+  const [isSavingExpiration, setIsSavingExpiration] = useState(false)
   const [isRegenerating, setIsRegenerating] = useState(false)
-  const [isReleasing, setIsReleasing] = useState(false)
+  const [isAdminReleasing, setIsAdminReleasing] = useState(false)
+  const [isRevokingRelease, setIsRevokingRelease] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [resendingEmail, setResendingEmail] = useState(false)
   const [copiedLink, setCopiedLink] = useState(false)
@@ -166,6 +170,7 @@ export function ProjectDeliveryManager({
   const [fileToReplace, setFileToReplace] = useState<DeliveryFile | null>(null)
   const [isReplacingFile, setIsReplacingFile] = useState(false)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
+  const [deletingFileId, setDeletingFileId] = useState<string | null>(null)
 
   // Optional Image Optimization (OFF by default)
   const [imageOptimizationEnabled, setImageOptimizationEnabled] = useState<boolean>(() => {
@@ -210,7 +215,9 @@ export function ProjectDeliveryManager({
         invoiceId: resolvedInvoiceId,
       })
 
-      const res = await fetch(`/api/delivery/admin?${queryParams.toString()}`)
+      const res = await fetchWithTimeout(`/api/delivery/admin?${queryParams.toString()}`, {
+        timeoutMs: 15000,
+      })
       const data = await res.json()
 
       if (!res.ok || !data.delivery) {
@@ -231,7 +238,7 @@ export function ProjectDeliveryManager({
       })
     } catch (err: any) {
       console.error('Error loading delivery manager:', err)
-      const detail = err?.message || 'Please check your connection and try again.'
+      const detail = formatActionError(err, 'Please check your connection and try again.')
       toast.error(`Delivery files could not be loaded: ${detail}`)
     } finally {
       setLoading(false)
@@ -561,7 +568,8 @@ export function ProjectDeliveryManager({
 
   // 4. Handle File Delete
   const handleDeleteFile = async (file: DeliveryFile) => {
-    setConfirmingDeleteId(null)
+    if (deletingFileId) return
+    setDeletingFileId(file.id)
 
     try {
       if (file.storagePath) {
@@ -586,35 +594,39 @@ export function ProjectDeliveryManager({
       }
 
       toast.success('File removed.')
+      setConfirmingDeleteId(null)
     } catch (err) {
       console.error('Delete error:', err)
-      toast.error('Unable to remove file. Please try again.')
+      toast.error(formatActionError(err, 'Unable to remove file. Please try again.'))
+    } finally {
+      setDeletingFileId(null)
     }
   }
 
   // 5. Regenerate Access Link
   const handleRegenerateLink = async () => {
-    if (!delivery) return
+    if (!delivery || isRegenerating) return
     setIsRegenerating(true)
     try {
       const newToken = generateSecureToken(24)
-      const res = await fetch('/api/delivery/admin', {
+      const res = await fetchWithTimeout('/api/delivery/admin', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           deliveryId: delivery.id,
           updates: { accessToken: newToken },
         }),
+        timeoutMs: 15000,
       })
 
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to update')
+      if (!res.ok) throw new Error(data.error || 'Failed to regenerate link')
 
       setCanonicalUrl(data.publicUrl || '')
       setDelivery((prev) => (prev ? { ...prev, accessToken: data.accessToken || newToken } : null))
       toast.success('Secure delivery link regenerated!')
-    } catch {
-      toast.error('Failed to regenerate link.')
+    } catch (err) {
+      toast.error(formatActionError(err, 'Failed to regenerate link.'))
     } finally {
       setIsRegenerating(false)
     }
@@ -622,10 +634,10 @@ export function ProjectDeliveryManager({
 
   // 6. Release Delivery Operations
   const executeAdminRelease = async () => {
-    if (!delivery) return
-    setIsReleasing(true)
+    if (!delivery || isAdminReleasing) return
+    setIsAdminReleasing(true)
     try {
-      const res = await fetch('/api/delivery/release', {
+      const res = await fetchWithTimeout('/api/delivery/release', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -634,6 +646,7 @@ export function ProjectDeliveryManager({
           adminOverride: true,
           reason: adminReleaseReason.trim() || 'Manual administrator override',
         }),
+        timeoutMs: 15000,
       })
 
       const data = await res.json()
@@ -663,23 +676,24 @@ export function ProjectDeliveryManager({
       setAdminReleaseConfirmed(false)
     } catch (err: any) {
       console.error('Admin release error:', err)
-      toast.error(err?.message || 'Failed to execute admin release.')
+      toast.error(formatActionError(err, 'Failed to execute admin release.'))
     } finally {
-      setIsReleasing(false)
+      setIsAdminReleasing(false)
     }
   }
 
   const executeRevokeRelease = async () => {
-    if (!delivery) return
-    setIsReleasing(true)
+    if (!delivery || isRevokingRelease) return
+    setIsRevokingRelease(true)
     try {
-      const res = await fetch('/api/delivery/release', {
+      const res = await fetchWithTimeout('/api/delivery/release', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           deliveryId: delivery.id,
           release: false,
         }),
+        timeoutMs: 15000,
       })
 
       const data = await res.json()
@@ -705,9 +719,9 @@ export function ProjectDeliveryManager({
       setRevokeConfirmed(false)
     } catch (err: any) {
       console.error('Revoke release error:', err)
-      toast.error(err?.message || 'Failed to revoke release.')
+      toast.error(formatActionError(err, 'Failed to revoke release.'))
     } finally {
-      setIsReleasing(false)
+      setIsRevokingRelease(false)
     }
   }
 
@@ -717,6 +731,7 @@ export function ProjectDeliveryManager({
   }
 
   const handleSubmitDelivery = async (isResend = false) => {
+    if (isSubmitting || resendingEmail) return
     if (!delivery) {
       toast.error('Delivery record is still initializing.')
       return
@@ -731,18 +746,18 @@ export function ProjectDeliveryManager({
       setResendingEmail(true)
     } else {
       setIsSubmitting(true)
-      setIsReleasing(true)
     }
 
     try {
       if (resolvedQuickJobId) {
-        const res = await fetch('/api/quick-jobs/release-delivery', {
+        const res = await fetchWithTimeout('/api/quick-jobs/release-delivery', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             jobId: resolvedQuickJobId,
             resend: isResend,
           }),
+          timeoutMs: 20000,
         })
 
         const data = await res.json()
@@ -780,7 +795,7 @@ export function ProjectDeliveryManager({
           fileCount: files.length,
         })
       } else {
-        const res = await fetch('/api/delivery/release', {
+        const res = await fetchWithTimeout('/api/delivery/release', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -789,6 +804,7 @@ export function ProjectDeliveryManager({
             resendEmail: isResend,
             projectId: resolvedProjectId || undefined,
           }),
+          timeoutMs: 20000,
         })
 
         const data = await res.json()
@@ -832,12 +848,12 @@ export function ProjectDeliveryManager({
           fileCount: files.length,
         })
       }
+      setShowReleaseConfirmModal(false)
     } catch (err: any) {
       console.error('Submit delivery error:', err)
-      toast.error(err?.message || 'Failed to release delivery.')
+      toast.error(formatActionError(err, 'Failed to release delivery.'))
     } finally {
       setIsSubmitting(false)
-      setIsReleasing(false)
       setResendingEmail(false)
     }
   }
@@ -846,7 +862,8 @@ export function ProjectDeliveryManager({
 
   // 7. Update Expiration Settings
   const handleSaveExpiration = async () => {
-    if (!delivery) return
+    if (!delivery || isSavingExpiration) return
+    setIsSavingExpiration(true)
     try {
       let expiresAtTimestamp: Timestamp | null = null
 
@@ -876,7 +893,7 @@ export function ProjectDeliveryManager({
         expiresAtTimestamp = Timestamp.fromDate(d)
       }
 
-      const res = await fetch('/api/delivery/admin', {
+      const res = await fetchWithTimeout('/api/delivery/admin', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -886,9 +903,11 @@ export function ProjectDeliveryManager({
             expiresAt: expiresAtTimestamp,
           },
         }),
+        timeoutMs: 15000,
       })
 
-      if (!res.ok) throw new Error('Failed to update')
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Failed to update expiration settings')
 
       setDelivery((prev) =>
         prev
@@ -902,13 +921,16 @@ export function ProjectDeliveryManager({
 
       toast.success('Expiration settings saved.')
       setShowExpireModal(false)
-    } catch {
-      toast.error('Failed to update expiration settings.')
+    } catch (err) {
+      toast.error(formatActionError(err, 'Failed to update expiration settings.'))
+    } finally {
+      setIsSavingExpiration(false)
     }
   }
 
   // 8. Send Delivery via WhatsApp (Secure Link ONLY)
   const handleSendWhatsAppDelivery = async () => {
+    if (sendingWA) return
     if (!delivery || !resolvedClientPhone) {
       toast.error('Missing WhatsApp phone number for this client.')
       return
@@ -925,7 +947,7 @@ export function ProjectDeliveryManager({
 
       const messageBody = `Hi ${delivery.clientName}, your LEXMEDIA.GH project is ready! 🎉\n\nYour final files are now available for download.\n\nProject: ${delivery.projectName}\n\n📁 Download your files:\n${deliveryUrl}\n\nThank you for choosing LEXMEDIA.GH.`
 
-      const res = await fetch('/api/whatsapp/send', {
+      const res = await fetchWithTimeout('/api/whatsapp/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -937,6 +959,7 @@ export function ProjectDeliveryManager({
           toNumber: resolvedClientPhone,
           messageBody,
         }),
+        timeoutMs: 15000,
       })
 
       const data = await res.json()
@@ -950,7 +973,7 @@ export function ProjectDeliveryManager({
       toast.success('Delivery link sent via WhatsApp!')
     } catch (err) {
       console.error('WhatsApp dispatch error:', err)
-      toast.error('WhatsApp message could not be sent. Please check your connection.')
+      toast.error(formatActionError(err, 'WhatsApp message could not be sent. Please check your connection.'))
     } finally {
       setSendingWA(false)
     }
@@ -1182,7 +1205,7 @@ export function ProjectDeliveryManager({
               <div className={`p-3 rounded-lg border flex items-center gap-3 ${
                 isReleased
                   ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                  : (isSubmitting || isReleasing)
+                  : (isSubmitting || isAdminReleasing)
                   ? 'bg-amber-50 border-amber-200 text-amber-900'
                   : hasFiles 
                   ? 'bg-indigo-50 border-indigo-200 text-indigo-900 animate-pulse'
@@ -1191,7 +1214,7 @@ export function ProjectDeliveryManager({
                 <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs font-bold ${
                   isReleased 
                     ? 'bg-emerald-600 text-white'
-                    : (isSubmitting || isReleasing)
+                    : (isSubmitting || isAdminReleasing)
                     ? 'bg-amber-500 text-white'
                     : hasFiles 
                     ? 'bg-indigo-600 text-white' 
@@ -1204,7 +1227,7 @@ export function ProjectDeliveryManager({
                   <p className="text-xs font-semibold mt-0.5">
                     {isReleased 
                       ? 'Files Submitted' 
-                      : (isSubmitting || isReleasing)
+                      : (isSubmitting || isAdminReleasing)
                       ? 'Processing Delivery'
                       : hasFiles 
                       ? 'Files ready for submission' 
@@ -1394,19 +1417,14 @@ export function ProjectDeliveryManager({
                 <Button
                   size="sm"
                   variant="primary"
-                  loading={isSubmitting || isReleasing}
-                  disabled={isSubmitting || isReleasing}
+                  loading={isSubmitting}
+                  loadingText={quickJob ? 'Releasing Delivery...' : 'Sending Delivery...'}
+                  disabled={isSubmitting}
                   onClick={() => promptReleaseConfirmation(false)}
                   icon={<Send size={14} />}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-xs"
                 >
-                  {isSubmitting
-                    ? quickJob
-                      ? '⟳ Releasing Delivery...'
-                      : '⟳ Sending Delivery...'
-                    : quickJob
-                    ? 'Release Delivery'
-                    : 'Submit Delivery'}
+                  {quickJob ? 'Release Delivery' : 'Submit Delivery'}
                 </Button>
               )
             )}
@@ -1421,18 +1439,21 @@ export function ProjectDeliveryManager({
                   size="sm"
                   variant="outline"
                   loading={resendingEmail}
-                  disabled={resendingEmail}
+                  loadingText="Sending..."
+                  disabled={resendingEmail || isRevokingRelease}
                   onClick={() => promptReleaseConfirmation(true)}
                   icon={<Mail size={12} />}
                   className="text-xs text-gray-700 bg-white hover:bg-gray-50 border-gray-300"
                   title="Resend delivery email notification to client"
                 >
-                  {resendingEmail ? 'Sending...' : 'Resend Email'}
+                  Resend Email
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
-                  loading={isReleasing}
+                  loading={isRevokingRelease}
+                  loadingText="Revoking..."
+                  disabled={isRevokingRelease || resendingEmail}
                   onClick={() => {
                     setRevokeConfirmed(false)
                     setShowRevokeReleaseModal(true)
@@ -1666,23 +1687,30 @@ export function ProjectDeliveryManager({
                 Secure Client Delivery Link
               </span>
               <button
+                type="button"
                 onClick={handleRegenerateLink}
                 disabled={isRegenerating}
+                aria-busy={isRegenerating || undefined}
                 className="text-[11px] font-medium text-gray-500 hover:text-indigo-600 flex items-center gap-1 transition-colors disabled:opacity-50 cursor-pointer"
               >
                 <RefreshCw size={11} className={isRegenerating ? 'animate-spin' : ''} />
-                Regenerate Link
+                {isRegenerating ? 'Regenerating...' : 'Regenerate Link'}
               </button>
             </div>
 
             <div className="flex items-center gap-2 bg-white rounded-lg border border-gray-200 px-3 py-1.5">
               <code className="text-xs text-gray-700 flex-1 truncate font-mono">{deliveryUrl}</code>
               <button
+                type="button"
                 onClick={async () => {
-                  await copyToClipboard(deliveryUrl)
-                  setCopiedLink(true)
-                  toast.success('Delivery link copied!')
-                  setTimeout(() => setCopiedLink(false), 2000)
+                  const ok = await copyToClipboard(deliveryUrl)
+                  if (ok) {
+                    setCopiedLink(true)
+                    toast.success('Delivery link copied!')
+                    setTimeout(() => setCopiedLink(false), 2000)
+                  } else {
+                    toast.error('Could not copy delivery link.')
+                  }
                 }}
                 className="p-1 rounded hover:bg-gray-100 text-gray-500 transition-colors shrink-0"
               >
@@ -1704,12 +1732,14 @@ export function ProjectDeliveryManager({
                 <Button
                   size="sm"
                   variant="outline"
-                  icon={sendingWA ? <Spinner size="sm" /> : waSent ? <CheckCircle2 size={13} className="text-emerald-600" /> : <MessageSquare size={13} />}
+                  loading={sendingWA}
+                  loadingText="Sending via WhatsApp..."
+                  icon={waSent ? <CheckCircle2 size={13} className="text-emerald-600" /> : <MessageSquare size={13} />}
                   className={waSent ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'}
                   onClick={handleSendWhatsAppDelivery}
                   disabled={sendingWA || files.length === 0}
                 >
-                  {sendingWA ? 'Sending via WhatsApp...' : waSent ? 'Delivery Sent ✓' : 'Send Delivery via WhatsApp'}
+                  {waSent ? 'Delivery Sent ✓' : 'Send Delivery via WhatsApp'}
                 </Button>
               )}
             </div>
@@ -1786,15 +1816,18 @@ export function ProjectDeliveryManager({
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
+                          disabled={deletingFileId === file.id}
+                          aria-busy={deletingFileId === file.id || undefined}
                           onClick={() => handleDeleteFile(file)}
-                          className="px-2 py-1 rounded-md bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold transition-colors"
+                          className="px-2 py-1 rounded-md bg-rose-600 hover:bg-rose-700 disabled:opacity-60 disabled:cursor-wait text-white text-[11px] font-semibold transition-colors"
                         >
-                          Delete?
+                          {deletingFileId === file.id ? 'Deleting...' : 'Delete?'}
                         </button>
                         <button
                           type="button"
+                          disabled={deletingFileId === file.id}
                           onClick={() => setConfirmingDeleteId(null)}
-                          className="px-2 py-1 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-600 text-[11px] font-medium transition-colors"
+                          className="px-2 py-1 rounded-md bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-600 text-[11px] font-medium transition-colors"
                         >
                           Cancel
                         </button>
@@ -1802,8 +1835,9 @@ export function ProjectDeliveryManager({
                     ) : (
                       <button
                         type="button"
+                        disabled={Boolean(deletingFileId)}
                         onClick={() => setConfirmingDeleteId(file.id)}
-                        className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-40 transition-colors"
                         title="Delete file"
                       >
                         <Trash2 size={13} />
@@ -1845,8 +1879,9 @@ export function ProjectDeliveryManager({
             <Button
               size="md"
               variant="primary"
-              loading={isSubmitting || isReleasing}
-              disabled={isSubmitting || isReleasing}
+              loading={isSubmitting}
+              loadingText={quickJob ? 'Releasing Delivery...' : 'Sending Delivery...'}
+              disabled={isSubmitting}
               onClick={() => {
                 if (files.length === 0) {
                   toast.error(quickJob ? 'Please upload delivery files before releasing this job.' : 'Please upload at least one file before submitting delivery.')
@@ -1861,13 +1896,7 @@ export function ProjectDeliveryManager({
                   : 'bg-indigo-600/80 hover:bg-indigo-600 text-white'
               }`}
             >
-              {isSubmitting || isReleasing
-                ? quickJob
-                  ? '⟳ Releasing Delivery...'
-                  : '⟳ Sending Delivery...'
-                : quickJob
-                ? 'Release Delivery'
-                : 'Submit Delivery'}
+              {quickJob ? 'Release Delivery' : 'Submit Delivery'}
             </Button>
           </div>
         )}
@@ -1908,12 +1937,13 @@ export function ProjectDeliveryManager({
                   size="sm"
                   variant="outline"
                   loading={resendingEmail}
+                  loadingText="Resending..."
                   disabled={resendingEmail}
                   onClick={() => promptReleaseConfirmation(true)}
                   icon={<RotateCcw size={12} />}
                   className="text-xs text-emerald-800 border-emerald-300 hover:bg-emerald-50 bg-white"
                 >
-                  {resendingEmail ? 'Resending...' : 'Resend Email'}
+                  Resend Email
                 </Button>
               </div>
             ) : delivery?.notifyEmailError ? (
@@ -1928,12 +1958,13 @@ export function ProjectDeliveryManager({
                   size="sm"
                   variant="primary"
                   loading={resendingEmail}
+                  loadingText="Retrying..."
                   disabled={resendingEmail}
                   onClick={() => handleSubmitDelivery(true)}
                   icon={<RotateCcw size={12} />}
                   className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-semibold"
                 >
-                  {resendingEmail ? 'Retrying...' : 'Retry Brevo Email'}
+                  Retry Brevo Email
                 </Button>
               </div>
             ) : (
@@ -1946,12 +1977,13 @@ export function ProjectDeliveryManager({
                   size="sm"
                   variant="primary"
                   loading={resendingEmail}
+                  loadingText="Sending..."
                   disabled={resendingEmail}
                   onClick={() => handleSubmitDelivery(true)}
                   icon={<Send size={12} />}
                   className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
                 >
-                  {resendingEmail ? 'Sending...' : 'Send Delivery Email'}
+                  Send Delivery Email
                 </Button>
               </div>
             )}
@@ -1962,7 +1994,8 @@ export function ProjectDeliveryManager({
       {/* Expiration Settings Modal */}
       <Modal
         isOpen={showExpireModal}
-        onClose={() => setShowExpireModal(false)}
+        onClose={() => !isSavingExpiration && setShowExpireModal(false)}
+        preventClose={isSavingExpiration}
         title="Delivery Link Expiration"
         size="sm"
       >
@@ -2017,10 +2050,21 @@ export function ProjectDeliveryManager({
           )}
 
           <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
-            <Button variant="outline" size="sm" onClick={() => setShowExpireModal(false)}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isSavingExpiration}
+              onClick={() => setShowExpireModal(false)}
+            >
               Cancel
             </Button>
-            <Button variant="primary" size="sm" onClick={handleSaveExpiration}>
+            <Button
+              variant="primary"
+              size="sm"
+              loading={isSavingExpiration}
+              loadingText="Saving..."
+              onClick={handleSaveExpiration}
+            >
               Save Settings
             </Button>
           </div>
@@ -2030,7 +2074,8 @@ export function ProjectDeliveryManager({
       {/* ADMIN RELEASE CONFIRMATION MODAL */}
       <Modal
         isOpen={showAdminReleaseModal}
-        onClose={() => setShowAdminReleaseModal(false)}
+        onClose={() => !isAdminReleasing && setShowAdminReleaseModal(false)}
+        preventClose={isAdminReleasing}
         title="Confirm Admin Release (Payment Override)"
         subtitle="Manually release delivery files to the client bypassing normal payment requirements."
         size="md"
@@ -2104,14 +2149,15 @@ export function ProjectDeliveryManager({
               variant="outline"
               size="sm"
               onClick={() => setShowAdminReleaseModal(false)}
-              disabled={isReleasing}
+              disabled={isAdminReleasing}
             >
               Cancel
             </Button>
             <Button
               variant="primary"
               size="sm"
-              loading={isReleasing}
+              loading={isAdminReleasing}
+              loadingText="Releasing..."
               disabled={!adminReleaseConfirmed || !adminReleaseReason.trim()}
               onClick={executeAdminRelease}
               icon={<Unlock size={14} />}
@@ -2126,7 +2172,8 @@ export function ProjectDeliveryManager({
       {/* REVOKE RELEASE CONFIRMATION MODAL */}
       <Modal
         isOpen={showRevokeReleaseModal}
-        onClose={() => setShowRevokeReleaseModal(false)}
+        onClose={() => !isRevokingRelease && setShowRevokeReleaseModal(false)}
+        preventClose={isRevokingRelease}
         title="Revoke Delivery Release"
         subtitle="Lock delivery files and restore payment gate for the client."
         size="sm"
@@ -2156,14 +2203,15 @@ export function ProjectDeliveryManager({
               variant="outline"
               size="sm"
               onClick={() => setShowRevokeReleaseModal(false)}
-              disabled={isReleasing}
+              disabled={isRevokingRelease}
             >
               Cancel
             </Button>
             <Button
               variant="danger"
               size="sm"
-              loading={isReleasing}
+              loading={isRevokingRelease}
+              loadingText="Revoking..."
               disabled={!revokeConfirmed}
               onClick={executeRevokeRelease}
               icon={<Lock size={14} />}
@@ -2178,6 +2226,7 @@ export function ProjectDeliveryManager({
       <Modal
         isOpen={showReleaseConfirmModal}
         onClose={() => !isSubmitting && !resendingEmail && setShowReleaseConfirmModal(false)}
+        preventClose={isSubmitting || resendingEmail}
         title={pendingIsResend ? 'Resend Delivery Email' : 'Release Delivery'}
         size="sm"
       >
@@ -2209,11 +2258,9 @@ export function ProjectDeliveryManager({
               variant="primary"
               size="sm"
               loading={isSubmitting || resendingEmail}
+              loadingText={pendingIsResend ? 'Sending...' : 'Releasing...'}
               disabled={isSubmitting || resendingEmail}
-              onClick={() => {
-                setShowReleaseConfirmModal(false)
-                handleSubmitDelivery(pendingIsResend)
-              }}
+              onClick={() => handleSubmitDelivery(pendingIsResend)}
               icon={<Send size={13} />}
               className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
             >

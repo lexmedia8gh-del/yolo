@@ -33,7 +33,7 @@ import type {
   Client,
   Project,
 } from '@/lib/types'
-import { formatWhatsAppPhone, generateWhatsAppLink } from '@/lib/utils'
+import { formatWhatsAppPhone, generateWhatsAppLink, formatActionError } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface ReminderModalProps {
@@ -109,6 +109,8 @@ export function ReminderModal({
     if (isOpen) {
       getDocuments<Client>(COLLECTIONS.CLIENTS).then((data) => setClients(data || []))
       getDocuments<Project>(COLLECTIONS.PROJECTS).then((data) => setProjects(data || []))
+    } else {
+      setLoading(false)
     }
   }, [isOpen])
 
@@ -161,6 +163,7 @@ export function ReminderModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (loading) return
     if (!validate()) return
 
     setLoading(true)
@@ -206,7 +209,7 @@ export function ReminderModal({
       onClose()
     } catch (err: any) {
       console.error('Error saving reminder:', err)
-      toast.error(err?.message || 'Failed to save reminder')
+      toast.error(formatActionError(err, 'Failed to save reminder'))
     } finally {
       setLoading(false)
     }
@@ -224,7 +227,8 @@ export function ReminderModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => !loading && onClose()}
+      preventClose={loading}
       title={reminderToEdit ? 'Edit Smart Reminder' : 'Create Smart Reminder'}
       size="lg"
     >
@@ -485,7 +489,13 @@ export function ReminderModal({
           <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={loading}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" size="sm" loading={loading}>
+          <Button
+            type="submit"
+            variant="primary"
+            size="sm"
+            loading={loading}
+            loadingText={reminderToEdit ? 'Saving...' : 'Creating...'}
+          >
             {reminderToEdit ? 'Save Changes' : 'Create Reminder'}
           </Button>
         </div>

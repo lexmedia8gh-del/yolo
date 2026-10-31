@@ -9,6 +9,7 @@ import { InvoiceDocument } from './InvoiceDocument'
 import { InvoiceStage } from './InvoiceStage'
 import { sanitizeBrandingLogoUrl } from '@/lib/hooks/useInvoiceBranding'
 import { useAuth } from '@/lib/hooks/useAuth'
+import { getAdminAuthHeaders } from '@/lib/firebase/auth'
 import {
   COLLECTIONS,
   getDocuments,
@@ -33,6 +34,8 @@ import {
   getPaymentLink,
   SUPPORTED_CURRENCIES,
   getCurrencySymbol,
+  fetchWithTimeout,
+  formatActionError,
 } from '@/lib/utils'
 import {
   Plus,
@@ -97,7 +100,8 @@ export function InvoiceBuilderModal({
 }: InvoiceBuilderModalProps) {
   const { user } = useAuth()
   const [activeTab, setActiveTab] = useState<'editor' | 'preview'>('editor')
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [savingAction, setSavingAction] = useState<'draft' | 'send' | 'save' | null>(null)
+  const isSubmitting = savingAction !== null
 
   // ─── Business Info State ───
   const [businessName, setBusinessName] = useState('lexmedia.gh')
@@ -162,7 +166,10 @@ export function InvoiceBuilderModal({
 
   // Load defaults from Brand Profile / Settings or populate from invoiceToEdit / initialDraft
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) {
+      setSavingAction(null)
+      return
+    }
 
     const loadSavedBrandingDefaults = async (preferExistingLogo = '') => {
       try {
@@ -510,6 +517,7 @@ export function InvoiceBuilderModal({
 
   // Save invoice (Draft, Created, or Updated)
   const handleSaveInvoice = async (targetStatus?: InvoiceStatus, sendAfterSave = false) => {
+    if (savingAction) return
     if (!invoiceNumber.trim()) {
       toast.error('Invoice number is required.')
       return
@@ -523,7 +531,13 @@ export function InvoiceBuilderModal({
       return
     }
 
-    setIsSubmitting(true)
+    const actionKind: 'draft' | 'send' | 'save' = sendAfterSave
+      ? 'send'
+      : targetStatus === 'Draft'
+      ? 'draft'
+      : 'save'
+
+    setSavingAction(actionKind)
     const toastId = toast.loading('Saving invoice...')
 
     try {
@@ -572,10 +586,12 @@ export function InvoiceBuilderModal({
           }
           await setDocument(COLLECTIONS.SETTINGS, 'business', bizDefaults, true)
           await setDocument(COLLECTIONS.SETTINGS, 'branding', brandDefaults, true)
-          fetch('/api/branding', {
+          const authHeaders = await getAdminAuthHeaders()
+          await fetchWithTimeout('/api/branding', {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeaders },
             body: JSON.stringify({ business: bizDefaults, branding: brandDefaults }),
+            timeoutMs: 12000,
           }).catch(() => {})
         } catch (bErr) {
           console.warn('Could not persist default business info:', bErr)
@@ -701,16 +717,17 @@ export function InvoiceBuilderModal({
       }
     } catch (err: any) {
       console.error('Save invoice error:', err)
-      toast.error(err.message || 'Failed to save invoice', { id: toastId })
+      toast.error(formatActionError(err, 'Failed to save invoice'), { id: toastId })
     } finally {
-      setIsSubmitting(false)
+      setSavingAction(null)
     }
   }
 
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => !isSubmitting && onClose()}
+      preventClose={isSubmitting}
       title=""
       size="full"
     >
@@ -758,6 +775,8 @@ export function InvoiceBuilderModal({
             <Button
               variant="outline"
               size="sm"
+              loading={savingAction === 'draft'}
+              loadingText="Saving Draft..."
               onClick={() => handleSaveInvoice('Draft')}
               disabled={isSubmitting}
             >
@@ -768,6 +787,8 @@ export function InvoiceBuilderModal({
               variant="outline"
               size="sm"
               icon={<Send size={13} />}
+              loading={savingAction === 'send'}
+              loadingText="Saving & Sending..."
               onClick={() => handleSaveInvoice('Sent', true)}
               disabled={isSubmitting}
               className="text-blue-700 border-blue-200 hover:bg-blue-50"
@@ -779,7 +800,9 @@ export function InvoiceBuilderModal({
               variant="primary"
               size="sm"
               icon={<Save size={13} />}
-              loading={isSubmitting}
+              loading={savingAction === 'save'}
+              loadingText={invoiceToEdit ? 'Updating...' : 'Saving...'}
+              disabled={isSubmitting}
               onClick={() => handleSaveInvoice()}
             >
               {invoiceToEdit ? 'Update Invoice' : 'Save Invoice'}
@@ -1460,6 +1483,8 @@ export function InvoiceBuilderModal({
             <Button
               type="button"
               variant="outline"
+              loading={savingAction === 'draft'}
+              loadingText="Saving Draft..."
               onClick={() => handleSaveInvoice('Draft')}
               disabled={isSubmitting}
             >
@@ -1468,7 +1493,9 @@ export function InvoiceBuilderModal({
             <Button
               type="button"
               variant="primary"
-              loading={isSubmitting}
+              loading={savingAction === 'save'}
+              loadingText={invoiceToEdit ? 'Saving...' : 'Creating...'}
+              disabled={isSubmitting}
               icon={<Save size={14} />}
               onClick={() => handleSaveInvoice()}
             >

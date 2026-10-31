@@ -43,6 +43,7 @@ import {
   appUrl,
   getPaymentLink,
   getProductionUrl,
+  formatActionError,
 } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
@@ -59,7 +60,9 @@ export default function LinksPage() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [revokingLink, setRevokingLink] = useState<ClientLink | null>(null)
   const [deletingLink, setDeletingLink] = useState<ClientLink | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
+  const [isRevoking, setIsRevoking] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   // Form State
   const [formData, setFormData] = useState({
@@ -111,12 +114,13 @@ export default function LinksPage() {
 
   const handleCreateLink = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isCreating) return
     if (!formData.invoiceId) {
       toast.error('Please select an invoice to generate a payment link')
       return
     }
 
-    setIsSubmitting(true)
+    setIsCreating(true)
     try {
       const token = generateSecureToken('pay_')
       await addDocument(COLLECTIONS.CLIENT_LINKS, {
@@ -132,22 +136,25 @@ export default function LinksPage() {
       })
 
       const publicUrl = getPaymentLink(token)
+      const copied = await copyToClipboard(publicUrl)
 
-      toast.success('Payment request link generated successfully.')
-      copyToClipboard(publicUrl)
-      toast.success('Link copied to clipboard!')
+      toast.success(
+        copied
+          ? 'Payment request link generated and copied to clipboard!'
+          : 'Payment request link generated successfully.'
+      )
       setIsAddModalOpen(false)
     } catch (err) {
       console.error('Error generating payment link:', err)
-      toast.error('Failed to create payment link')
+      toast.error(formatActionError(err, 'Failed to create payment link'))
     } finally {
-      setIsSubmitting(false)
+      setIsCreating(false)
     }
   }
 
   const handleRevokeLink = async () => {
-    if (!revokingLink) return
-    setIsSubmitting(true)
+    if (!revokingLink || isRevoking) return
+    setIsRevoking(true)
     try {
       await updateDocument(COLLECTIONS.CLIENT_LINKS, revokingLink.id, {
         status: 'Cancelled',
@@ -156,24 +163,24 @@ export default function LinksPage() {
       setRevokingLink(null)
     } catch (err) {
       console.error('Error revoking link:', err)
-      toast.error('Failed to disable payment link')
+      toast.error(formatActionError(err, 'Failed to disable payment link'))
     } finally {
-      setIsSubmitting(false)
+      setIsRevoking(false)
     }
   }
 
   const handleDeleteLink = async () => {
-    if (!deletingLink) return
-    setIsSubmitting(true)
+    if (!deletingLink || isDeleting) return
+    setIsDeleting(true)
     try {
       await deleteDocument(COLLECTIONS.CLIENT_LINKS, deletingLink.id)
       toast.success('Payment link deleted successfully.')
       setDeletingLink(null)
     } catch (err) {
       console.error('Failed to delete payment link:', err)
-      toast.error('Failed to delete payment link.')
+      toast.error(formatActionError(err, 'Failed to delete payment link.'))
     } finally {
-      setIsSubmitting(false)
+      setIsDeleting(false)
     }
   }
 
@@ -322,9 +329,11 @@ export default function LinksPage() {
                           <div className="flex items-center justify-end gap-1">
                             {/* Copy */}
                             <button
-                              onClick={() => {
-                                copyToClipboard(publicUrl)
-                                toast.success('Payment link copied!')
+                              type="button"
+                              onClick={async () => {
+                                const copied = await copyToClipboard(publicUrl)
+                                if (copied) toast.success('Payment link copied!')
+                                else toast.error('Could not copy link to clipboard.')
                               }}
                               className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
                               title="Copy Link"
@@ -456,9 +465,10 @@ export default function LinksPage() {
 
                       <button
                         type="button"
-                        onClick={() => {
-                          copyToClipboard(publicUrl)
-                          toast.success('Payment link copied!')
+                        onClick={async () => {
+                          const copied = await copyToClipboard(publicUrl)
+                          if (copied) toast.success('Payment link copied!')
+                          else toast.error('Could not copy link to clipboard.')
                         }}
                         className="h-9 px-3 rounded-lg border border-gray-200 bg-white text-gray-700 font-medium flex items-center gap-1 hover:bg-gray-50"
                       >
@@ -509,7 +519,8 @@ export default function LinksPage() {
       {/* Create Payment Request Link Modal */}
       <Modal
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={() => !isCreating && setIsAddModalOpen(false)}
+        preventClose={isCreating}
         title="Create Payment Request Link"
         size="md"
       >
@@ -519,7 +530,8 @@ export default function LinksPage() {
             <select
               value={formData.invoiceId}
               onChange={(e) => handleInvoiceSelect(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-white text-sm focus:ring-2 focus:ring-accent-500 outline-none"
+              disabled={isCreating}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-white text-sm focus:ring-2 focus:ring-accent-500 outline-none disabled:opacity-60"
               required
             >
               <option value="">-- Choose Pending Invoice --</option>
@@ -545,10 +557,20 @@ export default function LinksPage() {
           )}
 
           <div className="flex justify-end gap-3 pt-4 border-t border-border">
-            <Button type="button" variant="outline" onClick={() => setIsAddModalOpen(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isCreating}
+              onClick={() => setIsAddModalOpen(false)}
+            >
               Cancel
             </Button>
-            <Button type="submit" variant="primary" loading={isSubmitting}>
+            <Button
+              type="submit"
+              variant="primary"
+              loading={isCreating}
+              loadingText="Generating..."
+            >
               Generate & Copy Link
             </Button>
           </div>
@@ -558,7 +580,8 @@ export default function LinksPage() {
       {/* Revoke Modal */}
       <Modal
         isOpen={!!revokingLink}
-        onClose={() => setRevokingLink(null)}
+        onClose={() => !isRevoking && setRevokingLink(null)}
+        preventClose={isRevoking}
         title="Disable Payment Link"
         size="sm"
       >
@@ -575,10 +598,19 @@ export default function LinksPage() {
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t border-border">
-            <Button variant="outline" onClick={() => setRevokingLink(null)}>
+            <Button
+              variant="outline"
+              disabled={isRevoking}
+              onClick={() => setRevokingLink(null)}
+            >
               Cancel
             </Button>
-            <Button variant="danger" onClick={handleRevokeLink} loading={isSubmitting}>
+            <Button
+              variant="danger"
+              onClick={handleRevokeLink}
+              loading={isRevoking}
+              loadingText="Disabling..."
+            >
               Disable Link
             </Button>
           </div>
@@ -588,7 +620,8 @@ export default function LinksPage() {
       {/* Delete Confirmation Modal */}
       <Modal
         isOpen={!!deletingLink}
-        onClose={() => setDeletingLink(null)}
+        onClose={() => !isDeleting && setDeletingLink(null)}
+        preventClose={isDeleting}
         title="Delete Payment Link"
         size="sm"
       >
@@ -607,13 +640,18 @@ export default function LinksPage() {
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t border-border">
-            <Button variant="outline" onClick={() => setDeletingLink(null)}>
+            <Button
+              variant="outline"
+              disabled={isDeleting}
+              onClick={() => setDeletingLink(null)}
+            >
               Cancel
             </Button>
             <Button
               variant="danger"
               onClick={handleDeleteLink}
-              loading={isSubmitting}
+              loading={isDeleting}
+              loadingText="Deleting..."
             >
               Delete Link
             </Button>

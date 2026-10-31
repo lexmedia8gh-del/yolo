@@ -28,7 +28,7 @@ import {
 } from '@/lib/firebase/firestore'
 import type { Service, ServiceCategory, ServicePricingType, Package } from '@/lib/types'
 import { OFFICIAL_CATEGORIES, seedOfficialCatalogue } from '@/lib/services/catalogueData'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatActionError } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 export default function ServicesPage() {
@@ -44,6 +44,7 @@ export default function ServicesPage() {
   const [editingService, setEditingService] = useState<Service | null>(null)
   const [deactivatingService, setDeactivatingService] = useState<Service | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isTogglingStatus, setIsTogglingStatus] = useState(false)
 
   // Form State
   const [formData, setFormData] = useState({
@@ -84,6 +85,7 @@ export default function ServicesPage() {
   }, [])
 
   const handleSyncCatalogue = async () => {
+    if (isSyncing) return
     setIsSyncing(true)
     try {
       const res = await seedOfficialCatalogue()
@@ -92,7 +94,7 @@ export default function ServicesPage() {
       )
     } catch (err) {
       console.error('Catalogue sync error:', err)
-      toast.error('Failed to sync catalogue.')
+      toast.error(formatActionError(err, 'Failed to sync catalogue.'))
     } finally {
       setIsSyncing(false)
     }
@@ -135,6 +137,7 @@ export default function ServicesPage() {
 
   const handleSaveService = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
     if (!formData.name.trim()) {
       toast.error('Please enter the service name')
       return
@@ -179,16 +182,16 @@ export default function ServicesPage() {
       resetForm()
     } catch (err) {
       console.error('Error saving service:', err)
-      toast.error('Failed to save service.')
+      toast.error(formatActionError(err, 'Failed to save service.'))
     } finally {
       setIsSubmitting(false)
     }
   }
 
   const handleToggleStatus = async () => {
-    if (!deactivatingService) return
+    if (!deactivatingService || isTogglingStatus) return
     const newStatus = deactivatingService.status === 'active' ? 'inactive' : 'active'
-    setIsSubmitting(true)
+    setIsTogglingStatus(true)
     try {
       await updateDocument(COLLECTIONS.SERVICES, deactivatingService.id, {
         status: newStatus,
@@ -202,9 +205,9 @@ export default function ServicesPage() {
       setDeactivatingService(null)
     } catch (err) {
       console.error('Error toggling service status:', err)
-      toast.error('Failed to update service status.')
+      toast.error(formatActionError(err, 'Failed to update service status.'))
     } finally {
-      setIsSubmitting(false)
+      setIsTogglingStatus(false)
     }
   }
 
@@ -239,6 +242,7 @@ export default function ServicesPage() {
               variant="outline"
               size="md"
               loading={isSyncing}
+              loadingText="Syncing..."
               icon={<RefreshCw size={15} />}
             >
               Sync Official Catalogue
@@ -305,7 +309,14 @@ export default function ServicesPage() {
             </p>
           </div>
           <div className="flex items-center justify-center gap-3 pt-2">
-            <Button onClick={handleSyncCatalogue} variant="outline" size="sm" icon={<RefreshCw size={14} />}>
+            <Button
+              onClick={handleSyncCatalogue}
+              variant="outline"
+              size="sm"
+              loading={isSyncing}
+              loadingText="Syncing..."
+              icon={<RefreshCw size={14} />}
+            >
               Sync Official Catalogue
             </Button>
             <Button onClick={openAddModal} variant="primary" size="sm" icon={<Plus size={14} />}>
@@ -418,7 +429,8 @@ export default function ServicesPage() {
       {/* Add / Edit Service Modal */}
       <Modal
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={() => !isSubmitting && setIsAddModalOpen(false)}
+        preventClose={isSubmitting}
         title={editingService ? 'Edit Service' : 'Add Service'}
         size="md"
       >
@@ -509,10 +521,22 @@ export default function ServicesPage() {
             </label>
 
             <div className="flex items-center gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={() => setIsAddModalOpen(false)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={isSubmitting}
+                onClick={() => setIsAddModalOpen(false)}
+              >
                 Cancel
               </Button>
-              <Button type="submit" variant="primary" size="sm" loading={isSubmitting}>
+              <Button
+                type="submit"
+                variant="primary"
+                size="sm"
+                loading={isSubmitting}
+                loadingText={editingService ? 'Saving...' : 'Creating...'}
+              >
                 {editingService ? 'Save Changes' : 'Create Service'}
               </Button>
             </div>
@@ -523,7 +547,8 @@ export default function ServicesPage() {
       {/* Deactivate / Reactivate Modal */}
       <Modal
         isOpen={!!deactivatingService}
-        onClose={() => setDeactivatingService(null)}
+        onClose={() => !isTogglingStatus && setDeactivatingService(null)}
+        preventClose={isTogglingStatus}
         title={deactivatingService?.status === 'active' ? 'Deactivate Service' : 'Activate Service'}
         size="sm"
       >
@@ -534,13 +559,19 @@ export default function ServicesPage() {
             <strong>{deactivatingService?.name}</strong>?
           </p>
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100 dark:border-gray-800">
-            <Button variant="ghost" size="sm" onClick={() => setDeactivatingService(null)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={isTogglingStatus}
+              onClick={() => setDeactivatingService(null)}
+            >
               Cancel
             </Button>
             <Button
               variant={deactivatingService?.status === 'active' ? 'danger' : 'primary'}
               size="sm"
-              loading={isSubmitting}
+              loading={isTogglingStatus}
+              loadingText={deactivatingService?.status === 'active' ? 'Deactivating...' : 'Activating...'}
               onClick={handleToggleStatus}
             >
               {deactivatingService?.status === 'active' ? 'Deactivate' : 'Activate'}

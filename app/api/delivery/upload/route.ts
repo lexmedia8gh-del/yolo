@@ -132,23 +132,14 @@ export async function POST(req: NextRequest) {
       uploadedBy: 'admin',
     }
 
-    try {
-      const adminDb = getAdminDb()
-      await adminDb.collection(COLLECTIONS.DELIVERY_FILES).doc(id).set({
+    const adminDb = getAdminDb()
+    await adminDb.collection(COLLECTIONS.DELIVERY_FILES).doc(id).set(
+      {
         ...fileRecord,
         uploadedAt: FieldValue.serverTimestamp(),
-      })
-    } catch (adminDbErr: any) {
-      console.warn('[Delivery Upload] Admin Firestore set warning, using client SDK fallback:', adminDbErr?.message)
-      const { doc, setDoc, serverTimestamp } = await import('firebase/firestore')
-      const { db, isFirebaseConfigured } = await import('@/lib/firebase/config')
-      if (isFirebaseConfigured) {
-        await setDoc(doc(db, COLLECTIONS.DELIVERY_FILES, id), {
-          ...fileRecord,
-          uploadedAt: serverTimestamp(),
-        })
-      }
-    }
+      },
+      { merge: true }
+    )
 
     // If this is for a Quick Job, synchronize the Quick Job status
     if (quickJobId) {
@@ -188,7 +179,7 @@ export async function POST(req: NextRequest) {
           updatedAt: FieldValue.serverTimestamp(),
         }
 
-        await deliveryRef.update(updates)
+        await deliveryRef.set(updates, { merge: true })
 
         // Check if transitioning to "Ready for Delivery" or if email not yet sent
         if (nextStatus === 'Ready for Delivery' && !deliveryData.uploadEmailSent) {
@@ -335,11 +326,14 @@ export async function POST(req: NextRequest) {
             })
 
             if (emailRes.success) {
-              await deliveryRef.update({
-                uploadEmailSent: true,
-                uploadEmailSentAt: FieldValue.serverTimestamp(),
-                uploadEmailMessageId: emailRes.messageId || null,
-              })
+              await deliveryRef.set(
+                {
+                  uploadEmailSent: true,
+                  uploadEmailSentAt: FieldValue.serverTimestamp(),
+                  uploadEmailMessageId: emailRes.messageId || null,
+                },
+                { merge: true }
+              )
               emailNotificationStatus = { sent: true, messageId: emailRes.messageId }
             } else {
               emailNotificationStatus = { sent: false, error: emailRes.error }

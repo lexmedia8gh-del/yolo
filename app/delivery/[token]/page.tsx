@@ -33,7 +33,14 @@ import {
   Eye,
   MessageSquare,
 } from 'lucide-react'
-import { formatCurrency, formatFileSize, formatDate, getFileCategory } from '@/lib/utils'
+import {
+  formatCurrency,
+  formatFileSize,
+  formatDate,
+  getFileCategory,
+  fetchWithTimeout,
+  formatActionError,
+} from '@/lib/utils'
 import { Spinner } from '@/components/ui/Spinner'
 import { BrandingProvider, useBranding } from '@/lib/contexts/BrandingContext'
 import toast from 'react-hot-toast'
@@ -113,6 +120,7 @@ function ClientDeliveryPageInner() {
 
   // Download progress states
   const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null)
+  const [confirmingFileId, setConfirmingFileId] = useState<string | null>(null)
   const [downloadingConfirmFileId, setDownloadingConfirmFileId] = useState<string | null>(null)
   const [downloadingAll, setDownloadingAll] = useState(false)
 
@@ -138,10 +146,11 @@ function ClientDeliveryPageInner() {
   const verifyAndLoad = async (reference: string) => {
     setLoading(true)
     try {
-      const verifyRes = await fetch(
-        `/api/paystack/verify?reference=${encodeURIComponent(reference)}&token=${encodeURIComponent(token)}`
+      const verifyRes = await fetchWithTimeout(
+        `/api/paystack/verify?reference=${encodeURIComponent(reference)}&token=${encodeURIComponent(token)}`,
+        { timeoutMs: 15000 }
       )
-      const verifyData = await verifyRes.json()
+      const verifyData = await verifyRes.json().catch(() => ({}))
       if (verifyRes.ok && verifyData.status === 'success') {
         toast.success('Payment verified successfully!')
         window.history.replaceState({}, '', window.location.pathname)
@@ -150,8 +159,9 @@ function ClientDeliveryPageInner() {
       }
     } catch (err) {
       console.error('Verification error:', err)
+      toast.error(formatActionError(err, 'Payment verification failed'))
     } finally {
-      loadDelivery()
+      await loadDelivery()
     }
   }
 
@@ -162,8 +172,10 @@ function ClientDeliveryPageInner() {
     setIsLocked(false)
 
     try {
-      const res = await fetch(`/api/delivery/${encodeURIComponent(token)}`)
-      const data = await res.json()
+      const res = await fetchWithTimeout(`/api/delivery/${encodeURIComponent(token)}`, {
+        timeoutMs: 15000,
+      })
+      const data = await res.json().catch(() => ({}))
 
       if (res.status === 410 || data.isExpired) {
         setIsExpired(true)
@@ -189,17 +201,18 @@ function ClientDeliveryPageInner() {
       }
     } catch (err) {
       console.error('Error loading delivery:', err)
-      setErrorMsg('A network error occurred while connecting to the server.')
+      setErrorMsg(formatActionError(err, 'A network error occurred while connecting to the server.'))
     } finally {
       setLoading(false)
     }
   }
 
   const handlePayRemaining = async () => {
-    if (!financials || financials.remainingBalance <= 0) return
+    if (!financials || financials.remainingBalance <= 0 || isProcessingPayment) return
     setIsProcessingPayment(true)
+    let redirecting = false
     try {
-      const res = await fetch('/api/paystack/initialize', {
+      const res = await fetchWithTimeout('/api/paystack/initialize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -210,28 +223,37 @@ function ClientDeliveryPageInner() {
           clientName: delivery?.clientName || 'Client',
           callbackPath: '/delivery/',
         }),
+        timeoutMs: 15000,
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (!res.ok || !data.authorization_url) {
         throw new Error(data.error || 'Failed to initialize payment')
       }
+      redirecting = true
       window.location.href = data.authorization_url
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Payment initialization error:', err)
-      toast.error(err.message || 'Failed to start payment. Please try again.')
-      setIsProcessingPayment(false)
+      toast.error(formatActionError(err, 'Failed to start payment. Please try again.'))
+    } finally {
+      if (!redirecting) {
+        setIsProcessingPayment(false)
+      } else {
+        window.setTimeout(() => setIsProcessingPayment(false), 8000)
+      }
     }
   }
 
   const handleDownloadSingle = async (file: DeliveryFileDTO) => {
+    if (downloadingFileId === file.id || confirmingFileId === file.id) return
     setDownloadingFileId(file.id)
     try {
-      const res = await fetch('/api/delivery/download', {
+      const res = await fetchWithTimeout('/api/delivery/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, fileId: file.id }),
+        timeoutMs: 15000,
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
 
       if (!res.ok || !data.downloadUrl) {
         toast.error(data.error || 'Failed to download file.')
@@ -264,21 +286,23 @@ function ClientDeliveryPageInner() {
       setDownloadingConfirmFileId(file.id)
     } catch (err) {
       console.error('Download error:', err)
-      toast.error('Download failed. Please try again.')
+      toast.error(formatActionError(err, 'Download failed. Please try again.'))
     } finally {
       setDownloadingFileId(null)
     }
   }
 
   const handleConfirmDownload = async (fileId: string) => {
+    if (confirmingFileId === fileId) return
     try {
-      setDownloadingFileId(fileId)
-      const res = await fetch('/api/delivery/confirm-download', {
+      setConfirmingFileId(fileId)
+      const res = await fetchWithTimeout('/api/delivery/confirm-download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, fileId }),
+        timeoutMs: 15000,
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
 
       if (!res.ok) {
         toast.error(data.error || 'Failed to confirm download.')
@@ -290,26 +314,27 @@ function ClientDeliveryPageInner() {
       setDownloadingConfirmFileId(null)
     } catch (err) {
       console.error('Confirm error:', err)
-      toast.error('Failed to confirm download.')
+      toast.error(formatActionError(err, 'Failed to confirm download.'))
     } finally {
-      setDownloadingFileId(null)
+      setConfirmingFileId(null)
     }
   }
 
   const handleDownloadAll = async () => {
-    if (files.length === 0) return
+    if (files.length === 0 || downloadingAll) return
     setDownloadingAll(true)
-
-    toast.success(`Starting download for ${files.length} files...`)
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
-      await handleDownloadSingle(file)
-      if (i < files.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 800))
+    try {
+      toast.success(`Starting download for ${files.length} files...`)
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        await handleDownloadSingle(file)
+        if (i < files.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 800))
+        }
       }
+    } finally {
+      setDownloadingAll(false)
     }
-
-    setDownloadingAll(false)
   }
 
   // File categorization helper
@@ -530,7 +555,8 @@ function ClientDeliveryPageInner() {
                 <button
                   onClick={handlePayRemaining}
                   disabled={isProcessingPayment}
-                  className="w-full py-4 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-base transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2.5 cursor-pointer active:scale-[0.99] disabled:opacity-60"
+                  aria-busy={isProcessingPayment || undefined}
+                  className="w-full py-4 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-base transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2.5 cursor-pointer active:scale-[0.99] disabled:opacity-65 disabled:cursor-wait"
                 >
                   {isProcessingPayment ? (
                     <>
@@ -747,7 +773,8 @@ function ClientDeliveryPageInner() {
                     <button
                       onClick={handleDownloadAll}
                       disabled={downloadingAll}
-                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all shadow-lg shadow-indigo-600/25 active:scale-[0.98] disabled:opacity-60 cursor-pointer"
+                      aria-busy={downloadingAll || undefined}
+                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all shadow-lg shadow-indigo-600/25 active:scale-[0.98] disabled:opacity-65 disabled:cursor-wait cursor-pointer"
                     >
                       {downloadingAll ? (
                         <>
@@ -892,7 +919,8 @@ function ClientDeliveryPageInner() {
                   <button
                     onClick={() => handleDownloadSingle(currentImg)}
                     disabled={downloadingFileId === currentImg.id}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
+                    aria-busy={downloadingFileId === currentImg.id || undefined}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-all shadow-md active:scale-95 disabled:opacity-65 disabled:cursor-wait cursor-pointer"
                   >
                     {downloadingFileId === currentImg.id ? (
                       <>
@@ -922,10 +950,21 @@ function ClientDeliveryPageInner() {
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => handleDownloadSingle(currentLightboxImg)}
-                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all"
+                    disabled={downloadingFileId === currentLightboxImg.id}
+                    aria-busy={downloadingFileId === currentLightboxImg.id || undefined}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-65 disabled:cursor-wait cursor-pointer"
                   >
-                    <Download size={14} />
-                    <span className="hidden sm:inline">Download</span>
+                    {downloadingFileId === currentLightboxImg.id ? (
+                      <>
+                        <Spinner size="sm" />
+                        <span className="hidden sm:inline">Downloading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download size={14} />
+                        <span className="hidden sm:inline">Download</span>
+                      </>
+                    )}
                   </button>
                   <button
                     onClick={() => setLightboxOpen(false)}
@@ -1036,10 +1075,11 @@ function ClientDeliveryPageInner() {
                               <p className="text-[11px] text-amber-400 font-medium">Download started. Click to confirm:</p>
                               <button
                                 onClick={() => handleConfirmDownload(file.id)}
-                                disabled={downloadingFileId === file.id}
-                                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white border border-amber-500 hover:border-amber-400 text-xs font-bold transition-all disabled:opacity-50 cursor-pointer shadow-sm active:scale-95"
+                                disabled={confirmingFileId === file.id}
+                                aria-busy={confirmingFileId === file.id || undefined}
+                                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white border border-amber-500 hover:border-amber-400 text-xs font-bold transition-all disabled:opacity-65 disabled:cursor-wait cursor-pointer shadow-sm active:scale-95"
                               >
-                                {downloadingFileId === file.id ? (
+                                {confirmingFileId === file.id ? (
                                   <>
                                     <Spinner size="sm" />
                                     <span>Confirming...</span>
@@ -1056,7 +1096,8 @@ function ClientDeliveryPageInner() {
                             <button
                               onClick={() => handleDownloadSingle(file)}
                               disabled={isDownloadingThis || downloadingAll}
-                              className="w-full sm:mt-0 mt-3 sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-indigo-600 text-slate-200 hover:text-white border border-slate-700 hover:border-indigo-500 text-xs font-bold transition-all disabled:opacity-50 cursor-pointer shadow-sm active:scale-95"
+                              aria-busy={isDownloadingThis || undefined}
+                              className="w-full sm:mt-0 mt-3 sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-indigo-600 text-slate-200 hover:text-white border border-slate-700 hover:border-indigo-500 text-xs font-bold transition-all disabled:opacity-65 disabled:cursor-wait cursor-pointer shadow-sm active:scale-95"
                             >
                               {isDownloadingThis ? (
                                 <>

@@ -12,9 +12,10 @@ import {
   Calendar,
   CheckCircle2,
 } from 'lucide-react'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, formatActionError } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
+import toast from 'react-hot-toast'
 import type {
   FinancialSummaryKPIs,
   MonthlyRevenueData,
@@ -48,42 +49,54 @@ export function ReportsView({
   filter,
 }: ReportsViewProps) {
   const [activeReport, setActiveReport] = useState<ReportType>('financial')
+  const [isExportingCsv, setIsExportingCsv] = useState(false)
 
   const handlePrint = () => {
     window.print()
   }
 
-  const exportCurrentReportCSV = () => {
-    let csvContent = 'data:text/csv;charset=utf-8,'
-    if (activeReport === 'financial') {
-      csvContent += 'Month,Projects,Invoiced (GHS),Paid (GHS),Outstanding (GHS)\n'
-      monthlyRevenue.forEach((m) => {
-        csvContent += `"${m.month}",${m.projectCount},${m.invoiced.toFixed(2)},${m.paid.toFixed(2)},${m.outstanding.toFixed(2)}\n`
-      })
-    } else if (activeReport === 'clients') {
-      csvContent += 'Client Name,Company,Email,Phone,Projects,Total Billed (GHS),Total Paid (GHS),Outstanding (GHS)\n'
-      clientList.forEach((c) => {
-        csvContent += `"${c.name}","${c.company || ''}","${c.email || ''}","${c.phone || ''}",${c.projectCount},${c.totalBilled.toFixed(2)},${c.totalPaid.toFixed(2)},${c.outstanding.toFixed(2)}\n`
-      })
-    } else if (activeReport === 'projects') {
-      csvContent += 'Project Name,Client,Service,Status,Payment Status,Price (GHS),Amount Paid (GHS)\n'
-      projects.forEach((p) => {
-        csvContent += `"${p.name}","${p.clientName || ''}","${p.serviceName || ''}","${p.status}","${p.paymentStatus}",${(p.price || 0).toFixed(2)},${(p.amountPaid || 0).toFixed(2)}\n`
-      })
-    } else if (activeReport === 'services') {
-      csvContent += 'Service Category,Projects Count,Total Revenue (GHS),Total Paid (GHS),Outstanding (GHS),Avg Value (GHS)\n'
-      servicePerformance.forEach((s) => {
-        csvContent += `"${s.serviceName}",${s.projectCount},${s.totalRevenue.toFixed(2)},${s.totalPaid.toFixed(2)},${s.outstanding.toFixed(2)},${s.avgProjectValue.toFixed(2)}\n`
-      })
-    }
+  const exportCurrentReportCSV = async () => {
+    if (isExportingCsv) return
+    setIsExportingCsv(true)
+    try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      let csvContent = 'data:text/csv;charset=utf-8,'
+      if (activeReport === 'financial') {
+        csvContent += 'Month,Projects,Invoiced (GHS),Paid (GHS),Outstanding (GHS)\n'
+        monthlyRevenue.forEach((m) => {
+          csvContent += `"${m.month}",${m.projectCount},${m.invoiced.toFixed(2)},${m.paid.toFixed(2)},${m.outstanding.toFixed(2)}\n`
+        })
+      } else if (activeReport === 'clients') {
+        csvContent += 'Client Name,Company,Email,Phone,Projects,Total Billed (GHS),Total Paid (GHS),Outstanding (GHS)\n'
+        clientList.forEach((c) => {
+          csvContent += `"${c.name}","${c.company || ''}","${c.email || ''}","${c.phone || ''}",${c.projectCount},${c.totalBilled.toFixed(2)},${c.totalPaid.toFixed(2)},${c.outstanding.toFixed(2)}\n`
+        })
+      } else if (activeReport === 'projects') {
+        csvContent += 'Project Name,Client,Service,Status,Payment Status,Price (GHS),Amount Paid (GHS)\n'
+        projects.forEach((p) => {
+          csvContent += `"${p.name}","${p.clientName || ''}","${p.serviceName || ''}","${p.status}","${p.paymentStatus}",${(p.price || 0).toFixed(2)},${(p.amountPaid || 0).toFixed(2)}\n`
+        })
+      } else if (activeReport === 'services') {
+        csvContent += 'Service Category,Projects Count,Total Revenue (GHS),Total Paid (GHS),Outstanding (GHS),Avg Value (GHS)\n'
+        servicePerformance.forEach((s) => {
+          csvContent += `"${s.serviceName}",${s.projectCount},${s.totalRevenue.toFixed(2)},${s.totalPaid.toFixed(2)},${s.outstanding.toFixed(2)},${s.avgProjectValue.toFixed(2)}\n`
+        })
+      }
 
-    const encodedUri = encodeURI(csvContent)
-    const link = document.createElement('a')
-    link.setAttribute('href', encodedUri)
-    link.setAttribute('download', `LEXMEDIA.GH_${activeReport}_report.csv`)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+      const encodedUri = encodeURI(csvContent)
+      const link = document.createElement('a')
+      link.setAttribute('href', encodedUri)
+      link.setAttribute('download', `LEXMEDIA.GH_${activeReport}_report.csv`)
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      toast.success(`Exported ${activeReport} report (.csv)`)
+    } catch (err) {
+      console.error('CSV export error:', err)
+      toast.error(formatActionError(err, 'Failed to export CSV report.'))
+    } finally {
+      setIsExportingCsv(false)
+    }
   }
 
   return (
@@ -120,7 +133,14 @@ export function ReportsView({
 
         {/* Export / Print Actions */}
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={exportCurrentReportCSV} icon={<Download size={14} />}>
+          <Button
+            variant="outline"
+            size="sm"
+            loading={isExportingCsv}
+            loadingText="Exporting..."
+            onClick={exportCurrentReportCSV}
+            icon={<Download size={14} />}
+          >
             Export CSV
           </Button>
           <Button variant="outline" size="sm" onClick={handlePrint} icon={<Printer size={14} />}>

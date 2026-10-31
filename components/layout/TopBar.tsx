@@ -9,8 +9,9 @@ import {
   Settings,
   User,
   ChevronDown,
+  Loader2,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatActionError } from '@/lib/utils'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { signOut } from '@/lib/firebase/auth'
 import { Avatar } from '@/components/ui/Avatar'
@@ -27,6 +28,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
   const router = useRouter()
   const pathname = usePathname()
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const [isSigningOut, setIsSigningOut] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   const getPageTitle = (path: string | null) => {
@@ -59,12 +61,15 @@ export function TopBar({ onMenuClick }: TopBarProps) {
   }, [])
 
   const handleSignOut = async () => {
+    if (isSigningOut) return
+    setIsSigningOut(true)
     try {
       await signOut()
       toast.success('Signed out successfully')
       window.location.assign('/login')
-    } catch {
-      toast.error('Failed to sign out')
+    } catch (err) {
+      toast.error(formatActionError(err, 'Failed to sign out'))
+      setIsSigningOut(false)
     }
   }
 
@@ -150,10 +155,12 @@ export function TopBar({ onMenuClick }: TopBarProps) {
                 <div className="border-t border-gray-100 dark:border-gray-800 mt-1">
                   <button
                     onClick={handleSignOut}
-                    className="flex w-full items-center gap-2 px-3.5 py-2 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
+                    disabled={isSigningOut}
+                    aria-busy={isSigningOut || undefined}
+                    className="flex w-full items-center gap-2 px-3.5 py-2 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors disabled:opacity-70 disabled:cursor-wait"
                   >
-                    <LogOut size={14} />
-                    Sign Out
+                    {isSigningOut ? <Loader2 size={14} className="animate-spin" /> : <LogOut size={14} />}
+                    {isSigningOut ? 'Signing Out...' : 'Sign Out'}
                   </button>
                 </div>
               </div>

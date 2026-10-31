@@ -716,6 +716,7 @@ export function QuickInfoCheckCard({
             type="button"
             variant="outline"
             onClick={onApplyToForm}
+            disabled={isSubmitting}
             icon={<FileText size={14} />}
           >
             Review in Full Form
@@ -727,6 +728,7 @@ export function QuickInfoCheckCard({
               variant="primary"
               disabled={!isReadyToCreate || isSubmitting}
               loading={isSubmitting}
+              loadingText="Creating Client..."
               onClick={onDirectCreate}
               icon={<ArrowRight size={15} />}
             >

@@ -32,6 +32,7 @@ import {
   getProductionUrl,
   validateAppUrl,
   isVercelPlatformDomain,
+  formatActionError,
 } from '@/lib/utils'
 import { PreparePaymentMessageModal } from './PreparePaymentMessageModal'
 import toast from 'react-hot-toast'
@@ -89,7 +90,11 @@ export function PaymentLinkModal({
 
   // Load clients, projects, invoices
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) {
+      setSubmitting(false)
+      setCreatedLink(null)
+      return
+    }
     let active = true
 
     async function loadData() {
@@ -147,6 +152,7 @@ export function PaymentLinkModal({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (submitting) return
 
     if (!selectedClientId) {
       toast.error('Please select a client to associate this payment link with')
@@ -196,13 +202,13 @@ export function PaymentLinkModal({
       const finalUrl = (linkSource === 'custom' && !isVercelPlatformDomain(customUrl.trim()))
         ? getProductionUrl(customUrl.trim())
         : getPaymentLink(token)
-      copyToClipboard(finalUrl)
+      const copiedOk = await copyToClipboard(finalUrl)
 
-      toast.success('Payment link saved & copied to clipboard!')
+      toast.success(copiedOk ? 'Payment link saved & copied to clipboard!' : 'Payment link saved!')
       if (onSuccess) onSuccess(savedLink)
     } catch (err: any) {
       console.error('Error saving payment link:', err)
-      toast.error(err.message || 'Failed to save payment link.')
+      toast.error(formatActionError(err, 'Failed to save payment link.'))
     } finally {
       setSubmitting(false)
     }
@@ -220,7 +226,8 @@ export function PaymentLinkModal({
     <>
       <Modal
         isOpen={isOpen}
-        onClose={onClose}
+        onClose={() => !submitting && onClose()}
+        preventClose={submitting}
         title={createdLink ? 'Payment Link Ready' : 'Save / Associate Payment Link'}
         subtitle="Associate custom user-supplied payment links or studio portal links with clients."
         size="lg"
@@ -246,10 +253,14 @@ export function PaymentLinkModal({
                 <button
                   type="button"
                   onClick={async () => {
-                    await copyToClipboard(activeUrl)
-                    setCopied(true)
-                    toast.success('Copied to clipboard!')
-                    setTimeout(() => setCopied(false), 2000)
+                    const ok = await copyToClipboard(activeUrl)
+                    if (ok) {
+                      setCopied(true)
+                      toast.success('Copied to clipboard!')
+                      setTimeout(() => setCopied(false), 2000)
+                    } else {
+                      toast.error('Failed to copy link.')
+                    }
                   }}
                   className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-white border border-gray-200 hover:bg-gray-100 text-gray-700 flex items-center gap-1 shrink-0"
                 >
@@ -462,6 +473,7 @@ export function PaymentLinkModal({
                 size="sm"
                 type="submit"
                 loading={submitting}
+                loadingText="Saving..."
                 icon={<Link2 size={14} />}
               >
                 Save Payment Link

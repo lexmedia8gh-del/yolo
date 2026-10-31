@@ -30,7 +30,9 @@ import {
 import { DEFAULT_DISPATCH_TEMPLATES, substitutePlaceholders, type MessageTemplate } from '@/lib/templates/dispatchTemplates'
 import { getAdminAuthHeaders } from '@/lib/firebase/auth'
 import { getDocuments, COLLECTIONS } from '@/lib/firebase/firestore'
+import { fetchWithTimeout, formatActionError } from '@/lib/utils'
 import type { Project } from '@/lib/types'
+import toast from 'react-hot-toast'
 
 export interface ClientTarget {
   id: string
@@ -117,6 +119,10 @@ export function MultiChannelDispatchModal({
 
   // Initialize selected client when modal opens or initialClient prop changes
   useEffect(() => {
+    if (!isOpen) {
+      setIsSending(false)
+      return
+    }
     if (initialClient?.id) {
       setSelectedClientIds([initialClient.id])
     } else if (clientList.length > 0) {
@@ -130,13 +136,27 @@ export function MultiChannelDispatchModal({
 
     async function loadWorkspaceData() {
       try {
-        // 1. Fetch Branding
         const authHeaders = await getAdminAuthHeaders()
-        const brandingRes = await fetch('/api/admin/brevo/status', { headers: authHeaders }).catch(() => null)
-        // Also fetch branding document from Firestore if possible via client SDK
+        const brandingRes = await fetchWithTimeout('/api/branding', {
+          headers: authHeaders,
+          timeoutMs: 10000,
+        }).catch(() => null)
+        if (brandingRes?.ok) {
+          const brandingJson = await brandingRes.json().catch(() => null)
+          if (brandingJson?.branding) {
+            const b = brandingJson.branding
+            setBrandingSettings((prev) => ({
+              businessName: b.businessName || prev.businessName,
+              logoUrl: b.logoUrl || b.logoLightUrl || prev.logoUrl,
+              primaryColor: b.buttonColor || b.primaryColor || prev.primaryColor,
+              secondaryColor: b.secondaryColor || prev.secondaryColor,
+              accentColor: b.accentColor || prev.accentColor,
+            }))
+          }
+        }
+
         const fetchedProjects = await getDocuments<Project>(COLLECTIONS.PROJECTS)
         if (Array.isArray(fetchedProjects)) {
-          // If primary client selected, filter projects for that client
           const primaryId = selectedClientIds[0]
           if (primaryId) {
             const filtered = fetchedProjects.filter((p: any) => p.clientId === primaryId)
@@ -273,7 +293,7 @@ export function MultiChannelDispatchModal({
       const url = primaryClientId
         ? `/api/dispatch?clientId=${encodeURIComponent(primaryClientId)}`
         : '/api/dispatch?limit=15'
-      const res = await fetch(url, { headers: authHeaders })
+      const res = await fetchWithTimeout(url, { headers: authHeaders, timeoutMs: 12000 })
       if (res.ok) {
         const json = await res.json()
         if (json?.ok && Array.isArray(json.history)) {
@@ -281,6 +301,7 @@ export function MultiChannelDispatchModal({
         }
       }
     } catch {
+      // Non-blocking history fetch
     } finally {
       setIsLoadingHistory(false)
     }
@@ -328,23 +349,30 @@ export function MultiChannelDispatchModal({
 
   // Execute Batch Dispatch with Guaranteed finally loading reset
   const handleSendDispatch = async () => {
+    if (isSending) return
     setStatusMessage(null)
     setDispatchResults([])
 
     if (activeRecipients.length === 0) {
-      setStatusMessage({ type: 'error', text: 'Please select at least one recipient.' })
+      const msg = 'Please select at least one recipient.'
+      setStatusMessage({ type: 'error', text: msg })
+      toast.error(msg)
       return
     }
 
     if (!body.trim()) {
-      setStatusMessage({ type: 'error', text: 'Message body content cannot be empty.' })
+      const msg = 'Message body content cannot be empty.'
+      setStatusMessage({ type: 'error', text: msg })
+      toast.error(msg)
       return
     }
 
     if (channel === 'email') {
       const missingEmails = activeRecipients.filter((r) => !r.recipientEmail || !r.recipientEmail.includes('@'))
       if (missingEmails.length === activeRecipients.length) {
-        setStatusMessage({ type: 'error', text: 'All selected recipients lack a valid email address.' })
+        const msg = 'All selected recipients lack a valid email address.'
+        setStatusMessage({ type: 'error', text: msg })
+        toast.error(msg)
         return
       }
     }
@@ -352,7 +380,9 @@ export function MultiChannelDispatchModal({
     if (channel === 'sms') {
       const missingPhones = activeRecipients.filter((r) => !r.recipientPhone)
       if (missingPhones.length === activeRecipients.length) {
-        setStatusMessage({ type: 'error', text: 'All selected recipients lack a phone number for SMS.' })
+        const msg = 'All selected recipients lack a phone number for SMS.'
+        setStatusMessage({ type: 'error', text: msg })
+        toast.error(msg)
         return
       }
     }
@@ -361,7 +391,7 @@ export function MultiChannelDispatchModal({
 
     try {
       const authHeaders = await getAdminAuthHeaders()
-      const res = await fetch('/api/dispatch', {
+      const res = await fetchWithTimeout('/api/dispatch', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -378,6 +408,7 @@ export function MultiChannelDispatchModal({
           invoiceNumber,
           outstandingBalance,
         }),
+        timeoutMs: 25000,
       })
 
       const data = await res.json()
@@ -390,32 +421,44 @@ export function MultiChannelDispatchModal({
         setDispatchResults(data.results)
       }
 
-      const sentCount = data.sentCount || (data.ok ? activeRecipients.length : 0)
-      const failedCount = data.failedCount || 0
+      const sentCount = data.sentCount ?? (data.ok ? activeRecipients.length : 0)
+      const failedCount = data.failedCount ?? 0
 
-      if (sentCount > 0) {
-        setStatusMessage({
-          type: 'success',
-          text: `Message Sent Successfully! (${sentCount} sent${failedCount > 0 ? `, ${failedCount} failed` : ''})`,
-        })
+      if (sentCount > 0 && failedCount === 0) {
+        const msg = `Message dispatched successfully to ${sentCount} recipient${sentCount === 1 ? '' : 's'}!`
+        setStatusMessage({ type: 'success', text: msg })
+        toast.success(msg)
+      } else if (sentCount > 0 && failedCount > 0) {
+        const msg = `Partial dispatch: ${sentCount} sent, ${failedCount} failed. Review recipient results below.`
+        setStatusMessage({ type: 'success', text: msg })
+        toast.error(msg)
       } else {
-        setStatusMessage({
-          type: 'error',
-          text: `Dispatch failed for all recipients. ${data.error || ''}`,
-        })
+        const msg = `Dispatch failed for all recipients.${data.error ? ` ${data.error}` : ''}`
+        setStatusMessage({ type: 'error', text: msg })
+        toast.error(msg)
       }
 
       void fetchHistory()
       if (onSuccess && sentCount > 0) onSuccess()
     } catch (err: any) {
-      setStatusMessage({ type: 'error', text: err?.message || 'Failed to process dispatch delivery.' })
+      const msg = formatActionError(err, 'Failed to process dispatch delivery.')
+      setStatusMessage({ type: 'error', text: msg })
+      toast.error(msg)
     } finally {
       setIsSending(false)
     }
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Multi-Channel Dispatch Workspace" size="xl">
+    <Modal
+      isOpen={isOpen}
+      onClose={() => {
+        if (!isSending) onClose()
+      }}
+      preventClose={isSending}
+      title="Multi-Channel Dispatch Workspace"
+      size="xl"
+    >
       <div className="space-y-5">
         {/* Workspace Top Tabs */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -843,6 +886,7 @@ export function MultiChannelDispatchModal({
               <Button
                 type="button"
                 variant="outline"
+                disabled={isSending}
                 onClick={onClose}
                 className="border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800 text-xs"
               >
@@ -852,20 +896,13 @@ export function MultiChannelDispatchModal({
               <Button
                 type="button"
                 onClick={handleSendDispatch}
+                loading={isSending}
+                loadingText={`Dispatching (${activeRecipients.length})...`}
                 disabled={isSending || activeRecipients.length === 0}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-6 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 flex items-center gap-2"
+                icon={<Send className="w-4 h-4" />}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-6 py-2.5 rounded-xl shadow-lg shadow-blue-600/20"
               >
-                {isSending ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Dispatching to {activeRecipients.length} Recipient(s)...</span>
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4" />
-                    <span>Dispatch Message ({activeRecipients.length} Target{activeRecipients.length === 1 ? '' : 's'})</span>
-                  </>
-                )}
+                Dispatch Message ({activeRecipients.length} Target{activeRecipients.length === 1 ? '' : 's'})
               </Button>
             </div>
           </div>
@@ -977,11 +1014,12 @@ export function MultiChannelDispatchModal({
               </span>
               <button
                 type="button"
+                disabled={isLoadingHistory}
                 onClick={fetchHistory}
-                className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1"
+                className="text-[11px] text-slate-400 hover:text-white disabled:opacity-50 flex items-center gap-1"
               >
                 <RefreshCw className={`w-3 h-3 ${isLoadingHistory ? 'animate-spin' : ''}`} />
-                Refresh Logs
+                {isLoadingHistory ? 'Refreshing...' : 'Refresh Logs'}
               </button>
             </div>
 

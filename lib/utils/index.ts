@@ -267,6 +267,103 @@ export function getFirebaseErrorMessage(code: string): string {
   return messages[code] ?? 'An unexpected error occurred. Please try again.'
 }
 
+export function formatActionError(
+  error: unknown,
+  fallback = 'An unexpected error occurred. Please try again.'
+): string {
+  if (!error) return fallback
+
+  const anyErr = error as { code?: string; message?: string; error?: string; name?: string }
+  const code = typeof anyErr?.code === 'string' ? anyErr.code.trim() : ''
+
+  if (code && (code.startsWith('auth/') || code === 'permission-denied')) {
+    return getFirebaseErrorMessage(code)
+  }
+
+  let raw =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+      ? error
+      : typeof anyErr?.message === 'string'
+      ? anyErr.message
+      : typeof anyErr?.error === 'string'
+      ? anyErr.error
+      : ''
+
+  if (raw.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(raw)
+      if (typeof parsed?.error === 'string' && parsed.error.trim()) {
+        raw = parsed.error.trim()
+      } else if (typeof parsed?.message === 'string' && parsed.message.trim()) {
+        raw = parsed.message.trim()
+      }
+    } catch {
+      // Not valid JSON; keep raw message
+    }
+  }
+
+  const lower = raw.toLowerCase()
+  if (
+    anyErr?.name === 'AbortError' ||
+    lower.includes('aborterror') ||
+    lower.includes('timed out') ||
+    lower.includes('timeout')
+  ) {
+    return 'Request timed out. Please check your connection and try again.'
+  }
+
+  if (
+    lower.includes('missing or insufficient permissions') ||
+    lower.includes('permission_denied') ||
+    lower.includes('permission-denied')
+  ) {
+    return 'Permission denied while saving changes. Please verify your admin session and try again.'
+  }
+
+  if (
+    lower.includes('failed to fetch') ||
+    lower.includes('networkerror') ||
+    lower.includes('network request failed')
+  ) {
+    return 'Network connection error. Please check your internet connection and try again.'
+  }
+
+  return raw.trim() || fallback
+}
+
+export async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit & { timeoutMs?: number }
+): Promise<Response> {
+  const { timeoutMs = 20000, signal: externalSignal, ...rest } = init || {}
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(new Error('Request timed out')), timeoutMs)
+
+  const onExternalAbort = () => controller.abort(externalSignal?.reason)
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      clearTimeout(timer)
+      controller.abort(externalSignal.reason)
+    } else {
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true })
+    }
+  }
+
+  try {
+    return await fetch(input, {
+      ...rest,
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timer)
+    if (externalSignal) {
+      externalSignal.removeEventListener('abort', onExternalAbort)
+    }
+  }
+}
+
 // ─── WhatsApp Link Generation & Phone Formatting ──────────────
 export interface WhatsAppPhoneResult {
   formatted: string
@@ -359,18 +456,30 @@ export function getFileCategory(fileName: string, mimeType?: string): 'image' | 
 
 // ─── Clipboard & External Navigation ─────────────────────────
 export async function copyToClipboard(text: string): Promise<boolean> {
+  if (!text) return false
   try {
-    await navigator.clipboard.writeText(text)
-    return true
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
   } catch {
-    // Fallback
+    // Fall through to textarea fallback
+  }
+
+  if (typeof document === 'undefined') return false
+  try {
     const el = document.createElement('textarea')
     el.value = text
+    el.setAttribute('readonly', '')
+    el.style.position = 'fixed'
+    el.style.opacity = '0'
     document.body.appendChild(el)
     el.select()
-    document.execCommand('copy')
+    const copied = document.execCommand('copy')
     document.body.removeChild(el)
-    return true
+    return Boolean(copied)
+  } catch {
+    return false
   }
 }
 

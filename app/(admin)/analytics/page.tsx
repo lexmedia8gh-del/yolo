@@ -24,6 +24,7 @@ import {
   type DateFilterState,
 } from '@/lib/utils/analyticsCalculations'
 import { exportAnnualReportExcel } from '@/lib/utils/exportAnalyticsExcel'
+import { formatActionError } from '@/lib/utils'
 
 import { AnalyticsHeader } from '@/components/analytics/AnalyticsHeader'
 import { SummaryKpiCards } from '@/components/analytics/SummaryKpiCards'
@@ -140,11 +141,12 @@ export default function DataAnalysisPage() {
 
   // ── 3. Handle Annual Excel Export ───────────────────────────
   const handleExportAnnualReport = () => {
+    if (exporting) return
     const targetYear = filter.year === 'all' ? new Date().getFullYear() : Number(filter.year)
     setExporting(true)
     toast.loading(`Compiling Annual Report for ${targetYear}...`, { id: 'excel-export' })
 
-    setTimeout(() => {
+    requestAnimationFrame(() => {
       try {
         const success = exportAnnualReportExcel({
           year: targetYear,
@@ -160,13 +162,15 @@ export default function DataAnalysisPage() {
         } else {
           toast.error('Failed to generate Excel report. Please try again.', { id: 'excel-export' })
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Export error:', err)
-        toast.error('Error generating spreadsheet.', { id: 'excel-export' })
+        toast.error(formatActionError(err, 'Error generating spreadsheet.'), {
+          id: 'excel-export',
+        })
       } finally {
         setExporting(false)
       }
-    }, 400)
+    })
   }
 
   return (

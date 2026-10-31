@@ -14,12 +14,23 @@ import {
   Link2,
   ShieldCheck,
   Mail,
-  Loader2,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
+import { getAdminAuthHeaders } from '@/lib/firebase/auth'
 import type { Client, Project, Invoice } from '@/lib/types'
-import { formatCurrency, copyToClipboard, openExternalUrl, generateWhatsAppLink, formatWhatsAppPhone, getProductionUrl, getPaymentLink, isVercelPlatformDomain } from '@/lib/utils'
+import {
+  formatCurrency,
+  copyToClipboard,
+  openExternalUrl,
+  generateWhatsAppLink,
+  formatWhatsAppPhone,
+  getProductionUrl,
+  getPaymentLink,
+  isVercelPlatformDomain,
+  fetchWithTimeout,
+  formatActionError,
+} from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface PreparePaymentMessageModalProps {
@@ -75,6 +86,12 @@ export function PreparePaymentMessageModal({
 
   const phoneValidation = formatWhatsAppPhone(recipientPhone)
 
+  useEffect(() => {
+    if (!isOpen) {
+      setIsSendingEmail(false)
+    }
+  }, [isOpen])
+
   // Initialize recipient phone and email from client or invoice
   useEffect(() => {
     if (client?.whatsappNumber) {
@@ -127,10 +144,14 @@ export function PreparePaymentMessageModal({
       toast.error('Message is empty')
       return
     }
-    await copyToClipboard(customMessage)
-    setCopiedMessage(true)
-    toast.success('Message copied to clipboard!')
-    setTimeout(() => setCopiedMessage(false), 2500)
+    const ok = await copyToClipboard(customMessage)
+    if (ok) {
+      setCopiedMessage(true)
+      toast.success('Message copied to clipboard!')
+      setTimeout(() => setCopiedMessage(false), 2500)
+    } else {
+      toast.error('Failed to copy message.')
+    }
   }
 
   const handleCopyLinkOnly = async () => {
@@ -138,10 +159,14 @@ export function PreparePaymentMessageModal({
       toast.error('No payment link available.')
       return
     }
-    await copyToClipboard(effectiveUrl)
-    setCopiedLink(true)
-    toast.success('Payment link copied!')
-    setTimeout(() => setCopiedLink(false), 2500)
+    const ok = await copyToClipboard(effectiveUrl)
+    if (ok) {
+      setCopiedLink(true)
+      toast.success('Payment link copied!')
+      setTimeout(() => setCopiedLink(false), 2500)
+    } else {
+      toast.error('Failed to copy payment link.')
+    }
   }
 
   const handleOpenWhatsApp = () => {
@@ -168,6 +193,7 @@ export function PreparePaymentMessageModal({
   }
 
   const handleSendEmailViaBrevo = async () => {
+    if (isSendingEmail) return
     if (!recipientEmail.trim() || !recipientEmail.includes('@')) {
       toast.error('Please enter a valid client email address')
       return
@@ -179,9 +205,13 @@ export function PreparePaymentMessageModal({
 
     try {
       setIsSendingEmail(true)
-      const res = await fetch('/api/payments/send-email', {
+      const authHeaders = await getAdminAuthHeaders()
+      const res = await fetchWithTimeout('/api/payments/send-email', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+        },
         body: JSON.stringify({
           toEmail: recipientEmail.trim(),
           clientName: client?.fullName || (invoice as any)?.clientName || 'Valued Client',
@@ -193,16 +223,17 @@ export function PreparePaymentMessageModal({
           invoiceNumber: invoice?.invoiceNumber || invoiceNumber,
           personalMessage: customMessage,
         }),
+        timeoutMs: 20000,
       })
 
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (res.ok && data.success) {
         toast.success(`Payment email successfully sent via Brevo to ${recipientEmail}!`)
       } else {
         toast.error(data.error || 'Failed to dispatch email via Brevo')
       }
     } catch (err: any) {
-      toast.error(err?.message || 'Error communicating with Brevo service')
+      toast.error(formatActionError(err, 'Error communicating with Brevo service'))
     } finally {
       setIsSendingEmail(false)
     }
@@ -211,7 +242,8 @@ export function PreparePaymentMessageModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => !isSendingEmail && onClose()}
+      preventClose={isSendingEmail}
       title="Prepare Payment Message"
       subtitle="Craft and customize ready-to-send payment messages for WhatsApp, SMS, or Email."
       size="lg"
@@ -337,7 +369,7 @@ export function PreparePaymentMessageModal({
         {/* Action Buttons */}
         <div className="space-y-2 pt-3 border-t border-gray-100">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-            <Button variant="outline" size="sm" onClick={onClose}>
+            <Button variant="outline" size="sm" onClick={onClose} disabled={isSendingEmail}>
               Cancel
             </Button>
 
@@ -346,6 +378,7 @@ export function PreparePaymentMessageModal({
                 variant="outline"
                 size="sm"
                 onClick={handleCopyMessage}
+                disabled={isSendingEmail}
                 icon={copiedMessage ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />}
               >
                 {copiedMessage ? 'Copied!' : 'Copy Text'}
@@ -355,17 +388,20 @@ export function PreparePaymentMessageModal({
                 variant="outline"
                 size="sm"
                 onClick={handleSendEmailViaBrevo}
-                disabled={isSendingEmail || !recipientEmail}
-                icon={isSendingEmail ? <Loader2 size={14} className="animate-spin text-blue-600" /> : <Mail size={14} className="text-blue-600" />}
+                loading={isSendingEmail}
+                loadingText="Sending via Brevo..."
+                disabled={!recipientEmail}
+                icon={<Mail size={14} className="text-blue-600" />}
                 className="border-blue-200 text-blue-700 hover:bg-blue-50"
               >
-                {isSendingEmail ? 'Sending via Brevo...' : 'Send Email (Brevo)'}
+                Send Email (Brevo)
               </Button>
 
               <Button
                 variant="primary"
                 size="sm"
                 onClick={handleOpenWhatsApp}
+                disabled={isSendingEmail}
                 icon={<MessageSquare size={14} />}
                 className="bg-emerald-600 hover:bg-emerald-700 border-emerald-600 text-white"
               >

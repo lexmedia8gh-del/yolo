@@ -34,6 +34,7 @@ import type {
   Client,
   Project,
 } from '@/lib/types'
+import { formatActionError } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface TaskModalProps {
@@ -101,6 +102,8 @@ export function TaskModal({
     if (isOpen) {
       getDocuments<Client>(COLLECTIONS.CLIENTS).then((data) => setClients(data || []))
       getDocuments<Project>(COLLECTIONS.PROJECTS).then((data) => setProjects(data || []))
+    } else {
+      setLoading(false)
     }
   }, [isOpen])
 
@@ -191,6 +194,7 @@ export function TaskModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (loading) return
     if (!validate()) return
 
     setLoading(true)
@@ -237,7 +241,7 @@ export function TaskModal({
       onClose()
     } catch (err: any) {
       console.error('Error saving task:', err)
-      toast.error(err?.message || 'Failed to save task')
+      toast.error(formatActionError(err, 'Failed to save task'))
     } finally {
       setLoading(false)
     }
@@ -246,7 +250,8 @@ export function TaskModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => !loading && onClose()}
+      preventClose={loading}
       title={taskToEdit ? 'Edit Task & Checklist' : 'Create New Task'}
       size="lg"
     >
@@ -498,7 +503,13 @@ export function TaskModal({
           <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={loading}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" size="sm" loading={loading}>
+          <Button
+            type="submit"
+            variant="primary"
+            size="sm"
+            loading={loading}
+            loadingText={taskToEdit ? 'Saving...' : 'Creating...'}
+          >
             {taskToEdit ? 'Save Task' : 'Create Task'}
           </Button>
         </div>

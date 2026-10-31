@@ -4,8 +4,9 @@ import React, { useState, useEffect } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input, Textarea } from '@/components/ui/Input'
-import { formatCurrency, formatDate, getPaymentLink } from '@/lib/utils'
+import { formatCurrency, formatDate, getPaymentLink, fetchWithTimeout, formatActionError } from '@/lib/utils'
 import { useInvoiceBranding, sanitizeBrandingLogoUrl } from '@/lib/hooks/useInvoiceBranding'
+import { getAdminAuthHeaders } from '@/lib/firebase/auth'
 import type { Invoice } from '@/lib/types'
 import { Send, ShieldCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -29,6 +30,10 @@ export function SendInvoiceEmailModal({
   const [isSending, setIsSending] = useState(false)
 
   useEffect(() => {
+    if (!isOpen) {
+      setIsSending(false)
+      return
+    }
     if (invoice) {
       const senderBrand = invoice.businessInfo?.name || businessDefaults.name || 'lexmedia.gh'
       setRecipientEmail(invoice.clientEmail || '')
@@ -36,7 +41,7 @@ export function SendInvoiceEmailModal({
         `Thank you for partnering with ${senderBrand}. Please find your invoice ${invoice.invoiceNumber} attached with convenient online payment options.`
       )
     }
-  }, [invoice, businessDefaults.name])
+  }, [invoice, businessDefaults.name, isOpen])
 
   if (!invoice) return null
 
@@ -50,6 +55,7 @@ export function SendInvoiceEmailModal({
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSending) return
     if (!recipientEmail) {
       toast.error('Recipient email address is required.')
       return
@@ -59,9 +65,13 @@ export function SendInvoiceEmailModal({
     const toastId = toast.loading('Sending invoice email...')
 
     try {
-      const res = await fetch('/api/invoices/send-email', {
+      const authHeaders = await getAdminAuthHeaders()
+      const res = await fetchWithTimeout('/api/invoices/send-email', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+        },
         body: JSON.stringify({
           invoiceId: invoice.id,
           toEmail: recipientEmail.trim(),
@@ -82,9 +92,10 @@ export function SendInvoiceEmailModal({
           businessLogoUrl:
             sanitizeBrandingLogoUrl(invoice.businessInfo?.logo) || resolvedLogoUrl || undefined,
         }),
+        timeoutMs: 20000,
       })
 
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
 
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Failed to dispatch email')
@@ -95,7 +106,7 @@ export function SendInvoiceEmailModal({
       onClose()
     } catch (err: any) {
       console.error('Send invoice email failed:', err)
-      toast.error(err.message || 'Error sending invoice email', { id: toastId })
+      toast.error(formatActionError(err, 'Error sending invoice email'), { id: toastId })
     } finally {
       setIsSending(false)
     }
@@ -104,7 +115,8 @@ export function SendInvoiceEmailModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => !isSending && onClose()}
+      preventClose={isSending}
       title="Send Invoice to Client"
       size="md"
     >
@@ -141,6 +153,7 @@ export function SendInvoiceEmailModal({
           required
           value={recipientEmail}
           onChange={(e) => setRecipientEmail(e.target.value)}
+          disabled={isSending}
           placeholder="client@company.com"
           helperText="The invoice notification and secure payment button will be sent to this address."
         />
@@ -151,6 +164,7 @@ export function SendInvoiceEmailModal({
           rows={3}
           value={personalMessage}
           onChange={(e) => setPersonalMessage(e.target.value)}
+          disabled={isSending}
           placeholder="Add an optional message or note for your client..."
         />
 
@@ -176,6 +190,7 @@ export function SendInvoiceEmailModal({
             type="submit"
             variant="primary"
             loading={isSending}
+            loadingText="Sending..."
             icon={<Send size={14} />}
           >
             Send Invoice Now

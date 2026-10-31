@@ -22,6 +22,7 @@ import {
   COLLECTIONS,
   addDocument,
   updateDocument,
+  getDocument,
   getDocuments,
   subscribeToDocument,
 } from '@/lib/firebase/firestore'
@@ -31,6 +32,7 @@ import {
   formatCurrency,
   copyToClipboard,
   openExternalUrl,
+  formatActionError,
 } from '@/lib/utils'
 import type { QuickJob, ClientLink } from '@/lib/types'
 import toast from 'react-hot-toast'
@@ -159,6 +161,7 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
 
   // Generate Payment Link with editable amount
   const handleGenerateLink = async () => {
+    if (isGeneratingLink) return
     if (!isAmountValid) {
       if (parsedAmount <= 0) {
         toast.error('Amount to collect must be greater than GH₵0.00')
@@ -196,19 +199,23 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
       toast.success(`Payment link generated for ${formatCurrency(parsedAmount, currentJob.currency || 'GHS')}!`)
     } catch (err) {
       console.error(err)
-      toast.error('Failed to generate payment link')
+      toast.error(formatActionError(err, 'Failed to generate payment link'))
     } finally {
       setIsGeneratingLink(false)
     }
   }
 
   // Copy Payment Link
-  const handleCopyPaymentLink = (token: string) => {
+  const handleCopyPaymentLink = async (token: string) => {
     const linkUrl = getPaymentLink(token)
-    copyToClipboard(linkUrl)
-    setCopiedToken(token)
-    setTimeout(() => setCopiedToken(null), 2000)
-    toast.success('Payment link copied to clipboard')
+    const ok = await copyToClipboard(linkUrl)
+    if (ok) {
+      setCopiedToken(token)
+      setTimeout(() => setCopiedToken(null), 2000)
+      toast.success('Payment link copied to clipboard')
+    } else {
+      toast.error('Failed to copy payment link')
+    }
   }
 
   // Share via WhatsApp
@@ -222,6 +229,7 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
   // Record Offline Payment (Admin Manual Confirmation)
   const handleRecordOfflinePayment = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isRecordingPayment) return
     setIsRecordingPayment(true)
 
     try {
@@ -252,11 +260,8 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
       // 2. Update Client stats
       if (currentJob.clientId) {
         try {
-          const clientDocs = await getDocuments<any>(COLLECTIONS.CLIENTS, [
-            where('__name__', '==', currentJob.clientId),
-          ])
-          if (clientDocs && clientDocs.length > 0) {
-            const cl = clientDocs[0]
+          const cl = await getDocument<any>(COLLECTIONS.CLIENTS, currentJob.clientId)
+          if (cl) {
             await updateDocument(COLLECTIONS.CLIENTS, currentJob.clientId, {
               totalPaid: (cl.totalPaid || 0) + amountToRecord,
               outstandingBalance: Math.max(0, (cl.outstandingBalance || 0) - amountToRecord),
@@ -297,7 +302,7 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
       toast.success(newStatus === 'Paid' ? 'Payment confirmed! Delivery upload is now unlocked.' : 'Partial payment recorded.')
     } catch (err: any) {
       console.error('Error recording payment:', err)
-      toast.error('Failed to record payment.')
+      toast.error(formatActionError(err, 'Failed to record payment.'))
     } finally {
       setIsRecordingPayment(false)
     }
@@ -368,7 +373,13 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => setIsPaymentModalOpen(true)}
+                  onClick={() => {
+                    setPayFormData((prev) => ({
+                      ...prev,
+                      amount: outstandingBalance || originalTotal || 0,
+                    }))
+                    setIsPaymentModalOpen(true)
+                  }}
                   className="text-xs h-7 px-2.5"
                   icon={<DollarSign className="w-3 h-3 text-emerald-600" />}
                 >
@@ -479,6 +490,7 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
                   variant="primary"
                   onClick={handleGenerateLink}
                   loading={isGeneratingLink}
+                  loadingText="Generating..."
                   disabled={!isAmountValid}
                   className="w-full text-xs py-2.5 font-bold"
                   icon={<LinkIcon className="w-3.5 h-3.5" />}
@@ -595,7 +607,8 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
       {isPaymentModalOpen && (
         <Modal
           isOpen={isPaymentModalOpen}
-          onClose={() => setIsPaymentModalOpen(false)}
+          onClose={() => !isRecordingPayment && setIsPaymentModalOpen(false)}
+          preventClose={isRecordingPayment}
           title="Record Client Payment"
           size="sm"
         >
@@ -661,6 +674,7 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
                 type="button"
                 variant="ghost"
                 size="sm"
+                disabled={isRecordingPayment}
                 onClick={() => setIsPaymentModalOpen(false)}
               >
                 Cancel
@@ -670,6 +684,7 @@ export function QuickJobPaymentDelivery({ job: initialJob, onUpdate }: QuickJobP
                 variant="primary"
                 size="sm"
                 loading={isRecordingPayment}
+                loadingText="Recording..."
                 icon={<Check className="w-3.5 h-3.5" />}
               >
                 Confirm Payment

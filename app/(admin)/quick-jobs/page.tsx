@@ -75,7 +75,7 @@ const cleanUndefined = (obj: any): any => {
   return cleaned
 }
 import { QuickJobPaymentDelivery } from '@/components/quick-jobs/QuickJobPaymentDelivery'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, formatActionError, fetchWithTimeout } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 const STATUS_OPTIONS: QuickJobStatus[] = [
@@ -111,6 +111,8 @@ export default function QuickJobsPage() {
   const [deletingJob, setDeletingJob] = useState<QuickJob | null>(null)
   const [isNewClientModalOpen, setIsNewClientModalOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isCreatingClient, setIsCreatingClient] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   // Release Delivery Modal State
   const [releasingJob, setReleasingJob] = useState<QuickJob | null>(null)
@@ -154,16 +156,17 @@ export default function QuickJobsPage() {
   }
 
   const handleExecuteRelease = async () => {
-    if (!releasingJob) return
+    if (!releasingJob || isReleasingDirect) return
     setIsReleasingDirect(true)
     try {
-      const res = await fetch('/api/quick-jobs/release-delivery', {
+      const res = await fetchWithTimeout('/api/quick-jobs/release-delivery', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           jobId: releasingJob.id,
           resend: isResendModal,
         }),
+        timeoutMs: 15000,
       })
       const data = await res.json()
       if (!res.ok || !data.success) {
@@ -212,7 +215,7 @@ export default function QuickJobsPage() {
       setReleasingJob(null)
     } catch (err: any) {
       console.error('Release delivery error:', err)
-      toast.error(err?.message || 'Failed to release delivery.')
+      toast.error(formatActionError(err, 'Failed to release delivery.'))
       if (err?.message && err.message.includes('upload delivery files')) {
         setViewingJob(releasingJob)
       }
@@ -506,12 +509,13 @@ export default function QuickJobsPage() {
   // Create new client inline
   const handleCreateClientQuick = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isCreatingClient) return
     if (!newClientData.fullName.trim()) {
       toast.error('Please enter client full name')
       return
     }
 
-    setIsSubmitting(true)
+    setIsCreatingClient(true)
     try {
       const now = new Date().toISOString()
       const newClientPayload = {
@@ -538,9 +542,9 @@ export default function QuickJobsPage() {
       setNewClientData({ fullName: '', email: '', phone: '', company: '' })
     } catch (err) {
       console.error('Error creating client:', err)
-      toast.error('Failed to create client.')
+      toast.error(formatActionError(err, 'Failed to create client.'))
     } finally {
-      setIsSubmitting(false)
+      setIsCreatingClient(false)
     }
   }
 
@@ -680,7 +684,7 @@ export default function QuickJobsPage() {
         name: err?.name,
         error: err,
       })
-      toast.error(`Failed to save quick job: ${err?.message || String(err)}`)
+      toast.error(formatActionError(err, 'Failed to save quick job.'))
     } finally {
       setIsSubmitting(false)
     }
@@ -688,17 +692,17 @@ export default function QuickJobsPage() {
 
   // Delete Quick Job
   const handleDeleteJob = async () => {
-    if (!deletingJob || isSubmitting) return
-    setIsSubmitting(true)
+    if (!deletingJob || isDeleting) return
+    setIsDeleting(true)
     try {
       await deleteDocument(COLLECTIONS.QUICK_JOBS, deletingJob.id)
       toast.success('Quick job deleted successfully.')
       setDeletingJob(null)
     } catch (err) {
       console.error('Error deleting quick job:', err)
-      toast.error('Failed to delete quick job.')
+      toast.error(formatActionError(err, 'Failed to delete quick job.'))
     } finally {
-      setIsSubmitting(false)
+      setIsDeleting(false)
     }
   }
 
@@ -974,7 +978,8 @@ export default function QuickJobsPage() {
       {/* ────────────────────────────────────────────────────────── */}
       <Modal
         isOpen={isFormModalOpen}
-        onClose={() => setIsFormModalOpen(false)}
+        onClose={() => !isSubmitting && setIsFormModalOpen(false)}
+        preventClose={isSubmitting}
         title={editingJob ? 'Edit Quick Job' : 'Create Quick Job'}
         size="lg"
       >
@@ -1228,10 +1233,22 @@ export default function QuickJobsPage() {
           />
 
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100 dark:border-gray-800">
-            <Button type="button" variant="ghost" size="sm" onClick={() => setIsFormModalOpen(false)}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={isSubmitting}
+              onClick={() => setIsFormModalOpen(false)}
+            >
               Cancel
             </Button>
-            <Button type="submit" variant="primary" size="sm" loading={isSubmitting}>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              loading={isSubmitting}
+              loadingText={editingJob ? 'Updating...' : 'Creating...'}
+            >
               {editingJob ? 'Update Quick Job' : 'Create Quick Job'}
             </Button>
           </div>
@@ -1241,7 +1258,8 @@ export default function QuickJobsPage() {
       {/* Quick Add Client Modal */}
       <Modal
         isOpen={isNewClientModalOpen}
-        onClose={() => setIsNewClientModalOpen(false)}
+        onClose={() => !isCreatingClient && setIsNewClientModalOpen(false)}
+        preventClose={isCreatingClient}
         title="Quick Add Client"
         size="sm"
       >
@@ -1272,10 +1290,16 @@ export default function QuickJobsPage() {
             placeholder="Company Ltd"
           />
           <div className="flex items-center justify-end gap-2 pt-2">
-            <Button type="button" variant="ghost" size="sm" onClick={() => setIsNewClientModalOpen(false)}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={isCreatingClient}
+              onClick={() => setIsNewClientModalOpen(false)}
+            >
               Cancel
             </Button>
-            <Button type="submit" size="sm" loading={isSubmitting}>
+            <Button type="submit" size="sm" loading={isCreatingClient} loadingText="Saving...">
               Save Client
             </Button>
           </div>
@@ -1396,7 +1420,11 @@ export default function QuickJobsPage() {
               <QuickJobPaymentDelivery
                 job={activeViewingJob}
                 onUpdate={async (updatedData) => {
-                  await updateDocument(COLLECTIONS.QUICK_JOBS, activeViewingJob.id, updatedData)
+                  try {
+                    await updateDocument(COLLECTIONS.QUICK_JOBS, activeViewingJob.id, updatedData)
+                  } catch (err) {
+                    console.warn('QuickJob sync warning:', err)
+                  }
                   setViewingJob((prev) => (prev ? { ...prev, ...updatedData } : null))
                 }}
               />
@@ -1426,7 +1454,8 @@ export default function QuickJobsPage() {
       {deletingJob && (
         <Modal
           isOpen={!!deletingJob}
-          onClose={() => setDeletingJob(null)}
+          onClose={() => !isDeleting && setDeletingJob(null)}
+          preventClose={isDeleting}
           title="Delete Quick Job"
           size="sm"
         >
@@ -1437,7 +1466,13 @@ export default function QuickJobsPage() {
               cannot be undone.
             </p>
             <div className="flex items-center justify-end gap-2 pt-2">
-              <Button type="button" variant="ghost" size="sm" onClick={() => setDeletingJob(null)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={isDeleting}
+                onClick={() => setDeletingJob(null)}
+              >
                 Cancel
               </Button>
               <Button
@@ -1445,7 +1480,8 @@ export default function QuickJobsPage() {
                 variant="danger"
                 size="sm"
                 onClick={handleDeleteJob}
-                loading={isSubmitting}
+                loading={isDeleting}
+                loadingText="Deleting..."
               >
                 Delete Job
               </Button>
@@ -1459,6 +1495,7 @@ export default function QuickJobsPage() {
         <Modal
           isOpen={!!releasingJob}
           onClose={() => !isReleasingDirect && setReleasingJob(null)}
+          preventClose={isReleasingDirect}
           title={isResendModal ? 'Resend Delivery Email' : 'Release Delivery'}
           size="sm"
         >
@@ -1501,6 +1538,7 @@ export default function QuickJobsPage() {
                 variant="primary"
                 size="sm"
                 loading={isReleasingDirect}
+                loadingText={isResendModal ? 'Resending...' : 'Releasing...'}
                 disabled={isReleasingDirect}
                 onClick={handleExecuteRelease}
                 icon={<Send size={13} />}

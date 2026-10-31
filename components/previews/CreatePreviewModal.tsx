@@ -53,7 +53,10 @@ import {
   openExternalUrl,
   buildClientPreviewUrl,
   getFileCategory,
+  fetchWithTimeout,
+  formatActionError,
 } from '@/lib/utils'
+import { getAdminAuthHeaders } from '@/lib/firebase/auth'
 import { uploadDeliveryFile } from '@/lib/supabase/storage'
 import toast from 'react-hot-toast'
 
@@ -124,7 +127,10 @@ export function CreatePreviewModal({
 
   // Load clients & projects
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) {
+      setIsSubmitting(false)
+      return
+    }
     setLoadingData(true)
     Promise.all([
       getDocuments<Client>(COLLECTIONS.CLIENTS),
@@ -253,6 +259,7 @@ export function CreatePreviewModal({
   // Submit & Create Preview
   const handleCreatePreview = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
 
     if (!title.trim()) {
       toast.error('Please enter a preview title')
@@ -273,6 +280,7 @@ export function CreatePreviewModal({
     const toastId = toast.loading('Securing assets and generating proof session...')
 
     try {
+      const authHeaders = await getAdminAuthHeaders()
       // 1. Upload any newly staged file objects to Supabase Storage in private path
       const finalizedAssets: PreviewAsset[] = []
       const selectedProj = projects.find((p) => p.id === selectedProjectId)
@@ -294,9 +302,11 @@ export function CreatePreviewModal({
             formData.append('projectId', safeProjId)
             formData.append('path', destinationPath)
 
-            const uploadApiRes = await fetch('/api/preview/upload', {
+            const uploadApiRes = await fetchWithTimeout('/api/preview/upload', {
               method: 'POST',
+              headers: authHeaders,
               body: formData,
+              timeoutMs: 30000,
             })
             const uploadApiData = await uploadApiRes.json()
 
@@ -330,9 +340,12 @@ export function CreatePreviewModal({
       }
 
       // 2. Call backend API to create preview
-      const res = await fetch('/api/preview/admin', {
+      const res = await fetchWithTimeout('/api/preview/admin', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+        },
         body: JSON.stringify({
           clientId: selectedClientId,
           clientName: selectedCli?.fullName || 'Client',
@@ -354,6 +367,7 @@ export function CreatePreviewModal({
           },
           assets: finalizedAssets,
         }),
+        timeoutMs: 20000,
       })
 
       const data = await res.json()
@@ -373,7 +387,7 @@ export function CreatePreviewModal({
       onSuccess?.(data.preview)
     } catch (err: any) {
       console.error('Create preview error:', err)
-      toast.error(err?.message || 'Error generating client preview', { id: toastId })
+      toast.error(formatActionError(err, 'Error generating client preview'), { id: toastId })
     } finally {
       setIsSubmitting(false)
     }
@@ -388,9 +402,11 @@ export function CreatePreviewModal({
     <Modal
       isOpen={isOpen}
       onClose={() => {
+        if (isSubmitting) return
         handleReset()
         onClose()
       }}
+      preventClose={isSubmitting}
       title="Create View-Only Client Preview"
       size="xl"
     >
@@ -425,9 +441,13 @@ export function CreatePreviewModal({
                 variant="outline"
                 size="sm"
                 icon={<Copy size={14} />}
-                onClick={() => {
-                  copyToClipboard(createdPreview.url)
-                  toast.success('Preview link copied to clipboard!')
+                onClick={async () => {
+                  const ok = await copyToClipboard(createdPreview.url)
+                  if (ok) {
+                    toast.success('Preview link copied to clipboard!')
+                  } else {
+                    toast.error('Could not copy preview link.')
+                  }
                 }}
               >
                 Copy
@@ -762,10 +782,12 @@ export function CreatePreviewModal({
             <Button
               type="submit"
               variant="primary"
+              loading={isSubmitting}
+              loadingText="Securing Preview..."
               disabled={isSubmitting}
-              icon={isSubmitting ? <Spinner size="sm" /> : <Eye size={16} />}
+              icon={<Eye size={16} />}
             >
-              {isSubmitting ? 'Securing Preview...' : 'Generate Client Preview'}
+              Generate Client Preview
             </Button>
           </div>
         </form>

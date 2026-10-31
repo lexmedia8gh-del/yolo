@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 // db import removed
-import { collection, query, where, getDocs, doc, getDoc, updateDoc, increment, serverTimestamp } from 'firebase/firestore'
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore'
 import { FieldValue, Timestamp } from 'firebase-admin/firestore'
 
 
@@ -42,16 +42,22 @@ export async function POST(req: NextRequest) {
 
         if (fileSnap.exists) {
           fileData = fileSnap.data()
-          // Update file count
+          // Update file count safely via Admin/REST adapter
           try {
-            await fileDocRef.update({
-              downloadCount: FieldValue.increment(1),
-              lastDownloadedAt: FieldValue.serverTimestamp(),
-            })
-            await deliveryDoc.ref.update({
-              status: 'Downloaded',
-              updatedAt: FieldValue.serverTimestamp(),
-            })
+            await fileDocRef.set(
+              {
+                downloadCount: FieldValue.increment(1),
+                lastDownloadedAt: FieldValue.serverTimestamp(),
+              },
+              { merge: true }
+            )
+            await deliveryDoc.ref.set(
+              {
+                status: 'Downloaded',
+                updatedAt: FieldValue.serverTimestamp(),
+              },
+              { merge: true }
+            )
           } catch {}
         } else if (Array.isArray(deliveryData.files)) {
           const matchedFile = deliveryData.files.find((f: any) => f.id === fileId)
@@ -93,16 +99,6 @@ export async function POST(req: NextRequest) {
 
       if (fileSnap.exists()) {
         fileData = fileSnap.data()
-        try {
-          await updateDoc(fileDocRef, {
-            downloadCount: increment(1),
-            lastDownloadedAt: serverTimestamp(),
-          })
-          await updateDoc(doc(db, COLLECTIONS.DELIVERIES, deliveryId), {
-            status: 'Downloaded',
-            updatedAt: serverTimestamp(),
-          })
-        } catch {}
       } else if (Array.isArray(deliveryData.files)) {
         const matchedFile = deliveryData.files.find((f: any) => f.id === fileId)
         if (matchedFile) {

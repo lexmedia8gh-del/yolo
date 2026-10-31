@@ -17,10 +17,12 @@ import {
   Tag,
   ListTodo,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import type { TaskItem, TaskPriority, TaskStatus, TaskCategory } from '@/lib/types'
 import { updateDocument, COLLECTIONS } from '@/lib/firebase/firestore'
+import { formatActionError } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface TaskCardProps {
@@ -29,6 +31,7 @@ interface TaskCardProps {
   onEdit: (task: TaskItem) => void
   onDelete: (task: TaskItem) => void
   onChecklistUpdate?: (task: TaskItem) => void
+  isLoading?: boolean
 }
 
 const STATUS_CONFIG: Record<TaskStatus, { label: string; class: string }> = {
@@ -51,8 +54,11 @@ export function TaskCard({
   onEdit,
   onDelete,
   onChecklistUpdate,
+  isLoading = false,
 }: TaskCardProps) {
   const [showChecklist, setShowChecklist] = useState(false)
+  const [togglingSubItemId, setTogglingSubItemId] = useState<string | null>(null)
+  const [isCyclingStatus, setIsCyclingStatus] = useState(false)
   const isCompleted = task.status === 'completed'
 
   const todayStr = new Date().toISOString().split('T')[0]
@@ -68,6 +74,9 @@ export function TaskCard({
   const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0
 
   const handleToggleSubItem = async (itemId: string) => {
+    if (togglingSubItemId) return
+    setTogglingSubItemId(itemId)
+
     const updatedChecklist = checklistItems.map((item) =>
       item.id === itemId ? { ...item, completed: !item.completed } : item
     )
@@ -84,13 +93,19 @@ export function TaskCard({
         updatedAt: new Date().toISOString(),
       })
       if (onChecklistUpdate) onChecklistUpdate(updatedTask)
+      toast.success('Subtask updated')
     } catch (err) {
       console.error('Error toggling checklist item:', err)
-      toast.error('Failed to update subtask')
+      toast.error(formatActionError(err, 'Failed to update subtask'))
+    } finally {
+      setTogglingSubItemId(null)
     }
   }
 
   const handleCycleStatus = async () => {
+    if (isCyclingStatus || isLoading) return
+    setIsCyclingStatus(true)
+
     const nextStatusMap: Record<TaskStatus, TaskStatus> = {
       todo: 'in_progress',
       in_progress: 'completed',
@@ -115,7 +130,9 @@ export function TaskCard({
       toast.success(`Task status changed to ${STATUS_CONFIG[nextStatus].label}`)
     } catch (err) {
       console.error('Error updating status:', err)
-      toast.error('Failed to update status')
+      toast.error(formatActionError(err, 'Failed to update status'))
+    } finally {
+      setIsCyclingStatus(false)
     }
   }
 
@@ -133,11 +150,14 @@ export function TaskCard({
         {/* Checkbox */}
         <button
           type="button"
+          disabled={isLoading}
           onClick={() => onToggleComplete(task)}
-          className="mt-0.5 text-gray-400 hover:text-emerald-600 transition-colors shrink-0"
+          className="mt-0.5 text-gray-400 hover:text-emerald-600 transition-colors shrink-0 disabled:opacity-50"
           title={isCompleted ? 'Mark as Incomplete' : 'Mark as Completed'}
         >
-          {isCompleted ? (
+          {isLoading ? (
+            <RefreshCw size={18} className="animate-spin text-indigo-600" />
+          ) : isCompleted ? (
             <CheckCircle2 size={20} className="text-emerald-600 fill-emerald-100" />
           ) : (
             <Circle size={20} className="hover:text-emerald-500" />
@@ -151,11 +171,14 @@ export function TaskCard({
             {/* Status Button (clickable to cycle) */}
             <button
               type="button"
+              disabled={isCyclingStatus || isLoading}
+              aria-busy={isCyclingStatus || undefined}
               onClick={handleCycleStatus}
-              className={`text-[11px] px-2 py-0.5 rounded-full border transition-transform active:scale-95 ${statusInfo.class}`}
+              className={`text-[11px] px-2 py-0.5 rounded-full border transition-transform active:scale-95 disabled:opacity-60 inline-flex items-center gap-1 ${statusInfo.class}`}
               title="Click to cycle status"
             >
-              {statusInfo.label}
+              {isCyclingStatus && <RefreshCw size={10} className="animate-spin" />}
+              <span>{isCyclingStatus ? 'Updating...' : statusInfo.label}</span>
             </button>
 
             <span className={`text-[11px] px-2 py-0.5 rounded-full border ${priorityInfo.class}`}>
@@ -223,22 +246,28 @@ export function TaskCard({
               {/* Sub-item checklist toggle view */}
               {showChecklist && (
                 <div className="space-y-1 p-2 bg-gray-50 rounded-xl border border-gray-200/70 mt-1">
-                  {checklistItems.map((item) => (
-                    <label
-                      key={item.id}
-                      className="flex items-center gap-2 text-xs text-gray-800 cursor-pointer hover:bg-white p-1 rounded-lg transition-colors"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={item.completed}
-                        onChange={() => handleToggleSubItem(item.id)}
-                        className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500 border-gray-300"
-                      />
-                      <span className={item.completed ? 'line-through text-gray-400' : ''}>
-                        {item.text}
-                      </span>
-                    </label>
-                  ))}
+                  {checklistItems.map((item) => {
+                    const isUpdatingItem = togglingSubItemId === item.id
+                    return (
+                      <label
+                        key={item.id}
+                        className={`flex items-center gap-2 text-xs text-gray-800 cursor-pointer hover:bg-white p-1 rounded-lg transition-colors ${
+                          isUpdatingItem ? 'opacity-60 pointer-events-none' : ''
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={item.completed}
+                          disabled={Boolean(togglingSubItemId)}
+                          onChange={() => handleToggleSubItem(item.id)}
+                          className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500 border-gray-300"
+                        />
+                        <span className={item.completed ? 'line-through text-gray-400' : ''}>
+                          {item.text}
+                        </span>
+                      </label>
+                    )
+                  })}
                 </div>
               )}
             </div>

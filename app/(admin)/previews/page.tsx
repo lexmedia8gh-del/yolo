@@ -38,11 +38,18 @@ import {
   getDocuments,
 } from '@/lib/firebase/firestore'
 import type { ClientPreview, PreviewStatus } from '@/lib/types'
-import { formatDate, copyToClipboard, buildClientPreviewUrl } from '@/lib/utils'
+import {
+  formatDate,
+  copyToClipboard,
+  buildClientPreviewUrl,
+  fetchWithTimeout,
+  formatActionError,
+} from '@/lib/utils'
+import { getAdminAuthHeaders } from '@/lib/firebase/auth'
 import { CreatePreviewModal } from '@/components/previews/CreatePreviewModal'
 import { ChangeExpirationModal } from '@/components/previews/ChangeExpirationModal'
 import { PreviewAccessLogsModal } from '@/components/previews/PreviewAccessLogsModal'
-import toast, { Toaster } from 'react-hot-toast'
+import toast from 'react-hot-toast'
 
 export default function AdminPreviewsPage() {
   const [previews, setPreviews] = useState<ClientPreview[]>([])
@@ -56,7 +63,8 @@ export default function AdminPreviewsPage() {
   const [auditLogsModalPreview, setAuditLogsModalPreview] = useState<ClientPreview | null>(null)
   const [revokingPreview, setRevokingPreview] = useState<ClientPreview | null>(null)
   const [deletingPreview, setDeletingPreview] = useState<ClientPreview | null>(null)
-  const [isProcessing, setIsProcessing] = useState(false)
+  const [isRevoking, setIsRevoking] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   const getTimestampMillis = (ts: any): number => {
     if (!ts) return 0
@@ -120,56 +128,69 @@ export default function AdminPreviewsPage() {
 
   // Toggle Revoke / Reactivate Preview
   const handleToggleRevoke = async () => {
-    if (!revokingPreview) return
-    setIsProcessing(true)
+    if (!revokingPreview || isRevoking) return
+    setIsRevoking(true)
     const newStatus: PreviewStatus = revokingPreview.status === 'Revoked' ? 'Active' : 'Revoked'
     try {
-      const res = await fetch(`/api/preview/admin/${revokingPreview.id}`, {
+      const authHeaders = await getAdminAuthHeaders()
+      const res = await fetchWithTimeout(`/api/preview/admin/${revokingPreview.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+        },
         body: JSON.stringify({
           status: newStatus,
           revokedReason: newStatus === 'Revoked' ? 'Revoked by studio administrator' : '',
         }),
+        timeoutMs: 15000,
       })
-      if (!res.ok) throw new Error('Failed to update status')
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Failed to update preview status')
       toast.success(newStatus === 'Revoked' ? 'Preview access revoked' : 'Preview restored to active')
       setRevokingPreview(null)
-    } catch {
-      toast.error('Unable to update preview status')
+    } catch (err) {
+      toast.error(formatActionError(err, 'Unable to update preview status.'))
     } finally {
-      setIsProcessing(false)
+      setIsRevoking(false)
     }
   }
 
   // Delete Preview
   const handleDeletePreview = async () => {
-    if (!deletingPreview) return
-    setIsProcessing(true)
+    if (!deletingPreview || isDeleting) return
+    setIsDeleting(true)
     try {
-      const res = await fetch(`/api/preview/admin/${deletingPreview.id}`, {
+      const authHeaders = await getAdminAuthHeaders()
+      const res = await fetchWithTimeout(`/api/preview/admin/${deletingPreview.id}`, {
         method: 'DELETE',
+        headers: authHeaders,
+        timeoutMs: 15000,
       })
-      if (!res.ok) throw new Error('Failed to delete preview')
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Failed to delete preview')
       toast.success('Client preview deleted')
       setDeletingPreview(null)
-    } catch {
-      toast.error('Unable to delete preview')
+    } catch (err) {
+      toast.error(formatActionError(err, 'Unable to delete preview.'))
     } finally {
-      setIsProcessing(false)
+      setIsDeleting(false)
     }
   }
 
   // Copy Preview Link
-  const handleCopyLink = (token: string) => {
+  const handleCopyLink = async (token: string) => {
     const url = buildClientPreviewUrl(token)
-    copyToClipboard(url)
-    toast.success('Client preview link copied to clipboard!')
+    const ok = await copyToClipboard(url)
+    if (ok) {
+      toast.success('Client preview link copied to clipboard!')
+    } else {
+      toast.error('Could not copy client preview link.')
+    }
   }
 
   return (
     <div className="space-y-6">
-      <Toaster position="top-right" />
 
       {/* Header */}
       <PageHeader
@@ -595,7 +616,8 @@ export default function AdminPreviewsPage() {
       {/* Revoke / Reactivate Confirmation Modal */}
       <Modal
         isOpen={!!revokingPreview}
-        onClose={() => setRevokingPreview(null)}
+        onClose={() => !isRevoking && setRevokingPreview(null)}
+        preventClose={isRevoking}
         title={
           revokingPreview?.status === 'Revoked'
             ? 'Reactivate Client Preview'
@@ -615,21 +637,19 @@ export default function AdminPreviewsPage() {
               variant="outline"
               size="sm"
               onClick={() => setRevokingPreview(null)}
-              disabled={isProcessing}
+              disabled={isRevoking}
             >
               Cancel
             </Button>
             <Button
               variant={revokingPreview?.status === 'Revoked' ? 'primary' : 'danger'}
               size="sm"
+              loading={isRevoking}
+              loadingText={revokingPreview?.status === 'Revoked' ? 'Reactivating...' : 'Revoking...'}
               onClick={handleToggleRevoke}
-              disabled={isProcessing}
+              disabled={isRevoking}
             >
-              {isProcessing
-                ? 'Updating...'
-                : revokingPreview?.status === 'Revoked'
-                ? 'Reactivate'
-                : 'Revoke Access'}
+              {revokingPreview?.status === 'Revoked' ? 'Reactivate' : 'Revoke Access'}
             </Button>
           </div>
         </div>
@@ -638,7 +658,8 @@ export default function AdminPreviewsPage() {
       {/* Delete Confirmation Modal */}
       <Modal
         isOpen={!!deletingPreview}
-        onClose={() => setDeletingPreview(null)}
+        onClose={() => !isDeleting && setDeletingPreview(null)}
+        preventClose={isDeleting}
         title="Delete Client Preview"
         size="sm"
       >
@@ -652,17 +673,19 @@ export default function AdminPreviewsPage() {
               variant="outline"
               size="sm"
               onClick={() => setDeletingPreview(null)}
-              disabled={isProcessing}
+              disabled={isDeleting}
             >
               Cancel
             </Button>
             <Button
               variant="danger"
               size="sm"
+              loading={isDeleting}
+              loadingText="Deleting..."
               onClick={handleDeletePreview}
-              disabled={isProcessing}
+              disabled={isDeleting}
             >
-              {isProcessing ? 'Deleting...' : 'Delete'}
+              Delete
             </Button>
           </div>
         </div>

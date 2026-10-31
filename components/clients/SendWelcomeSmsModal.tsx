@@ -18,6 +18,7 @@ import { getWelcomeMessage, getDefaultWelcomeTemplate } from '@/lib/services/sms
 import { validatePhoneNumber } from '@/lib/services/sms/phoneUtils'
 import { getDocument, COLLECTIONS } from '@/lib/firebase/firestore'
 import type { BusinessSettings } from '@/lib/types'
+import { formatActionError, fetchWithTimeout } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface SendWelcomeSmsModalProps {
@@ -49,26 +50,29 @@ export function SendWelcomeSmsModal({
   } | null>(null)
 
   useEffect(() => {
-    if (isOpen) {
-      setRecipientPhone(phoneNumber || '')
-      setLastResult(null)
-      // Load saved template from settings
-      getDocument<BusinessSettings>(COLLECTIONS.SETTINGS, 'business')
-        .then((doc) => {
-          if (doc && doc.defaultWelcomeSmsTemplate) {
-            setTemplate(doc.defaultWelcomeSmsTemplate)
-          }
-        })
-        .catch(() => {
-          // ignore, keep default
-        })
+    if (!isOpen) {
+      setIsSending(false)
+      return
     }
+    setRecipientPhone(phoneNumber || '')
+    setLastResult(null)
+    // Load saved template from settings
+    getDocument<BusinessSettings>(COLLECTIONS.SETTINGS, 'business')
+      .then((doc) => {
+        if (doc && doc.defaultWelcomeSmsTemplate) {
+          setTemplate(doc.defaultWelcomeSmsTemplate)
+        }
+      })
+      .catch(() => {
+        // ignore, keep default
+      })
   }, [isOpen, phoneNumber])
 
   const validation = validatePhoneNumber(recipientPhone)
   const renderedMessage = getWelcomeMessage(clientName, validation.normalized || recipientPhone, 'LEXMEDIA.GH', template)
 
   const handleSend = async () => {
+    if (isSending) return
     if (!validation.isValid) {
       toast.error(validation.error || 'Please enter a valid phone number')
       return
@@ -78,7 +82,7 @@ export function SendWelcomeSmsModal({
     setLastResult(null)
 
     try {
-      const res = await fetch('/api/sms/welcome', {
+      const res = await fetchWithTimeout('/api/sms/welcome', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -87,9 +91,10 @@ export function SendWelcomeSmsModal({
           clientId,
           customTemplate: template,
         }),
+        timeoutMs: 15000,
       })
 
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
 
       if (res.ok && data.success === true) {
         const msg = data.message || 'SMS request accepted by provider'
@@ -113,7 +118,7 @@ export function SendWelcomeSmsModal({
       }
     } catch (err: any) {
       console.error('Error sending welcome SMS:', err)
-      const errorMsg = err?.message || 'Network error communicating with server'
+      const errorMsg = formatActionError(err, 'Network error communicating with server')
       setLastResult({
         success: false,
         error: errorMsg,
@@ -134,6 +139,7 @@ export function SendWelcomeSmsModal({
       onClose={onClose}
       title="Send Welcome SMS"
       size="md"
+      preventClose={isSending}
     >
       <div className="space-y-4">
         <p className="text-xs text-muted -mt-2">
@@ -239,7 +245,7 @@ export function SendWelcomeSmsModal({
 
         {/* Actions */}
         <div className="flex justify-end gap-2.5 pt-3 border-t border-border">
-          <Button type="button" variant="outline" onClick={onClose}>
+          <Button type="button" variant="outline" onClick={onClose} disabled={isSending}>
             Close
           </Button>
           <Button
@@ -247,6 +253,7 @@ export function SendWelcomeSmsModal({
             variant="primary"
             disabled={!validation.isValid || isSending}
             loading={isSending}
+            loadingText="Sending..."
             onClick={handleSend}
             icon={<Send size={14} />}
           >

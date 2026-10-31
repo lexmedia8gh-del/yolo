@@ -24,7 +24,7 @@ import {
   subscribeToCollection,
 } from '@/lib/firebase/firestore'
 import type { Project, ProjectStatus } from '@/lib/types'
-import { formatCurrency, formatDate, getStatusColor } from '@/lib/utils'
+import { formatCurrency, formatDate, getStatusColor, formatActionError } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 const STATUS_OPTIONS: ProjectStatus[] = [
@@ -73,7 +73,7 @@ export default function ProjectsPage() {
   }, [])
 
   const handleDeleteProject = async () => {
-    if (!deletingProject) return
+    if (!deletingProject || isSubmitting) return
     setIsSubmitting(true)
     try {
       await deleteDocument(COLLECTIONS.PROJECTS, deletingProject.id)
@@ -81,7 +81,7 @@ export default function ProjectsPage() {
       setDeletingProject(null)
     } catch (err) {
       console.error('Failed to delete project:', err)
-      toast.error('Failed to delete project.')
+      toast.error(formatActionError(err, 'Failed to delete project.'))
     } finally {
       setIsSubmitting(false)
     }
@@ -354,6 +354,7 @@ export default function ProjectsPage() {
         onClose={() => setDeletingProject(null)}
         title="Delete Project"
         size="sm"
+        preventClose={isSubmitting}
       >
         <div className="space-y-4 text-center py-2">
           <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto bg-rose-50 text-rose-600">
@@ -370,13 +371,14 @@ export default function ProjectsPage() {
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-            <Button variant="outline" onClick={() => setDeletingProject(null)}>
+            <Button variant="outline" onClick={() => setDeletingProject(null)} disabled={isSubmitting}>
               Cancel
             </Button>
             <Button
               variant="danger"
               onClick={handleDeleteProject}
               loading={isSubmitting}
+              loadingText="Deleting..."
             >
               Delete Project
             </Button>

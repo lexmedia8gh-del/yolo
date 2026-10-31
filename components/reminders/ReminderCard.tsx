@@ -19,6 +19,7 @@ import {
   ChevronDown,
   ChevronUp,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import type { SmartReminder, ReminderPriority, ReminderCategory } from '@/lib/types'
@@ -29,6 +30,7 @@ interface ReminderCardProps {
   onToggleComplete: (reminder: SmartReminder) => void
   onEdit: (reminder: SmartReminder) => void
   onDelete: (reminder: SmartReminder) => void
+  isLoading?: boolean
 }
 
 const CATEGORY_COLORS: Record<ReminderCategory, { label: string; class: string }> = {
@@ -52,6 +54,7 @@ export function ReminderCard({
   onToggleComplete,
   onEdit,
   onDelete,
+  isLoading = false,
 }: ReminderCardProps) {
   const [expanded, setExpanded] = useState(false)
   const isCompleted = reminder.status === 'completed'
@@ -80,11 +83,14 @@ export function ReminderCard({
         {/* Checkbox */}
         <button
           type="button"
+          disabled={isLoading}
           onClick={() => onToggleComplete(reminder)}
-          className="mt-0.5 text-gray-400 hover:text-emerald-600 transition-colors shrink-0"
+          className="mt-0.5 text-gray-400 hover:text-emerald-600 transition-colors shrink-0 disabled:opacity-50"
           title={isCompleted ? 'Mark as Pending' : 'Mark as Completed'}
         >
-          {isCompleted ? (
+          {isLoading ? (
+            <RefreshCw size={18} className="animate-spin text-indigo-600" />
+          ) : isCompleted ? (
             <CheckCircle2 size={20} className="text-emerald-600 fill-emerald-100" />
           ) : (
             <Circle size={20} className="hover:text-emerald-500" />

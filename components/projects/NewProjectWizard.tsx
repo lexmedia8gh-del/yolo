@@ -45,6 +45,8 @@ import {
   openExternalUrl,
   appUrl,
   getPaymentLink,
+  formatActionError,
+  fetchWithTimeout,
 } from '@/lib/utils'
 import { where, orderBy } from '@/lib/firebase/firestore'
 import toast from 'react-hot-toast'
@@ -244,7 +246,7 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
 
   // ─── Atomic Project + Invoice + ClientLink creation ──────────
   const handleConfirm = useCallback(async () => {
-    if (!selectedService || !selectedPackage) return
+    if (!selectedService || !selectedPackage || submitting) return
 
     const depositValidation = getValidatedDeposit()
     if (!depositValidation.isValid) {
@@ -516,13 +518,14 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
       onSuccess?.()
     } catch (err: any) {
       console.error('Project creation failed:', err)
-      toast.error(err?.message || 'Failed to create project. Please try again.')
+      toast.error(formatActionError(err, 'Failed to create project. Please try again.'))
     } finally {
       setSubmitting(false)
     }
   }, [
     selectedService,
     selectedPackage,
+    submitting,
     client,
     projectName,
     projectNotes,
@@ -534,13 +537,18 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
 
   const handleCopyLink = async () => {
     if (!result?.paymentUrl) return
-    await copyToClipboard(result.paymentUrl)
-    setLinkCopied(true)
-    toast.success('Payment link copied!')
-    setTimeout(() => setLinkCopied(false), 2000)
+    const copied = await copyToClipboard(result.paymentUrl)
+    if (copied) {
+      setLinkCopied(true)
+      toast.success('Payment link copied!')
+      setTimeout(() => setLinkCopied(false), 2000)
+    } else {
+      toast.error('Failed to copy payment link')
+    }
   }
 
   const handleWhatsApp = async () => {
+    if (sendingWA || waSent) return
     if (!result || !client.whatsappNumber) {
       toast.error('Client does not have a WhatsApp number. Add a WhatsApp number before sending.')
       return
@@ -550,7 +558,7 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
     try {
       const msg = `Hello ${client.fullName}! 👋\n\nYour invoice ${result.invoiceNumber} is ready.\n\n📋 Service: ${result.service.name}\n📦 Package: ${result.pkg.title}\n💰 Total: ${formatCurrency(result.totalAmount)}\n🔐 Deposit: ${formatCurrency(result.depositAmount)}\n\nClick the link below to pay securely:\n${result.paymentUrl}\n\nThank you for choosing LEXMEDIA.GH! 🙏`
       
-      const res = await fetch('/api/whatsapp/send', {
+      const res = await fetchWithTimeout('/api/whatsapp/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -560,16 +568,17 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
           messageBody: msg,
           toNumber: client.whatsappNumber,
         }),
+        timeoutMs: 15000,
       })
 
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || 'Failed to send WhatsApp message')
 
       setWaSent(true)
       toast.success('WhatsApp message sent!')
     } catch (err: any) {
       console.error('WhatsApp Error:', err)
-      toast.error(err.message || 'Failed to send WhatsApp message.')
+      toast.error(formatActionError(err, 'Failed to send WhatsApp message.'))
     } finally {
       setSendingWA(false)
     }
@@ -593,7 +602,8 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
           {step !== 'success' && (
             <button
               onClick={onClose}
-              className="p-2 rounded-xl text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+              disabled={submitting}
+              className="p-2 rounded-xl text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <X size={18} />
             </button>
@@ -754,7 +764,8 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setStep('package')}
-                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                    disabled={submitting}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <ChevronLeft size={18} />
                   </button>
@@ -899,10 +910,11 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
                   size="md"
                   onClick={handleConfirm}
                   loading={submitting}
+                  loadingText="Creating Project..."
                   disabled={submitting || !projectName.trim() || !customDeposit.trim() || !!depositError}
-                  icon={submitting ? undefined : <Sparkles size={16} />}
+                  icon={<Sparkles size={16} />}
                 >
-                  {submitting ? 'Creating Project…' : 'Confirm & Create Project'}
+                  Confirm & Create Project
                 </Button>
               </div>
             )
@@ -981,12 +993,14 @@ export function NewProjectWizard({ client, onClose, onSuccess }: Props) {
                         variant={waSent ? 'outline' : 'primary'}
                         size="sm"
                         fullWidth
-                        icon={sendingWA ? <Spinner size="sm" /> : waSent ? <CheckCircle2 size={13} className="text-emerald-600" /> : <MessageSquare size={13} />}
+                        loading={sendingWA}
+                        loadingText="Sending..."
+                        icon={waSent ? <CheckCircle2 size={13} className="text-emerald-600" /> : <MessageSquare size={13} />}
                         onClick={handleWhatsApp}
                         disabled={sendingWA || waSent}
                         className={waSent ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'bg-emerald-600 hover:bg-emerald-700'}
                       >
-                        {sendingWA ? 'Sending...' : waSent ? 'Sent' : 'Send via WhatsApp'}
+                        {waSent ? 'Sent' : 'Send via WhatsApp'}
                       </Button>
                     )}
                   </div>

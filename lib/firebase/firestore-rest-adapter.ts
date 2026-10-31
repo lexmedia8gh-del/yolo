@@ -87,6 +87,24 @@ async function resolveCallerJwt(): Promise<string | null> {
   return null
 }
 
+function isRealFirebaseJwt(jwt: string | null): boolean {
+  return Boolean(jwt && jwt !== 'active-admin-session' && jwt.split('.').length === 3)
+}
+
+async function fetchRestWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 10000
+): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(new Error('Firestore REST timeout')), timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 function escapeFieldPathSegment(seg: string): string {
   if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(seg)) return seg
   return `\`${seg.replace(/`/g, '\\`')}\``
@@ -629,7 +647,7 @@ export class FirestoreRestAdapter {
     const { apiKey, baseUrl } = getRestConfig(this.projectId, this.databaseId)
     const localState = getLocalDocHydrated(ref.collectionPath, ref.id)
 
-    const canReadCloud = Boolean(jwt) || PUBLIC_READ_COLLECTIONS.has(topCollection)
+    const canReadCloud = isRealFirebaseJwt(jwt) || PUBLIC_READ_COLLECTIONS.has(topCollection)
     if (canReadCloud && apiKey) {
       const encodedDocPath = ref.path
         .split('/')
@@ -638,7 +656,7 @@ export class FirestoreRestAdapter {
       const url = this.appendApiKey(`${baseUrl}/${encodedDocPath}`, apiKey)
 
       try {
-        let res = await fetch(url, {
+        let res = await fetchRestWithTimeout(url, {
           method: 'GET',
           headers: this.buildHeaders(jwt),
           cache: 'no-store',
@@ -646,7 +664,7 @@ export class FirestoreRestAdapter {
 
         // If JWT expired on a publicly readable collection, retry unauthenticated
         if ((res.status === 401 || res.status === 403) && jwt && PUBLIC_READ_COLLECTIONS.has(topCollection)) {
-          res = await fetch(url, {
+          res = await fetchRestWithTimeout(url, {
             method: 'GET',
             headers: this.buildHeaders(null),
             cache: 'no-store',
@@ -784,7 +802,7 @@ export class FirestoreRestAdapter {
     const topCollection = collectionPath.split('/')[0]
     const jwt = await resolveCallerJwt()
     const { apiKey, basePath, baseUrl } = getRestConfig(this.projectId, this.databaseId)
-    const canReadCloud = Boolean(jwt) || PUBLIC_READ_COLLECTIONS.has(topCollection)
+    const canReadCloud = isRealFirebaseJwt(jwt) || PUBLIC_READ_COLLECTIONS.has(topCollection)
 
     const localMatched = queryLocalCollection(collectionPath, filters, [], undefined)
     const deletedMap = getLocallyDeletedMap(collectionPath)
@@ -803,7 +821,7 @@ export class FirestoreRestAdapter {
           basePath
         )
         const url = this.appendApiKey(`${baseUrl}${parentUrlPath}:runQuery`, apiKey)
-        return fetch(url, {
+        return fetchRestWithTimeout(url, {
           method: 'POST',
           headers: this.buildHeaders(activeJwt),
           body: JSON.stringify(body),
@@ -917,7 +935,7 @@ export class FirestoreRestAdapter {
     const allPublicWritable = ops.every((o) =>
       PUBLIC_WRITE_COLLECTIONS.has(o.ref.collectionPath.split('/')[0])
     )
-    const canWriteCloud = (Boolean(jwt) || allPublicWritable) && Boolean(apiKey)
+    const canWriteCloud = (isRealFirebaseJwt(jwt) || allPublicWritable) && Boolean(apiKey)
 
     if (canWriteCloud) {
       const writes = ops.map((op) => {
@@ -927,7 +945,7 @@ export class FirestoreRestAdapter {
 
       const commitUrl = this.appendApiKey(`${baseUrl}:commit`, apiKey)
       try {
-        let res = await fetch(commitUrl, {
+        let res = await fetchRestWithTimeout(commitUrl, {
           method: 'POST',
           headers: this.buildHeaders(jwt),
           body: JSON.stringify({ writes }),
@@ -942,7 +960,7 @@ export class FirestoreRestAdapter {
             const retryMode = op.mode === 'update' ? 'merge' : op.mode
             return buildCommitWrite(fullDocName, retryMode, op.data).write
           })
-          res = await fetch(commitUrl, {
+          res = await fetchRestWithTimeout(commitUrl, {
             method: 'POST',
             headers: this.buildHeaders(jwt),
             body: JSON.stringify({ writes: retryWrites }),

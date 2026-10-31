@@ -47,7 +47,7 @@ import {
   OFFICIAL_CATEGORIES,
   seedOfficialCatalogue,
 } from '@/lib/services/catalogueData'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatActionError } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 export default function PackagesPage() {
@@ -67,11 +67,15 @@ export default function PackagesPage() {
   const [deactivatingPackage, setDeactivatingPackage] = useState<Package | null>(null)
   const [deletingPackage, setDeletingPackage] = useState<Package | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isDeletingPackage, setIsDeletingPackage] = useState(false)
+  const [processingIds, setProcessingIds] = useState<string[]>([])
 
   // AddOn Modal States
   const [isAddOnModalOpen, setIsAddOnModalOpen] = useState(false)
   const [editingAddOn, setEditingAddOn] = useState<AddOn | null>(null)
   const [deletingAddOn, setDeletingAddOn] = useState<AddOn | null>(null)
+  const [isSavingAddOn, setIsSavingAddOn] = useState(false)
+  const [isDeletingAddOn, setIsDeletingAddOn] = useState(false)
 
   // Package Form State
   const [packageForm, setPackageForm] = useState({
@@ -139,6 +143,7 @@ export default function PackagesPage() {
 
   // Sync Official Catalogue
   const handleSyncCatalogue = async (showSuccessToast = true) => {
+    if (isSyncing) return
     setIsSyncing(true)
     try {
       const res = await seedOfficialCatalogue()
@@ -149,7 +154,7 @@ export default function PackagesPage() {
       }
     } catch (err: any) {
       console.error('Catalogue sync error:', err)
-      toast.error('Failed to synchronise catalogue.')
+      toast.error(formatActionError(err, 'Failed to synchronise catalogue.'))
     } finally {
       setIsSyncing(false)
     }
@@ -257,6 +262,7 @@ export default function PackagesPage() {
 
   const handleSavePackage = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSubmitting) return
     if (!packageForm.title.trim()) {
       toast.error('Please enter the package title')
       return
@@ -318,13 +324,15 @@ export default function PackagesPage() {
       resetPackageForm()
     } catch (err) {
       console.error('Error saving package:', err)
-      toast.error('Failed to save package.')
+      toast.error(formatActionError(err, 'Failed to save package.'))
     } finally {
       setIsSubmitting(false)
     }
   }
 
   const handleTogglePackageStatus = async (pkg: Package) => {
+    if (processingIds.includes(pkg.id)) return
+    setProcessingIds((prev) => [...prev, pkg.id])
     const newStatus = pkg.active === false || pkg.status === 'inactive'
     try {
       await updateDocument(COLLECTIONS.PACKAGES, pkg.id, {
@@ -334,14 +342,17 @@ export default function PackagesPage() {
       })
       toast.success(newStatus ? 'Package activated.' : 'Package deactivated.')
     } catch (err) {
-      toast.error('Failed to update package status.')
+      console.error('Error toggling package status:', err)
+      toast.error(formatActionError(err, 'Failed to update package status.'))
+    } finally {
+      setProcessingIds((prev) => prev.filter((id) => id !== pkg.id))
     }
   }
 
   // Safe Package Deletion / Archiving
   const handleDeletePackageConfirm = async () => {
-    if (!deletingPackage) return
-    setIsSubmitting(true)
+    if (!deletingPackage || isDeletingPackage) return
+    setIsDeletingPackage(true)
     try {
       // Check if package is used by any Quick Jobs
       const jobsUsingPkg = await getDocuments(COLLECTIONS.QUICK_JOBS, [])
@@ -364,9 +375,9 @@ export default function PackagesPage() {
       setDeletingPackage(null)
     } catch (err) {
       console.error('Error deleting package:', err)
-      toast.error('Failed to delete package.')
+      toast.error(formatActionError(err, 'Failed to delete package.'))
     } finally {
-      setIsSubmitting(false)
+      setIsDeletingPackage(false)
     }
   }
 
@@ -403,12 +414,13 @@ export default function PackagesPage() {
 
   const handleSaveAddOn = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isSavingAddOn) return
     if (!addOnForm.name.trim()) {
       toast.error('Please enter add-on name')
       return
     }
 
-    setIsSubmitting(true)
+    setIsSavingAddOn(true)
     try {
       const now = new Date().toISOString()
       const payload: Partial<AddOn> = {
@@ -437,36 +449,42 @@ export default function PackagesPage() {
       resetAddOnForm()
     } catch (err) {
       console.error('Error saving add-on:', err)
-      toast.error('Failed to save add-on.')
+      toast.error(formatActionError(err, 'Failed to save add-on.'))
     } finally {
-      setIsSubmitting(false)
+      setIsSavingAddOn(false)
     }
   }
 
   const handleToggleAddOnStatus = async (addon: AddOn) => {
+    if (processingIds.includes(addon.id)) return
+    setProcessingIds((prev) => [...prev, addon.id])
+    const newStatus = !addon.active
     try {
       await updateDocument(COLLECTIONS.ADD_ONS, addon.id, {
-        active: !addon.active,
+        active: newStatus,
         updatedAt: new Date().toISOString(),
       })
-      toast.success(addon.active ? 'Add-on deactivated.' : 'Add-on activated.')
+      toast.success(newStatus ? 'Add-on activated.' : 'Add-on deactivated.')
     } catch (err) {
-      toast.error('Failed to update add-on status.')
+      console.error('Error toggling add-on status:', err)
+      toast.error(formatActionError(err, 'Failed to update add-on status.'))
+    } finally {
+      setProcessingIds((prev) => prev.filter((id) => id !== addon.id))
     }
   }
 
   const handleDeleteAddOnConfirm = async () => {
-    if (!deletingAddOn) return
-    setIsSubmitting(true)
+    if (!deletingAddOn || isDeletingAddOn) return
+    setIsDeletingAddOn(true)
     try {
       await deleteDocument(COLLECTIONS.ADD_ONS, deletingAddOn.id)
       toast.success('Add-on deleted successfully.')
       setDeletingAddOn(null)
     } catch (err) {
       console.error('Error deleting add-on:', err)
-      toast.error('Failed to delete add-on.')
+      toast.error(formatActionError(err, 'Failed to delete add-on.'))
     } finally {
-      setIsSubmitting(false)
+      setIsDeletingAddOn(false)
     }
   }
 
@@ -549,6 +567,7 @@ export default function PackagesPage() {
               variant="outline"
               size="md"
               loading={isSyncing}
+              loadingText="Syncing..."
               icon={<RefreshCw size={15} />}
               title="Synchronise or restore official catalogue"
             >
@@ -700,7 +719,14 @@ export default function PackagesPage() {
                 </p>
               </div>
               <div className="flex items-center justify-center gap-3 pt-2">
-                <Button onClick={() => handleSyncCatalogue(true)} variant="outline" size="sm" icon={<RefreshCw size={14} />}>
+                <Button
+                  onClick={() => handleSyncCatalogue(true)}
+                  variant="outline"
+                  size="sm"
+                  loading={isSyncing}
+                  loadingText="Syncing..."
+                  icon={<RefreshCw size={14} />}
+                >
                   Sync Official Catalogue
                 </Button>
                 <Button onClick={openAddPackageModal} variant="primary" size="sm" icon={<Plus size={14} />}>
@@ -834,15 +860,22 @@ export default function PackagesPage() {
                         </button>
                         <button
                           type="button"
+                          disabled={processingIds.includes(pkg.id)}
                           onClick={() => handleTogglePackageStatus(pkg)}
                           className={`p-1.5 rounded-lg transition-colors ${
-                            isActive
+                            processingIds.includes(pkg.id)
+                              ? 'opacity-50 cursor-not-allowed'
+                              : isActive
                               ? 'text-gray-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30'
                               : 'text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30'
                           }`}
                           title={isActive ? 'Deactivate' : 'Activate'}
                         >
-                          <Power size={15} />
+                          {processingIds.includes(pkg.id) ? (
+                            <RefreshCw size={15} className="animate-spin text-indigo-600" />
+                          ) : (
+                            <Power size={15} />
+                          )}
                         </button>
                         <button
                           type="button"
@@ -940,15 +973,22 @@ export default function PackagesPage() {
                           </button>
                           <button
                             type="button"
+                            disabled={processingIds.includes(addon.id)}
                             onClick={() => handleToggleAddOnStatus(addon)}
                             className={`p-1.5 rounded-lg transition-colors ${
-                              isActive
+                              processingIds.includes(addon.id)
+                                ? 'opacity-50 cursor-not-allowed'
+                                : isActive
                                 ? 'text-gray-500 hover:text-amber-600 hover:bg-amber-50'
                                 : 'text-gray-500 hover:text-emerald-600 hover:bg-emerald-50'
                             }`}
                             title={isActive ? 'Deactivate' : 'Activate'}
                           >
-                            <Power size={14} />
+                            {processingIds.includes(addon.id) ? (
+                              <RefreshCw size={14} className="animate-spin text-indigo-600" />
+                            ) : (
+                              <Power size={14} />
+                            )}
                           </button>
                           <button
                             type="button"
@@ -974,7 +1014,8 @@ export default function PackagesPage() {
       {/* ────────────────────────────────────────────────────────── */}
       <Modal
         isOpen={isPackageModalOpen}
-        onClose={() => setIsPackageModalOpen(false)}
+        onClose={() => !isSubmitting && setIsPackageModalOpen(false)}
+        preventClose={isSubmitting}
         title={editingPackage ? 'Edit Package' : 'Create Package'}
         size="lg"
       >
@@ -1194,10 +1235,22 @@ export default function PackagesPage() {
             </label>
 
             <div className="flex items-center gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={() => setIsPackageModalOpen(false)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={isSubmitting}
+                onClick={() => setIsPackageModalOpen(false)}
+              >
                 Cancel
               </Button>
-              <Button type="submit" variant="primary" size="sm" loading={isSubmitting}>
+              <Button
+                type="submit"
+                variant="primary"
+                size="sm"
+                loading={isSubmitting}
+                loadingText={editingPackage ? 'Saving...' : 'Creating...'}
+              >
                 {editingPackage ? 'Save Changes' : 'Create Package'}
               </Button>
             </div>
@@ -1210,7 +1263,8 @@ export default function PackagesPage() {
       {/* ────────────────────────────────────────────────────────── */}
       <Modal
         isOpen={isAddOnModalOpen}
-        onClose={() => setIsAddOnModalOpen(false)}
+        onClose={() => !isSavingAddOn && setIsAddOnModalOpen(false)}
+        preventClose={isSavingAddOn}
         title={editingAddOn ? 'Edit Add-On' : 'Add New Add-On'}
         size="md"
       >
@@ -1292,10 +1346,22 @@ export default function PackagesPage() {
             </label>
 
             <div className="flex items-center gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={() => setIsAddOnModalOpen(false)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={isSavingAddOn}
+                onClick={() => setIsAddOnModalOpen(false)}
+              >
                 Cancel
               </Button>
-              <Button type="submit" variant="primary" size="sm" loading={isSubmitting}>
+              <Button
+                type="submit"
+                variant="primary"
+                size="sm"
+                loading={isSavingAddOn}
+                loadingText={editingAddOn ? 'Saving...' : 'Creating...'}
+              >
                 {editingAddOn ? 'Save Changes' : 'Create Add-On'}
               </Button>
             </div>
@@ -1308,7 +1374,8 @@ export default function PackagesPage() {
       {/* ────────────────────────────────────────────────────────── */}
       <Modal
         isOpen={!!deletingPackage}
-        onClose={() => setDeletingPackage(null)}
+        onClose={() => !isDeletingPackage && setDeletingPackage(null)}
+        preventClose={isDeletingPackage}
         title="Delete or Archive Package"
         size="sm"
       >
@@ -1325,13 +1392,19 @@ export default function PackagesPage() {
           </p>
 
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100 dark:border-gray-800">
-            <Button variant="ghost" size="sm" onClick={() => setDeletingPackage(null)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={isDeletingPackage}
+              onClick={() => setDeletingPackage(null)}
+            >
               Cancel
             </Button>
             <Button
               variant="danger"
               size="sm"
-              loading={isSubmitting}
+              loading={isDeletingPackage}
+              loadingText="Removing..."
               onClick={handleDeletePackageConfirm}
             >
               Confirm Removal
@@ -1345,7 +1418,8 @@ export default function PackagesPage() {
       {/* ────────────────────────────────────────────────────────── */}
       <Modal
         isOpen={!!deletingAddOn}
-        onClose={() => setDeletingAddOn(null)}
+        onClose={() => !isDeletingAddOn && setDeletingAddOn(null)}
+        preventClose={isDeletingAddOn}
         title="Delete Add-On"
         size="sm"
       >
@@ -1355,13 +1429,19 @@ export default function PackagesPage() {
           </p>
 
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100 dark:border-gray-800">
-            <Button variant="ghost" size="sm" onClick={() => setDeletingAddOn(null)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={isDeletingAddOn}
+              onClick={() => setDeletingAddOn(null)}
+            >
               Cancel
             </Button>
             <Button
               variant="danger"
               size="sm"
-              loading={isSubmitting}
+              loading={isDeletingAddOn}
+              loadingText="Deleting..."
               onClick={handleDeleteAddOnConfirm}
             >
               Delete Add-On

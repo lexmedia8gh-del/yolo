@@ -441,7 +441,6 @@ export default function PaymentsPage() {
         onClose={() => setShowRecordModal(false)}
         onSuccess={() => {
           fetchPayments()
-          toast.success('Payment recorded successfully')
         }}
       />
 
@@ -459,9 +458,7 @@ export default function PaymentsPage() {
       <PaymentLinkModal
         isOpen={showLinkModal}
         onClose={() => setShowLinkModal(false)}
-        onSuccess={() => {
-          toast.success('Payment link saved')
-        }}
+        onSuccess={() => {}}
       />
     </div>
   )

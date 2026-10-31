@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb, getAdminStorage } from '@/lib/firebase/admin'
 import { COLLECTIONS } from '@/lib/firebase/firestore'
 // Removed db import
-import { collection, query, where, getDocs, doc, getDoc, deleteDoc } from 'firebase/firestore'
-import { FieldValue, Timestamp } from 'firebase-admin/firestore'
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore'
+import { FieldValue } from 'firebase-admin/firestore'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
 import fs from 'fs'
 import path from 'path'
@@ -70,7 +70,9 @@ export async function POST(req: NextRequest) {
 
         if (fileSnap.exists()) {
           fileData = fileSnap.data()
-          await deleteDoc(fileDocRef)
+          try {
+            await getAdminDb().collection(COLLECTIONS.DELIVERY_FILES).doc(fileId).delete()
+          } catch {}
         }
       }
     }
@@ -123,22 +125,28 @@ export async function POST(req: NextRequest) {
         isFullyDownloaded = remainingSnap.empty
 
         if (isFullyDownloaded) {
-          await adminDb.collection(COLLECTIONS.DELIVERIES).doc(deliveryId).update({
-            status: 'Downloaded',
-            updatedAt: FieldValue.serverTimestamp(),
-          })
+          await adminDb.collection(COLLECTIONS.DELIVERIES).doc(deliveryId).set(
+            {
+              status: 'Downloaded',
+              updatedAt: FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          )
         }
 
         // Check if this delivery belongs to a Quick Job
         const quickJobId = deliveryData.quickJobId || (deliveryId.startsWith('qj_') ? deliveryId : null)
         if (quickJobId) {
           const qjRef = adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(quickJobId)
-          await qjRef.update({
-            deliveryStatus: isFullyDownloaded ? 'Downloaded' : 'Released',
-            lastDownloadedAt: FieldValue.serverTimestamp(),
-            downloadCount: FieldValue.increment(1),
-            updatedAt: FieldValue.serverTimestamp(),
-          })
+          await qjRef.set(
+            {
+              deliveryStatus: isFullyDownloaded ? 'Downloaded' : 'Released',
+              lastDownloadedAt: FieldValue.serverTimestamp(),
+              downloadCount: FieldValue.increment(1),
+              updatedAt: FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          )
         }
       }
     } catch (statusErr) {

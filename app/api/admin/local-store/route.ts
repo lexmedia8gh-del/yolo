@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAdminDb, requireAdmin } from '@/lib/firebase/admin'
+import { getAdminDb, hasAdminCredentials, requireAdmin } from '@/lib/firebase/admin'
 import {
   clearLocalCollection,
   dehydrateForJsonResponse,
@@ -26,6 +26,17 @@ function sanitizeDocId(raw?: string | null): string {
   return clean
 }
 
+function hasDirectCloudAccess(req: NextRequest): boolean {
+  if (hasAdminCredentials() || Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
+    return true
+  }
+  const authHeader = req.headers.get('authorization') || ''
+  const bearer = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : ''
+  const cookieToken = req.cookies.get('__session')?.value?.trim() || ''
+  const token = bearer || cookieToken
+  return Boolean(token && token !== 'active-admin-session' && token.split('.').length === 3)
+}
+
 export async function GET(req: NextRequest) {
   const authResult = await requireAdmin(req)
   if (!authResult.ok) {
@@ -33,40 +44,48 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url)
-  const col = sanitizeCollection(searchParams.get('collection'))
-  const docId = sanitizeDocId(searchParams.get('id'))
+  const col = sanitizeCollection(searchParams.get('collection') || searchParams.get('collectionName'))
+  const docId = sanitizeDocId(searchParams.get('id') || searchParams.get('docId'))
 
   if (!col) {
     return NextResponse.json({ error: 'Invalid collection name.' }, { status: 400 })
   }
 
-  // First try fetching directly from Cloud Firestore via getAdminDb
-  try {
-    const adminDb = getAdminDb()
-    if (docId) {
-      const snap = await adminDb.collection(col).doc(docId).get()
-      if (snap.exists) {
-        const data = snap.data() || {}
-        setLocalDoc(col, docId, data, { merge: true, cloudSynced: true })
-        return NextResponse.json({
-          ok: true,
-          doc: { ...data, id: docId },
-        })
+  const isDirectAdminSdk = hasAdminCredentials() || Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS)
+
+  // First try fetching directly from Cloud Firestore when cloud credentials or user JWT are present
+  if (hasDirectCloudAccess(req)) {
+    try {
+      const adminDb = getAdminDb()
+      if (docId) {
+        const snap = await adminDb.collection(col).doc(docId).get()
+        if (snap.exists) {
+          const data = snap.data() || {}
+          if (isDirectAdminSdk) {
+            setLocalDoc(col, docId, data, { merge: true, cloudSynced: true })
+          }
+          return NextResponse.json({
+            ok: true,
+            doc: { ...dehydrateForJsonResponse(data), id: docId },
+          })
+        }
+      } else {
+        const colSnap = await adminDb.collection(col).get()
+        if (!colSnap.empty) {
+          const cloudDocs: any[] = []
+          colSnap.forEach((d) => {
+            const data = d.data() || {}
+            if (isDirectAdminSdk) {
+              setLocalDoc(col, d.id, data, { merge: true, cloudSynced: true })
+            }
+            cloudDocs.push({ ...dehydrateForJsonResponse(data), id: d.id })
+          })
+          return NextResponse.json({ ok: true, docs: cloudDocs })
+        }
       }
-    } else {
-      const colSnap = await adminDb.collection(col).get()
-      if (!colSnap.empty) {
-        const cloudDocs: any[] = []
-        colSnap.forEach((d) => {
-          const data = d.data() || {}
-          setLocalDoc(col, d.id, data, { merge: true, cloudSynced: true })
-          cloudDocs.push({ ...data, id: d.id })
-        })
-        return NextResponse.json({ ok: true, docs: cloudDocs })
-      }
+    } catch (err) {
+      console.warn(`[LocalStore API] Cloud Firestore query fallback for ${col}:`, err)
     }
-  } catch (err) {
-    console.warn(`[LocalStore API] Cloud Firestore query fallback for ${col}:`, err)
   }
 
   if (docId) {
@@ -93,27 +112,34 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const action = String(body?.action || '')
-    const col = sanitizeCollection(body?.collection)
+    const col = sanitizeCollection(body?.collection || body?.collectionName)
     const cloudSynced = Boolean(body?.cloudSynced)
-    const adminDb = getAdminDb()
+    const canMirrorCloud = hasDirectCloudAccess(req)
+    const adminDb = canMirrorCloud ? getAdminDb() : null
 
     if (action === 'batch' && Array.isArray(body?.operations)) {
       for (const op of body.operations) {
-        const opCol = sanitizeCollection(op?.collection)
-        const opId = sanitizeDocId(op?.id)
+        const opCol = sanitizeCollection(op?.collection || op?.collectionName)
+        const opId = sanitizeDocId(op?.id || op?.docId)
         if (!opCol || !opId) continue
         if (op.type === 'delete') {
           deleteLocalDoc(opCol, opId, { cloudSynced: Boolean(op.cloudSynced) })
-          try { await adminDb.collection(opCol).doc(opId).delete() } catch {}
+          if (adminDb) {
+            try { await adminDb.collection(opCol).doc(opId).delete() } catch {}
+          }
         } else if (op.type === 'update') {
-          updateLocalDoc(opCol, opId, op.data || {}, { cloudSynced: Boolean(op.cloudSynced) })
-          try { await adminDb.collection(opCol).doc(opId).set(op.data || {}, { merge: true }) } catch {}
+          const updated = updateLocalDoc(opCol, opId, op.data || {}, { cloudSynced: Boolean(op.cloudSynced) })
+          if (adminDb) {
+            try { await adminDb.collection(opCol).doc(opId).set(updated, { merge: true }) } catch {}
+          }
         } else {
-          setLocalDoc(opCol, opId, op.data || {}, {
+          const saved = setLocalDoc(opCol, opId, op.data || {}, {
             merge: Boolean(op.merge),
             cloudSynced: Boolean(op.cloudSynced),
           })
-          try { await adminDb.collection(opCol).doc(opId).set(op.data || {}, { merge: Boolean(op.merge) }) } catch {}
+          if (adminDb) {
+            try { await adminDb.collection(opCol).doc(opId).set(saved, { merge: Boolean(op.merge) }) } catch {}
+          }
         }
       }
       return NextResponse.json({ ok: true })
@@ -131,16 +157,18 @@ export async function POST(req: NextRequest) {
     if (action === 'syncCollection' && Array.isArray(body?.docs)) {
       const defaultCloudSynced = body?.cloudSynced !== undefined ? Boolean(body.cloudSynced) : true
       for (const item of body.docs) {
-        const itemId = sanitizeDocId(item?.id)
+        const itemId = sanitizeDocId(item?.id || item?.docId)
         if (!itemId) continue
         const { id: _ignored, ...rest } = item
-        setLocalDoc(col, itemId, rest, { merge: true, cloudSynced: defaultCloudSynced })
-        try { await adminDb.collection(col).doc(itemId).set(rest, { merge: true }) } catch {}
+        const saved = setLocalDoc(col, itemId, rest, { merge: true, cloudSynced: defaultCloudSynced })
+        if (adminDb && !defaultCloudSynced) {
+          try { await adminDb.collection(col).doc(itemId).set(saved, { merge: true }) } catch {}
+        }
       }
       return NextResponse.json({ ok: true })
     }
 
-    const docId = sanitizeDocId(body?.id)
+    const docId = sanitizeDocId(body?.id || body?.docId)
     if (!docId) {
       return NextResponse.json({ error: 'Invalid document ID.' }, { status: 400 })
     }
@@ -151,10 +179,12 @@ export async function POST(req: NextRequest) {
         merge: Boolean(body?.merge),
         cloudSynced,
       })
-      try {
-        await adminDb.collection(col).doc(docId).set(data, { merge: Boolean(body?.merge) })
-      } catch (e) {
-        console.warn(`[LocalStore API] Failed to mirror set to Cloud Firestore for ${col}/${docId}:`, e)
+      if (adminDb && !cloudSynced) {
+        try {
+          await adminDb.collection(col).doc(docId).set(saved, { merge: Boolean(body?.merge) })
+        } catch (e) {
+          console.warn(`[LocalStore API] Failed to mirror set to Cloud Firestore for ${col}/${docId}:`, e)
+        }
       }
       return NextResponse.json({
         ok: true,
@@ -166,10 +196,12 @@ export async function POST(req: NextRequest) {
     if (action === 'update') {
       const data = body?.data && typeof body.data === 'object' ? body.data : {}
       const updated = updateLocalDoc(col, docId, data, { cloudSynced })
-      try {
-        await adminDb.collection(col).doc(docId).set(data, { merge: true })
-      } catch (e) {
-        console.warn(`[LocalStore API] Failed to mirror update to Cloud Firestore for ${col}/${docId}:`, e)
+      if (adminDb && !cloudSynced) {
+        try {
+          await adminDb.collection(col).doc(docId).set(updated, { merge: true })
+        } catch (e) {
+          console.warn(`[LocalStore API] Failed to mirror update to Cloud Firestore for ${col}/${docId}:`, e)
+        }
       }
       return NextResponse.json({
         ok: true,
@@ -180,10 +212,12 @@ export async function POST(req: NextRequest) {
 
     if (action === 'delete') {
       deleteLocalDoc(col, docId, { cloudSynced })
-      try {
-        await adminDb.collection(col).doc(docId).delete()
-      } catch (e) {
-        console.warn(`[LocalStore API] Failed to mirror delete to Cloud Firestore for ${col}/${docId}:`, e)
+      if (adminDb && !cloudSynced) {
+        try {
+          await adminDb.collection(col).doc(docId).delete()
+        } catch (e) {
+          console.warn(`[LocalStore API] Failed to mirror delete to Cloud Firestore for ${col}/${docId}:`, e)
+        }
       }
       return NextResponse.json({ ok: true, id: docId })
     }

@@ -198,15 +198,8 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Generate session token or fallback session
-      let token = 'active-admin-session'
-      if (hasAdminCredentials() && targetUid !== 'admin-staff-user') {
-        try {
-          token = await getAdminAuth().createCustomToken(targetUid, { admin: true })
-        } catch {
-          token = 'active-admin-session'
-        }
-      }
+      // Use active-admin-session cookie token so server API routes (requireAdmin) validate PIN sessions reliably
+      const token = 'active-admin-session'
 
       const response = NextResponse.json({
         ok: true,

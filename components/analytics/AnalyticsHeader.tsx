@@ -92,10 +92,11 @@ export function AnalyticsHeader({
             variant="primary"
             onClick={onExportExcel}
             loading={exporting}
+            loadingText="Generating Report..."
             icon={<FileSpreadsheet size={16} className="text-emerald-300" />}
             className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
           >
-            {exporting ? 'Generating Report...' : `Export Annual Report (.xlsx)`}
+            Export Annual Report (.xlsx)
           </Button>
         </div>
       </div>
