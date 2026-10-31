@@ -3,6 +3,7 @@ import { getAdminDb, requireAdmin } from '@/lib/firebase/admin'
 import { substitutePlaceholders, DEFAULT_DISPATCH_TEMPLATES } from '@/lib/templates/dispatchTemplates'
 import { getEmailSender } from '@/lib/config/email'
 import { getAppUrl, getProductionUrl } from '@/lib/utils'
+import { renderDispatchEmailTemplate, type EmailBrandingOptions } from '@/lib/services/brevo'
 
 export const dynamic = 'force-dynamic'
 
@@ -136,10 +137,6 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const channel = (body?.channel || 'email').toLowerCase() as 'email' | 'sms'
-    const recipientEmail = String(body?.recipientEmail || '').trim()
-    const recipientPhone = String(body?.recipientPhone || '').trim()
-    const recipientName = String(body?.recipientName || 'Valued Client').trim()
-    const clientId = String(body?.clientId || '').trim()
     const templateId = String(body?.templateId || '').trim()
 
     let rawSubject = String(body?.subject || '').trim()
@@ -158,118 +155,212 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Dispatch message content body is required.' }, { status: 400 })
     }
 
-    // Perform variable placeholder substitution
-    const substitutedSubject = substitutePlaceholders(rawSubject || 'LEXMEDIA.GH Dispatch Notification', {
-      clientName: recipientName,
-      clientId,
-      projectName: body?.projectName,
-      invoiceNumber: body?.invoiceNumber,
-      invoiceAmount: body?.invoiceAmount || body?.amount,
-      amountPaid: body?.amountPaid,
-      outstandingBalance: body?.outstandingBalance,
-      paymentStatus: body?.paymentStatus,
-      loginUrl: body?.loginUrl || `${getAppUrl()}/login`,
-      serviceName: body?.serviceName,
-    })
+    // Build normalized list of recipients (supports multi-recipient array or single target)
+    let recipientsList: Array<{
+      recipientEmail: string
+      recipientPhone: string
+      recipientName: string
+      clientId: string
+    }> = []
 
-    const substitutedBody = substitutePlaceholders(rawBody, {
-      clientName: recipientName,
-      clientId,
-      projectName: body?.projectName,
-      invoiceNumber: body?.invoiceNumber,
-      invoiceAmount: body?.invoiceAmount || body?.amount,
-      amountPaid: body?.amountPaid,
-      outstandingBalance: body?.outstandingBalance,
-      paymentStatus: body?.paymentStatus,
-      loginUrl: body?.loginUrl || `${getAppUrl()}/login`,
-      serviceName: body?.serviceName,
-    })
-
-    const logRef = await getAdminDb().collection('communication_history').add({
-      channel,
-      recipientEmail,
-      recipientPhone,
-      recipientName,
-      clientId,
-      templateId: templateId || 'custom',
-      subject: substitutedSubject,
-      body: substitutedBody,
-      status: 'sending',
-      createdAt: new Date().toISOString(),
-      sentBy: authResult.email || authResult.uid,
-    })
-
-    let dispatchResult: { success: boolean; messageId?: string; error?: string }
-
-    if (channel === 'sms') {
-      if (!recipientPhone) {
-        await logRef.update({ status: 'failed', error: 'Missing phone number for SMS dispatch.' })
-        return NextResponse.json({ error: 'Recipient phone number is required for SMS dispatches.' }, { status: 400 })
-      }
-      dispatchResult = await sendBrevoTransactionalSms({
-        toPhone: recipientPhone,
-        senderName: 'LEXMEDIA',
-        content: substitutedBody,
-      })
+    if (Array.isArray(body?.recipients) && body.recipients.length > 0) {
+      recipientsList = body.recipients.map((r: any) => ({
+        recipientEmail: String(r.recipientEmail || r.email || '').trim(),
+        recipientPhone: String(r.recipientPhone || r.phone || '').trim(),
+        recipientName: String(r.recipientName || r.name || 'Valued Client').trim(),
+        clientId: String(r.clientId || r.id || '').trim(),
+      }))
     } else {
-      if (!recipientEmail || !recipientEmail.includes('@')) {
-        await logRef.update({ status: 'failed', error: 'Missing valid email address for Email dispatch.' })
-        return NextResponse.json({ error: 'Recipient email address is required for Email dispatches.' }, { status: 400 })
+      const singleEmail = String(body?.recipientEmail || '').trim()
+      const singlePhone = String(body?.recipientPhone || '').trim()
+      const singleName = String(body?.recipientName || 'Valued Client').trim()
+      const singleClientId = String(body?.clientId || '').trim()
+
+      if (singleEmail || singlePhone || singleName) {
+        recipientsList.push({
+          recipientEmail: singleEmail,
+          recipientPhone: singlePhone,
+          recipientName: singleName,
+          clientId: singleClientId,
+        })
       }
-
-      const formattedHtmlBody = `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>${substitutedSubject}</title></head>
-<body style="margin: 0; padding: 24px; background-color: #0b1329; font-family: sans-serif; color: #1e293b;">
-  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
-    <tr>
-      <td style="background-color: #0f172a; padding: 24px 28px; text-align: center; color: #ffffff;">
-        <h2 style="margin: 0; font-size: 20px; font-weight: 700;">LEXMEDIA.GH</h2>
-        <p style="margin: 4px 0 0 0; font-size: 11px; color: #38bdf8; text-transform: uppercase; letter-spacing: 1px;">Official Dispatch Notice</p>
-      </td>
-    </tr>
-    <tr>
-      <td style="padding: 28px; font-size: 14px; line-height: 1.6; color: #334155; white-space: pre-wrap;">${substitutedBody}</td>
-    </tr>
-    <tr>
-      <td style="background-color: #f8fafc; padding: 18px 28px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 11px; color: #64748b;">
-        &copy; LEXMEDIA.GH &bull; Digital Media Production &bull; Ghana
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`
-
-      dispatchResult = await sendBrevoDispatchEmail({
-        toEmail: recipientEmail,
-        toName: recipientName,
-        subject: substitutedSubject,
-        htmlContent: formattedHtmlBody,
-      })
     }
 
-    const finalStatus = dispatchResult.success ? 'sent' : 'failed'
-    await logRef.update({
-      status: finalStatus,
-      messageId: dispatchResult.messageId || null,
-      error: dispatchResult.error || null,
-      completedAt: new Date().toISOString(),
-    })
-
-    if (!dispatchResult.success) {
+    if (recipientsList.length === 0) {
       return NextResponse.json(
-        { error: dispatchResult.error || 'Failed to complete dispatch delivery.' },
-        { status: 500 }
+        { error: 'At least one recipient (email or phone) is required for dispatch.' },
+        { status: 400 }
       )
     }
 
+    // Fetch dynamic branding configuration from Firestore
+    let brandingOptions: EmailBrandingOptions = {
+      businessName: 'LEXMEDIA.GH',
+      primaryColor: '#2563eb',
+      secondaryColor: '#1e293b',
+      accentColor: '#38bdf8',
+    }
+
+    try {
+      const brandingSnap = await getAdminDb().collection('settings').doc('branding').get()
+      if (brandingSnap.exists) {
+        const bData = brandingSnap.data() || {}
+        brandingOptions = {
+          businessName: bData.businessName || 'LEXMEDIA.GH',
+          logoUrl: bData.logoUrl || bData.logoLightUrl || '',
+          primaryColor: bData.primaryColor || '#2563eb',
+          secondaryColor: bData.secondaryColor || '#1e293b',
+          accentColor: bData.accentColor || '#38bdf8',
+        }
+      }
+    } catch (err) {
+      console.warn('[Dispatch] Could not fetch settings/branding from Firestore, using default:', err)
+    }
+
+    // Resolve base portal URL cleanly without localhost
+    const rawLoginUrl = body?.portalUrl || body?.loginUrl || body?.deliveryUrl || body?.paymentUrl || '/login'
+    const cleanPortalUrl = getProductionUrl(rawLoginUrl, req)
+
+    const results: Array<{
+      recipient: string
+      recipientName: string
+      status: 'sent' | 'failed'
+      messageId?: string
+      error?: string
+      logId?: string
+    }> = []
+
+    // Execute dispatch for each target recipient
+    for (const target of recipientsList) {
+      const targetEmail = target.recipientEmail
+      const targetPhone = target.recipientPhone
+      const targetName = target.recipientName
+      const targetClientId = target.clientId
+
+      const substitutedSubject = substitutePlaceholders(rawSubject || 'LEXMEDIA.GH Dispatch Notification', {
+        clientName: targetName,
+        clientId: targetClientId,
+        projectName: body?.projectName,
+        invoiceNumber: body?.invoiceNumber,
+        invoiceAmount: body?.invoiceAmount || body?.amount,
+        amountPaid: body?.amountPaid,
+        outstandingBalance: body?.outstandingBalance,
+        paymentStatus: body?.paymentStatus,
+        loginUrl: cleanPortalUrl,
+        serviceName: body?.serviceName,
+        companyName: brandingOptions.businessName,
+      })
+
+      const substitutedBody = substitutePlaceholders(rawBody, {
+        clientName: targetName,
+        clientId: targetClientId,
+        projectName: body?.projectName,
+        invoiceNumber: body?.invoiceNumber,
+        invoiceAmount: body?.invoiceAmount || body?.amount,
+        amountPaid: body?.amountPaid,
+        outstandingBalance: body?.outstandingBalance,
+        paymentStatus: body?.paymentStatus,
+        loginUrl: cleanPortalUrl,
+        serviceName: body?.serviceName,
+        companyName: brandingOptions.businessName,
+      })
+
+      const logRef = await getAdminDb().collection('communication_history').add({
+        channel,
+        recipientEmail: targetEmail,
+        recipientPhone: targetPhone,
+        recipientName: targetName,
+        clientId: targetClientId,
+        templateId: templateId || 'custom',
+        subject: substitutedSubject,
+        body: substitutedBody,
+        portalUrl: cleanPortalUrl,
+        status: 'sending',
+        createdAt: new Date().toISOString(),
+        sentBy: authResult.email || authResult.uid,
+      })
+
+      let dispatchResult: { success: boolean; messageId?: string; error?: string }
+
+      if (channel === 'sms') {
+        if (!targetPhone) {
+          await logRef.update({ status: 'failed', error: 'Missing phone number for SMS dispatch.' })
+          results.push({
+            recipient: targetPhone || targetName,
+            recipientName: targetName,
+            status: 'failed',
+            error: 'Missing phone number for SMS dispatch',
+            logId: logRef.id,
+          })
+          continue
+        }
+
+        dispatchResult = await sendBrevoTransactionalSms({
+          toPhone: targetPhone,
+          senderName: brandingOptions.businessName || 'LEXMEDIA',
+          content: substitutedBody,
+        })
+      } else {
+        if (!targetEmail || !targetEmail.includes('@')) {
+          await logRef.update({ status: 'failed', error: 'Missing valid email address for Email dispatch.' })
+          results.push({
+            recipient: targetEmail || targetName,
+            recipientName: targetName,
+            status: 'failed',
+            error: 'Invalid or missing recipient email',
+            logId: logRef.id,
+          })
+          continue
+        }
+
+        const formattedHtmlBody = renderDispatchEmailTemplate({
+          recipientName: targetName,
+          subject: substitutedSubject,
+          bodyText: substitutedBody,
+          portalUrl: cleanPortalUrl,
+          buttonText: body?.buttonText || 'Access Client Portal',
+          branding: brandingOptions,
+          projectName: body?.projectName,
+          invoiceNumber: body?.invoiceNumber,
+          outstandingBalance: body?.outstandingBalance,
+        })
+
+        dispatchResult = await sendBrevoDispatchEmail({
+          toEmail: targetEmail,
+          toName: targetName,
+          subject: substitutedSubject,
+          htmlContent: formattedHtmlBody,
+        })
+      }
+
+      const finalStatus = dispatchResult.success ? 'sent' : 'failed'
+      await logRef.update({
+        status: finalStatus,
+        messageId: dispatchResult.messageId || null,
+        error: dispatchResult.error || null,
+        completedAt: new Date().toISOString(),
+      })
+
+      results.push({
+        recipient: channel === 'sms' ? targetPhone : targetEmail,
+        recipientName: targetName,
+        status: finalStatus,
+        messageId: dispatchResult.messageId,
+        error: dispatchResult.error,
+        logId: logRef.id,
+      })
+    }
+
+    const sentCount = results.filter((r) => r.status === 'sent').length
+    const failedCount = results.filter((r) => r.status === 'failed').length
+
     return NextResponse.json({
-      ok: true,
-      logId: logRef.id,
-      status: 'sent',
-      messageId: dispatchResult.messageId,
+      ok: sentCount > 0,
       channel,
-      recipient: channel === 'sms' ? recipientPhone : recipientEmail,
+      totalDispatched: results.length,
+      sentCount,
+      failedCount,
+      results,
     })
   } catch (err: any) {
     console.error('[Multi-Channel Dispatch API Error]:', err)
