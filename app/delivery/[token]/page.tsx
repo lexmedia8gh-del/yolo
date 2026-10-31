@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useId, useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import {
   Download,
@@ -43,6 +43,8 @@ import {
 } from '@/lib/utils'
 import { Spinner } from '@/components/ui/Spinner'
 import { BrandingProvider, useBranding } from '@/lib/contexts/BrandingContext'
+import { resolveBrandLogoCandidates, resolveBrandPalette } from '@/lib/branding/payment-theme'
+import type { BrandingSettings } from '@/lib/types'
 import toast from 'react-hot-toast'
 import {
   PageEnter,
@@ -107,7 +109,49 @@ export default function ClientDeliveryPage() {
 function ClientDeliveryPageInner() {
   const params = useParams()
   const token = (params?.token as string) || ''
-  const { branding } = useBranding()
+  const { branding: contextBranding } = useBranding()
+  const scopeId = useId().replace(/[^a-zA-Z0-9_-]/g, '')
+  const [liveBrandingOverride, setLiveBrandingOverride] = useState<Partial<BrandingSettings> | null>(null)
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/branding', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((payload) => {
+        if (active && payload?.success && payload.branding) {
+          setLiveBrandingOverride(payload.branding)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const effectiveBranding = useMemo<BrandingSettings>(
+    () => ({
+      ...contextBranding,
+      ...(liveBrandingOverride || {}),
+    }),
+    [contextBranding, liveBrandingOverride]
+  )
+
+  const palette = useMemo(() => resolveBrandPalette(effectiveBranding), [effectiveBranding])
+  const logoCandidates = useMemo(() => resolveBrandLogoCandidates(effectiveBranding, 'light'), [effectiveBranding])
+
+  const scopedPayCss = useMemo(
+    () => `
+      [data-pay-scope="${scopeId}"] {
+        --pay-primary: ${palette.primaryColor};
+        --pay-secondary: ${palette.secondaryColor};
+        --pay-accent: ${palette.accentColor};
+        --pay-cta-bg: ${palette.ctaBg};
+        --pay-cta-text: ${palette.ctaText};
+        --pay-cta-shadow: ${palette.ctaShadow};
+      }
+    `,
+    [scopeId, palette]
+  )
 
   const [loading, setLoading] = useState(true)
   const [delivery, setDelivery] = useState<DeliveryDTO | null>(null)
@@ -430,7 +474,7 @@ function ClientDeliveryPageInner() {
             <div className="space-y-2">
               <h1 className="text-xl font-bold text-white">Delivery Link Expired</h1>
               <p className="text-sm text-slate-400 leading-relaxed">
-                Please contact {branding.businessName || 'LEXMEDIA.GH'} to request a refreshed access link.
+                Please contact {palette.businessName || 'LEXMEDIA.GH'} to request a refreshed access link.
               </p>
             </div>
             <div className="pt-4 border-t border-slate-800">
@@ -472,36 +516,37 @@ function ClientDeliveryPageInner() {
 
     return (
       <PageEnter>
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
+        <style>{scopedPayCss}</style>
+        <div data-pay-scope={scopeId} className="min-h-screen bg-[#F8FAFC] text-[#0F172A] flex flex-col justify-between font-sans selection:bg-[var(--pay-cta-bg)] selection:text-[var(--pay-cta-text)]">
           {/* Header */}
-          <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20">
+          <header className="border-b border-slate-200/80 bg-white/95 backdrop-blur-md sticky top-0 z-20 shadow-xs">
             <div className="max-w-3xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                {branding.logoLightUrl || branding.logoUrl ? (
+                {logoCandidates.length > 0 ? (
                   <img
-                    src={branding.logoLightUrl || branding.logoUrl}
-                    alt={branding.businessName}
+                    src={logoCandidates[0]}
+                    alt={palette.businessName}
                     className="h-8 w-auto max-w-[160px] object-contain"
                   />
                 ) : (
                   <div
-                    className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md"
-                    style={{ backgroundColor: branding.buttonColor || '#4F46E5' }}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-xs"
+                    style={{ backgroundColor: palette.primaryColor }}
                   >
-                    {(branding.shortName || 'LX').slice(0, 2).toUpperCase()}
+                    {(palette.businessName || 'LX').slice(0, 2).toUpperCase()}
                   </div>
                 )}
                 <div>
-                  <span className="font-bold tracking-tight text-white text-base">
-                    {branding.businessName || 'LexMedia'}
+                  <span className="font-extrabold tracking-tight text-[#0F172A] text-base">
+                    {palette.businessName || 'LEXMEDIA.GH'}
                   </span>
-                  <span className="hidden sm:inline-block text-[11px] text-slate-400 font-mono ml-2 px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700">
+                  <span className="hidden sm:inline-block text-[11px] text-slate-500 font-medium ml-2 px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200">
                     Payment & Delivery Portal
                   </span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
                   <Lock size={13} />
                   Payment Required
                 </span>
@@ -511,46 +556,44 @@ function ClientDeliveryPageInner() {
 
           {/* Main Payment Required Content */}
           <main className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-16 w-full flex-1 flex flex-col items-center justify-center space-y-8">
-            <CardReveal className="w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-10 shadow-2xl space-y-8 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-48 h-48 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
-
+            <CardReveal className="w-full bg-white border border-[#E2E8F0] rounded-3xl p-6 sm:p-10 shadow-xl space-y-8 relative overflow-hidden">
               <div className="text-center space-y-3 relative z-10">
-                <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400">
+                <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto text-amber-600 shadow-xs">
                   <Lock size={30} />
                 </div>
                 <div className="space-y-1.5">
-                  <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                  <h1 className="text-2xl sm:text-3xl font-extrabold text-[#0F172A] tracking-tight">
                     Your Deliverables Are Ready 🎉
                   </h1>
-                  <p className="text-sm sm:text-base text-slate-300 max-w-lg mx-auto leading-relaxed">
+                  <p className="text-sm sm:text-base text-slate-600 max-w-lg mx-auto leading-relaxed">
                     Your files are ready for delivery. Please complete your outstanding payment to access and download your deliverables.
                   </p>
                 </div>
               </div>
 
               {/* Payment Summary Box */}
-              <div className="bg-slate-950/80 rounded-2xl p-5 sm:p-6 border border-slate-800/80 space-y-4 relative z-10">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Payment Summary</h3>
+              <div className="bg-slate-50/90 rounded-2xl p-5 sm:p-6 border border-slate-200/80 space-y-4 relative z-10">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Payment Summary</h3>
                 <div className="space-y-3 text-sm">
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-800/60">
-                    <span className="text-slate-400">Client Information</span>
-                    <span className="font-semibold text-white">{delivery.clientName}</span>
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-200/80">
+                    <span className="text-slate-600">Client Information</span>
+                    <span className="font-semibold text-slate-900">{delivery.clientName}</span>
                   </div>
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-800/60">
-                    <span className="text-slate-400">Project / Service</span>
-                    <span className="font-semibold text-white">{delivery.projectName || delivery.title}</span>
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-200/80">
+                    <span className="text-slate-600">Project / Service</span>
+                    <span className="font-semibold text-slate-900">{delivery.projectName || delivery.title}</span>
                   </div>
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-800/60">
-                    <span className="text-slate-400">Total Paid So Far</span>
-                    <span className="font-semibold text-emerald-400">{formatCurrency(totalPaid, currency)}</span>
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-200/80">
+                    <span className="text-slate-600">Total Paid So Far</span>
+                    <span className="font-bold text-emerald-600">{formatCurrency(totalPaid, currency)}</span>
                   </div>
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-800/60">
-                    <span className="text-slate-400">Total Agreed Price</span>
-                    <span className="font-semibold text-white">{formatCurrency(invoiceTotal, currency)}</span>
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-200/80">
+                    <span className="text-slate-600">Total Agreed Price</span>
+                    <span className="font-semibold text-slate-900">{formatCurrency(invoiceTotal, currency)}</span>
                   </div>
                   <div className="flex items-center justify-between pt-1">
-                    <span className="text-sm font-bold text-amber-400">Remaining Balance</span>
-                    <span className="text-lg font-extrabold text-amber-400 font-mono">
+                    <span className="text-sm font-bold text-[#0F172A]">Remaining Balance</span>
+                    <span className="text-xl font-extrabold text-[var(--pay-cta-bg)] font-mono">
                       {formatCurrency(remainingBal, currency)}
                     </span>
                   </div>
@@ -563,7 +606,7 @@ function ClientDeliveryPageInner() {
                   onClick={handlePayRemaining}
                   disabled={isProcessingPayment}
                   aria-busy={isProcessingPayment || undefined}
-                  className="w-full py-4 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-base transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2.5 cursor-pointer active:scale-[0.99] disabled:opacity-65 disabled:cursor-wait"
+                  className="w-full py-4 px-6 rounded-2xl bg-[var(--pay-cta-bg)] hover:opacity-95 text-[var(--pay-cta-text)] font-extrabold text-base transition-all shadow-[var(--pay-cta-shadow)] flex items-center justify-center gap-2.5 cursor-pointer active:scale-[0.99] disabled:opacity-65 disabled:cursor-wait"
                 >
                   {isProcessingPayment ? (
                     <>
@@ -573,12 +616,12 @@ function ClientDeliveryPageInner() {
                   ) : (
                     <>
                       <CreditCard size={20} />
-                      <span>Pay {formatCurrency(remainingBal, currency)} & Unlock Deliverables</span>
+                      <span>Proceed to Pay {formatCurrency(remainingBal, currency)} & Unlock Deliverables</span>
                     </>
                   )}
                 </button>
                 <p className="text-center text-xs text-slate-500 flex items-center justify-center gap-1.5 pt-1">
-                  <ShieldCheck size={14} className="text-emerald-400" />
+                  <ShieldCheck size={14} className="text-emerald-600" />
                   Secured by Paystack · Instant File Unlock Upon Verification
                 </p>
               </div>
@@ -586,9 +629,9 @@ function ClientDeliveryPageInner() {
           </main>
 
           {/* Footer */}
-          <footer className="border-t border-slate-800/80 bg-slate-900/40 py-6 px-4 sm:px-6 text-center text-xs text-slate-400 space-y-1">
-            <p className="font-semibold text-slate-300">Thank you for choosing {branding.businessName || 'LEXMEDIA.GH'}.</p>
-            <p>© {new Date().getFullYear()} {branding.businessName || 'LEXMEDIA.GH'}. All rights reserved.</p>
+          <footer className="border-t border-slate-200/80 bg-white py-6 px-4 sm:px-6 text-center text-xs text-slate-500 space-y-1">
+            <p className="font-semibold text-slate-700">Thank you for choosing {palette.businessName || 'LEXMEDIA.GH'}.</p>
+            <p>© {new Date().getFullYear()} {palette.businessName || 'LEXMEDIA.GH'}. All rights reserved.</p>
           </footer>
         </div>
       </PageEnter>
@@ -612,23 +655,23 @@ function ClientDeliveryPageInner() {
           <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20">
             <div className="max-w-3xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                {branding.logoLightUrl || branding.logoUrl ? (
+                {logoCandidates.length > 0 ? (
                   <img
-                    src={branding.logoLightUrl || branding.logoUrl}
-                    alt={branding.businessName}
+                    src={logoCandidates[0]}
+                    alt={palette.businessName}
                     className="h-8 w-auto max-w-[160px] object-contain"
                   />
                 ) : (
                   <div
                     className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md"
-                    style={{ backgroundColor: branding.buttonColor || '#4F46E5' }}
+                    style={{ backgroundColor: palette.primaryColor || '#4F46E5' }}
                   >
-                    {(branding.shortName || 'LX').slice(0, 2).toUpperCase()}
+                    {(palette.businessName || 'LX').slice(0, 2).toUpperCase()}
                   </div>
                 )}
                 <div>
                   <span className="font-bold tracking-tight text-white text-base">
-                    {branding.businessName || 'LEXMEDIA.GH'}
+                    {palette.businessName || 'LEXMEDIA.GH'}
                   </span>
                   <span className="hidden sm:inline-block text-[11px] text-slate-400 font-mono ml-2 px-2 py-0.5 rounded-lg bg-slate-800 border border-slate-700">
                     Client Project Portal
@@ -668,7 +711,7 @@ function ClientDeliveryPageInner() {
               <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-6 space-y-3 relative z-10">
                 <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-indigo-400 border-b border-slate-800/80 pb-3">
                   <MessageSquare size={15} />
-                  <span>Overview from {branding.businessName || 'LEXMEDIA.GH'}</span>
+                  <span>Overview from {palette.businessName || 'LEXMEDIA.GH'}</span>
                 </div>
                 <p className="text-sm sm:text-base text-slate-200 leading-relaxed font-sans whitespace-pre-wrap pt-1">
                   {customMessage}
@@ -757,7 +800,7 @@ function ClientDeliveryPageInner() {
 
                 <p className="text-center text-xs text-slate-400 flex items-center justify-center gap-1.5">
                   <ShieldCheck size={14} className="text-emerald-400" />
-                  Verified Client Portal · {branding.businessName || 'LEXMEDIA.GH'}
+                  Verified Client Portal · {palette.businessName || 'LEXMEDIA.GH'}
                 </p>
               </div>
             </CardReveal>
@@ -765,8 +808,8 @@ function ClientDeliveryPageInner() {
 
           {/* Footer */}
           <footer className="border-t border-slate-800/80 bg-slate-900/40 py-6 px-4 sm:px-6 text-center text-xs text-slate-400 space-y-1">
-            <p className="font-semibold text-slate-300">Thank you for choosing {branding.businessName || 'LEXMEDIA.GH'}.</p>
-            <p>© {new Date().getFullYear()} {branding.businessName || 'LEXMEDIA.GH'}. All rights reserved.</p>
+            <p className="font-semibold text-slate-300">Thank you for choosing {palette.businessName || 'LEXMEDIA.GH'}.</p>
+            <p>© {new Date().getFullYear()} {palette.businessName || 'LEXMEDIA.GH'}. All rights reserved.</p>
           </footer>
         </div>
       </PageEnter>
@@ -786,23 +829,23 @@ function ClientDeliveryPageInner() {
           <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20">
             <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                {branding.logoLightUrl || branding.logoUrl ? (
+                {logoCandidates.length > 0 ? (
                   <img
-                    src={branding.logoLightUrl || branding.logoUrl}
-                    alt={branding.businessName}
+                    src={logoCandidates[0]}
+                    alt={palette.businessName}
                     className="h-8 w-auto max-w-[160px] object-contain"
                   />
                 ) : (
                   <div
                     className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md"
-                    style={{ backgroundColor: branding.buttonColor || '#4F46E5' }}
+                    style={{ backgroundColor: palette.primaryColor || '#4F46E5' }}
                   >
-                    {(branding.shortName || 'LX').slice(0, 2).toUpperCase()}
+                    {(palette.businessName || 'LX').slice(0, 2).toUpperCase()}
                   </div>
                 )}
                 <div>
                   <span className="font-bold tracking-tight text-white text-base">
-                    {branding.businessName || 'LEXMEDIA.GH'}
+                    {palette.businessName || 'LEXMEDIA.GH'}
                   </span>
                   <span className="hidden sm:inline-block text-[11px] text-slate-400 font-mono ml-2 px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700">
                     Delivery Portal
@@ -1203,8 +1246,8 @@ function ClientDeliveryPageInner() {
         {/* Footer */}
         <FadeIn delay={0.3}>
           <footer className="border-t border-slate-800/80 bg-slate-900/40 py-8 px-4 sm:px-6 text-center text-xs text-slate-400 space-y-2">
-            <p className="font-semibold text-slate-300">Thank you for choosing {branding.businessName || 'LEXMEDIA.GH'}.</p>
-            <p>© {new Date().getFullYear()} {branding.businessName || 'LEXMEDIA.GH'}. All rights reserved.</p>
+            <p className="font-semibold text-slate-300">Thank you for choosing {palette.businessName || 'LEXMEDIA.GH'}.</p>
+            <p>© {new Date().getFullYear()} {palette.businessName || 'LEXMEDIA.GH'}. All rights reserved.</p>
           </footer>
         </FadeIn>
 

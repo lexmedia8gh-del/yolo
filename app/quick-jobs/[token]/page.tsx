@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useId, useMemo } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import {
   Lock,
@@ -30,6 +30,8 @@ import {
 } from '@/lib/utils'
 import { Spinner } from '@/components/ui/Spinner'
 import { getSupabaseClient, isSupabaseConfigured } from '@/lib/supabase/client'
+import { resolveBrandLogoCandidates, resolveBrandPalette } from '@/lib/branding/payment-theme'
+import type { BrandingSettings } from '@/lib/types'
 import toast from 'react-hot-toast'
 
 interface QuickJobDTO {
@@ -64,7 +66,49 @@ function QuickJobPortalContent() {
   const params = useParams()
   const searchParams = useSearchParams()
   const router = useRouter()
-  const { branding } = useBranding()
+  const { branding: contextBranding } = useBranding()
+  const scopeId = useId().replace(/[^a-zA-Z0-9_-]/g, '')
+  const [liveBrandingOverride, setLiveBrandingOverride] = useState<Partial<BrandingSettings> | null>(null)
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/branding', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((payload) => {
+        if (active && payload?.success && payload.branding) {
+          setLiveBrandingOverride(payload.branding)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const effectiveBranding = useMemo<BrandingSettings>(
+    () => ({
+      ...contextBranding,
+      ...(liveBrandingOverride || {}),
+    }),
+    [contextBranding, liveBrandingOverride]
+  )
+
+  const palette = useMemo(() => resolveBrandPalette(effectiveBranding), [effectiveBranding])
+  const logoCandidates = useMemo(() => resolveBrandLogoCandidates(effectiveBranding, 'light'), [effectiveBranding])
+
+  const scopedPayCss = useMemo(
+    () => `
+      [data-pay-scope="${scopeId}"] {
+        --pay-primary: ${palette.primaryColor};
+        --pay-secondary: ${palette.secondaryColor};
+        --pay-accent: ${palette.accentColor};
+        --pay-cta-bg: ${palette.ctaBg};
+        --pay-cta-text: ${palette.ctaText};
+        --pay-cta-shadow: ${palette.ctaShadow};
+      }
+    `,
+    [scopeId, palette]
+  )
 
   const token = (params?.token as string) || ''
   const refQuery = searchParams?.get('reference')
@@ -364,32 +408,55 @@ function QuickJobPortalContent() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 py-10 px-4 sm:px-6 lg:px-8 selection:bg-indigo-500 selection:text-white">
-      {/* Background glow */}
-      <div className="fixed inset-0 pointer-events-none bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.12),rgba(255,255,255,0))]" />
+    <div
+      data-pay-scope={scopeId}
+      className="min-h-screen bg-[#F8FAFC] text-[#0F172A] py-8 sm:py-12 px-4 sm:px-6 lg:px-8 selection:bg-[var(--pay-cta-bg)] selection:text-[var(--pay-cta-text)]"
+    >
+      <style dangerouslySetInnerHTML={{ __html: scopedPayCss }} />
 
-      <div className="max-w-3xl mx-auto space-y-8 relative z-10">
+      <div className="max-w-2xl mx-auto space-y-6 relative z-10">
         {/* Brand & Job Header */}
-        <header className="border-b border-slate-800/80 pb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-xs font-semibold text-indigo-400 mb-2">
-              <ShieldCheck size={14} />
-              <span>Secure Quick Job Portal</span>
-            </div>
-            <h1 className="text-2xl font-black tracking-tight text-white">
-              {branding.businessName || 'LEXMEDIA.GH'}
+        <header className="text-center space-y-3 pb-2">
+          {logoCandidates.find((u) => u) ? (
+            <img
+              src={logoCandidates.find((u) => u)}
+              alt={`${palette.businessName} logo`}
+              referrerPolicy="no-referrer"
+              className="max-h-12 w-auto max-w-[190px] mx-auto object-contain select-none"
+            />
+          ) : null}
+          <div className="space-y-1">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#0F172A]">
+              {palette.businessName}
             </h1>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Client: <strong className="text-slate-200">{job.clientName}</strong>
+            <p className="inline-flex items-center justify-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[#64748B]">
+              <ShieldCheck size={14} className="text-emerald-600 shrink-0" />
+              <span>Secure Quick Job Portal</span>
             </p>
           </div>
+        </header>
 
-          <div className="flex items-center gap-2">
+        {/* ── Section 1: Job Summary & Financials ── */}
+        <div className="bg-white border border-[#E2E8F0] rounded-3xl p-6 sm:p-8 shadow-xl shadow-gray-200/50 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#E2E8F0]">
+            <div className="space-y-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[#64748B]">
+                Client & Deliverables Description
+              </span>
+              <h2 className="text-lg font-extrabold text-[#0F172A] leading-snug">
+                {job.jobDescription}
+              </h2>
+              <p className="text-xs text-[#64748B]">
+                Client: <strong className="text-[#0F172A]">{job.clientName}</strong>
+                {job.serviceTitle ? ` · Service: ${job.serviceTitle}` : ''}
+              </p>
+            </div>
+
             <span
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 shrink-0 ${
                 job.isPaid
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                  : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700'
+                  : 'bg-amber-500/10 border-amber-500/30 text-amber-700'
               }`}
             >
               {job.isPaid ? (
@@ -405,49 +472,32 @@ function QuickJobPortalContent() {
               )}
             </span>
           </div>
-        </header>
-
-        {/* ── Section 1: Job Summary & Financials ── */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 backdrop-blur-xl shadow-xl space-y-6">
-          <div className="space-y-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              Deliverables Description
-            </span>
-            <h2 className="text-lg font-bold text-white leading-relaxed">
-              {job.jobDescription}
-            </h2>
-            {job.serviceTitle && (
-              <p className="text-xs text-slate-400 font-medium">
-                Service: {job.serviceTitle}
-              </p>
-            )}
-          </div>
 
           {/* Pricing Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 border-t border-slate-800/80">
-            <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/60">
-              <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="bg-[#F8FAFC] p-3.5 rounded-2xl border border-[#E2E8F0]">
+              <span className="text-[10px] uppercase font-semibold text-[#64748B] block mb-1">
                 Agreed Total
               </span>
-              <span className="text-base font-bold text-white font-mono">
+              <span className="text-base font-bold text-[#0F172A] font-mono">
                 {formatCurrency(job.originalAgreedPrice, job.currency)}
               </span>
             </div>
-            <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/60">
-              <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">
+            <div className="bg-[#F8FAFC] p-3.5 rounded-2xl border border-[#E2E8F0]">
+              <span className="text-[10px] uppercase font-semibold text-[#64748B] block mb-1">
                 Amount Paid
               </span>
-              <span className="text-base font-bold text-emerald-400 font-mono">
+              <span className="text-base font-bold text-emerald-700 font-mono">
                 {formatCurrency(job.amountPaid, job.currency)}
               </span>
             </div>
-            <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/60">
-              <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">
+            <div className="bg-[#F8FAFC] p-3.5 rounded-2xl border border-[#E2E8F0]">
+              <span className="text-[10px] uppercase font-semibold text-[#64748B] block mb-1">
                 Outstanding Balance
               </span>
               <span
                 className={`text-base font-bold font-mono ${
-                  job.isPaid ? 'text-slate-500' : 'text-rose-400'
+                  job.isPaid ? 'text-[#64748B]' : 'text-rose-600'
                 }`}
               >
                 {formatCurrency(job.outstandingBalance, job.currency)}
@@ -464,44 +514,44 @@ function QuickJobPortalContent() {
             const remainingAfterPayment = Math.max(0, job.outstandingBalance - amountToCollectNow)
 
             return (
-              <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-4">
+              <div className="p-5 rounded-2xl bg-amber-500/8 border border-amber-500/20 space-y-4">
                 <div className="flex items-start gap-3">
-                  <Lock size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                  <Lock size={18} className="text-amber-600 shrink-0 mt-0.5" />
                   <div className="space-y-1">
-                    <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wide">
+                    <h4 className="text-xs font-bold text-amber-800 uppercase tracking-wide">
                       Payment Required to Unlock Deliverables & Uploads
                     </h4>
-                    <p className="text-xs text-amber-200/80 leading-relaxed">
+                    <p className="text-xs text-[#475569] leading-relaxed">
                       Review the payment details below and proceed with Paystack. Deliverable files will be immediately unlocked once verified.
                     </p>
                   </div>
                 </div>
 
                 {/* Financial Breakdown Table */}
-                <div className="bg-slate-950/80 rounded-xl p-4 border border-slate-800 text-xs space-y-2.5">
-                  <div className="flex items-center justify-between text-slate-400">
+                <div className="bg-[#F8FAFC] rounded-xl p-4 border border-[#E2E8F0] text-xs space-y-2.5">
+                  <div className="flex items-center justify-between text-[#64748B]">
                     <span>Original Job Total:</span>
-                    <span className="font-mono font-bold text-white">
+                    <span className="font-mono font-bold text-[#0F172A]">
                       {formatCurrency(job.originalAgreedPrice, job.currency)}
                     </span>
                   </div>
                   {job.amountPaid > 0 && (
-                    <div className="flex items-center justify-between text-slate-400">
+                    <div className="flex items-center justify-between text-[#64748B]">
                       <span>Previously Paid:</span>
-                      <span className="font-mono font-semibold text-emerald-400">
+                      <span className="font-mono font-semibold text-emerald-700">
                         {formatCurrency(job.amountPaid, job.currency)}
                       </span>
                     </div>
                   )}
-                  <div className="flex items-center justify-between text-amber-400 font-bold border-t border-slate-800 pt-2 text-sm">
-                    <span>Amount Due for This Payment:</span>
-                    <span className="font-mono text-base">
+                  <div className="flex items-center justify-between font-bold border-t border-[#E2E8F0] pt-2 text-sm">
+                    <span className="text-[var(--pay-cta-bg)] font-bold">Amount Due for This Payment:</span>
+                    <span className="font-mono text-[var(--pay-cta-bg)] text-base font-extrabold">
                       {formatCurrency(amountToCollectNow, job.currency)}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between text-slate-400 pt-1 border-t border-slate-800">
+                  <div className="flex items-center justify-between text-[#64748B] pt-1 border-t border-[#E2E8F0]">
                     <span>Remaining Balance After Successful Payment:</span>
-                    <span className="font-mono font-bold text-slate-200">
+                    <span className="font-mono font-bold text-[#0F172A]">
                       {formatCurrency(remainingAfterPayment, job.currency)}
                     </span>
                   </div>
@@ -511,11 +561,11 @@ function QuickJobPortalContent() {
                   onClick={handlePayNow}
                   disabled={isProcessingPayment}
                   aria-busy={isProcessingPayment || undefined}
-                  className="w-full py-3.5 px-5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-65 disabled:cursor-wait"
+                  className="w-full h-14 rounded-2xl font-extrabold text-sm sm:text-base bg-[var(--pay-cta-bg)] text-[var(--pay-cta-text)] hover:opacity-95 transition-all shadow-lg shadow-[var(--pay-cta-shadow)] flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-65 disabled:cursor-wait"
                 >
                   {isProcessingPayment ? (
                     <>
-                      <RefreshCw size={16} className="animate-spin" />
+                      <RefreshCw size={18} className="animate-spin" />
                       <span>Connecting to Paystack...</span>
                     </>
                   ) : (
@@ -711,7 +761,7 @@ function QuickJobPortalContent() {
 
         {/* Footer */}
         <footer className="text-center text-xs text-slate-500 pt-4">
-          <p>© {new Date().getFullYear()} {branding.businessName || 'LEXMEDIA.GH'}. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} {palette.businessName || 'LEXMEDIA.GH'}. All rights reserved.</p>
         </footer>
       </div>
     </div>

@@ -23,7 +23,7 @@ import {
   COLLECTIONS,
   getDocuments,
 } from '@/lib/firebase/firestore'
-import type { ClientLink, Invoice } from '@/lib/types'
+import type { ClientLink, Invoice, BrandingSettings } from '@/lib/types'
 import { formatCurrency, formatDateTime, fetchWithTimeout, formatActionError } from '@/lib/utils'
 import { useBranding } from '@/lib/contexts/BrandingContext'
 import { resolveBrandLogoCandidates, resolveBrandPalette } from '@/lib/branding/payment-theme'
@@ -66,17 +66,46 @@ function PublicPaymentPageInner() {
   const searchParams = useSearchParams()
   const token = (params?.token as string) || ''
   const refQuery = searchParams?.get('reference')
-  const { branding } = useBranding()
+  const { branding: contextBranding } = useBranding()
   const scopeId = useId().replace(/[^a-zA-Z0-9_-]/g, '')
-  const palette = useMemo(() => resolveBrandPalette(branding), [branding])
-  const logoCandidates = useMemo(() => resolveBrandLogoCandidates(branding, 'light'), [branding])
+  const [liveBrandingOverride, setLiveBrandingOverride] = useState<Partial<BrandingSettings> | null>(null)
+
+  // Fetch latest branding from /api/branding so Settings -> Branding changes take immediate effect
+  useEffect(() => {
+    let active = true
+    fetch('/api/branding', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((payload) => {
+        if (active && payload?.success && payload.branding) {
+          setLiveBrandingOverride(payload.branding)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const effectiveBranding = useMemo<BrandingSettings>(
+    () => ({
+      ...contextBranding,
+      ...(liveBrandingOverride || {}),
+    }),
+    [contextBranding, liveBrandingOverride]
+  )
+
+  const palette = useMemo(() => resolveBrandPalette(effectiveBranding), [effectiveBranding])
+  const logoCandidates = useMemo(() => resolveBrandLogoCandidates(effectiveBranding, 'light'), [effectiveBranding])
 
   const scopedPayCss = useMemo(
     () => `
       [data-pay-scope="${scopeId}"] {
+        --pay-primary: ${palette.primaryColor};
+        --pay-secondary: ${palette.secondaryColor};
+        --pay-accent: ${palette.accentColor};
         --pay-cta-bg: ${palette.ctaBg};
         --pay-cta-text: ${palette.ctaText};
-        --pay-accent: ${palette.accentColor};
+        --pay-cta-shadow: ${palette.ctaShadow};
       }
     `,
     [scopeId, palette]
@@ -568,7 +597,7 @@ function PublicPaymentPageInner() {
                   <span className="text-[11px] font-bold uppercase tracking-widest text-gray-400">
                     {isAlreadyPaid ? 'Amount Paid' : (isQuickJob || isProject) ? 'Amount Due for This Payment' : 'Total Amount Due'}
                   </span>
-                  <div className="text-4xl sm:text-5xl font-black tracking-tight text-indigo-600 dark:text-indigo-600 font-mono">
+                  <div className="text-4xl sm:text-5xl font-black tracking-tight text-[var(--pay-cta-bg)] font-mono">
                     {formatCurrency(linkData.amount || invoiceData?.balanceDue || 0, linkData.currency || invoiceData?.currency)}
                   </div>
                   <div className="pt-2 flex justify-center">
@@ -624,8 +653,8 @@ function PublicPaymentPageInner() {
                       </div>
                     )}
                     <div className="flex items-center justify-between font-bold text-gray-900 pb-2 border-b border-gray-200/60">
-                      <span className="text-indigo-600 font-semibold">Amount Due for This Payment</span>
-                      <span className="font-mono text-indigo-600 text-base">
+                      <span className="text-[var(--pay-cta-bg)] font-semibold">Amount Due for This Payment</span>
+                      <span className="font-mono text-[var(--pay-cta-bg)] text-base font-extrabold">
                         {formatCurrency(linkData.amount || 0, linkData.currency || projectData.currency)}
                       </span>
                     </div>
@@ -671,8 +700,8 @@ function PublicPaymentPageInner() {
                       </div>
                     )}
                     <div className="flex items-center justify-between font-bold text-gray-900 pb-2 border-b border-gray-200/60">
-                      <span className="text-indigo-600 font-semibold">Amount Due for This Payment</span>
-                      <span className="font-mono text-indigo-600 text-base">
+                      <span className="text-[var(--pay-cta-bg)] font-semibold">Amount Due for This Payment</span>
+                      <span className="font-mono text-[var(--pay-cta-bg)] text-base font-extrabold">
                         {formatCurrency(linkData.amount || 0, linkData.currency || quickJobData.currency)}
                       </span>
                     </div>
@@ -709,7 +738,7 @@ function PublicPaymentPageInner() {
                     )}
                     <div className="flex items-center justify-between text-gray-900 font-bold pt-1 border-t border-gray-200/60 text-sm">
                       <span>Remaining Balance Due</span>
-                      <span className="font-mono text-indigo-600">{formatCurrency(invoiceData.balanceDue ?? invoiceData.total, invoiceData.currency)}</span>
+                      <span className="font-mono text-[var(--pay-cta-bg)] font-extrabold">{formatCurrency(invoiceData.balanceDue ?? invoiceData.total, invoiceData.currency)}</span>
                     </div>
                   </div>
                 )}
