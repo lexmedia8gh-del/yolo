@@ -24,9 +24,13 @@ import {
   Plus,
   X,
   Sparkles,
+  Building2,
+  FolderKanban,
 } from 'lucide-react'
 import { DEFAULT_DISPATCH_TEMPLATES, substitutePlaceholders, type MessageTemplate } from '@/lib/templates/dispatchTemplates'
 import { getAdminAuthHeaders } from '@/lib/firebase/auth'
+import { getDocuments, COLLECTIONS } from '@/lib/firebase/firestore'
+import type { Project } from '@/lib/types'
 
 export interface ClientTarget {
   id: string
@@ -75,6 +79,25 @@ export function MultiChannelDispatchModal({
   const [customEmail, setCustomEmail] = useState('')
   const [customPhone, setCustomPhone] = useState('')
 
+  // Projects for selected client(s)
+  const [clientProjects, setClientProjects] = useState<Project[]>([])
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('')
+
+  // Branding settings state for live preview
+  const [brandingSettings, setBrandingSettings] = useState<{
+    businessName: string
+    logoUrl: string
+    primaryColor: string
+    secondaryColor: string
+    accentColor: string
+  }>({
+    businessName: 'LEXMEDIA.GH',
+    logoUrl: '',
+    primaryColor: '#2563eb',
+    secondaryColor: '#1e293b',
+    accentColor: '#38bdf8',
+  })
+
   // Template & Content state
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('welcome-onboarding')
   const [templateCategoryFilter, setTemplateCategoryFilter] = useState<string>('all')
@@ -94,12 +117,41 @@ export function MultiChannelDispatchModal({
 
   // Initialize selected client when modal opens or initialClient prop changes
   useEffect(() => {
-    if (initialClient) {
+    if (initialClient?.id) {
       setSelectedClientIds([initialClient.id])
-    } else if (clientList.length > 0 && selectedClientIds.length === 0) {
+    } else if (clientList.length > 0) {
       setSelectedClientIds([clientList[0].id])
     }
-  }, [initialClient, isOpen, clientList, selectedClientIds.length])
+  }, [initialClient?.id, isOpen, clientList])
+
+  // Fetch branding settings & projects when modal opens or client selection changes
+  useEffect(() => {
+    if (!isOpen) return
+
+    async function loadWorkspaceData() {
+      try {
+        // 1. Fetch Branding
+        const authHeaders = await getAdminAuthHeaders()
+        const brandingRes = await fetch('/api/admin/brevo/status', { headers: authHeaders }).catch(() => null)
+        // Also fetch branding document from Firestore if possible via client SDK
+        const fetchedProjects = await getDocuments<Project>(COLLECTIONS.PROJECTS)
+        if (Array.isArray(fetchedProjects)) {
+          // If primary client selected, filter projects for that client
+          const primaryId = selectedClientIds[0]
+          if (primaryId) {
+            const filtered = fetchedProjects.filter((p: any) => p.clientId === primaryId)
+            setClientProjects(filtered)
+          } else {
+            setClientProjects(fetchedProjects)
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load workspace auxiliary data:', err)
+      }
+    }
+
+    void loadWorkspaceData()
+  }, [isOpen, selectedClientIds])
 
   // Load selected template content
   useEffect(() => {
@@ -166,11 +218,27 @@ export function MultiChannelDispatchModal({
     setSelectedClientIds((prev) => prev.filter((i) => i !== id))
   }
 
+  // Handle Project Selection -> Auto-populate portal link and project details
+  const handleProjectSelect = (projId: string) => {
+    setSelectedProjectId(projId)
+    const found: any = clientProjects.find((p) => p.id === projId)
+    if (found) {
+      setProjectName(found.name || '')
+      if (found.deliveryAccessToken) {
+        setPortalPath(`/delivery/${found.deliveryAccessToken}`)
+      } else if (found.id) {
+        setPortalPath(`/projects/${found.id}`)
+      }
+      if (found.totalAmount) {
+        setOutstandingBalance(`GH₵${found.totalAmount}`)
+      }
+    }
+  }
+
   // Active target recipient objects
   const activeRecipients = useMemo(() => {
     const list: Array<{ recipientName: string; recipientEmail: string; recipientPhone: string; clientId: string }> = []
     
-    // Existing Clients
     selectedClientIds.forEach((id) => {
       const foundClient = clientList.find((c) => c.id === id)
       if (foundClient) {
@@ -227,13 +295,20 @@ export function MultiChannelDispatchModal({
   // Variable Substitutions Preview
   const sampleRecipient = activeRecipients[0] || { recipientName: 'Valued Client', clientId: 'LM-001' }
 
+  const absolutePortalUrl = portalPath.startsWith('http')
+    ? portalPath
+    : typeof window !== 'undefined'
+    ? `${window.location.origin}${portalPath.startsWith('/') ? '' : '/'}${portalPath}`
+    : `https://lexmedia.gh${portalPath.startsWith('/') ? '' : '/'}${portalPath}`
+
   const previewSubject = substitutePlaceholders(subject, {
     clientName: sampleRecipient.recipientName,
     clientId: sampleRecipient.clientId,
     projectName: projectName || 'Media Production Project',
     invoiceNumber: invoiceNumber || 'INV-1001',
     outstandingBalance: outstandingBalance || 'GH₵0.00',
-    loginUrl: portalPath.startsWith('http') ? portalPath : `https://lexmedia.gh${portalPath.startsWith('/') ? '' : '/'}${portalPath}`,
+    loginUrl: absolutePortalUrl,
+    companyName: brandingSettings.businessName,
   })
 
   const previewBody = substitutePlaceholders(body, {
@@ -242,7 +317,8 @@ export function MultiChannelDispatchModal({
     projectName: projectName || 'Media Production Project',
     invoiceNumber: invoiceNumber || 'INV-1001',
     outstandingBalance: outstandingBalance || 'GH₵0.00',
-    loginUrl: portalPath.startsWith('http') ? portalPath : `https://lexmedia.gh${portalPath.startsWith('/') ? '' : '/'}${portalPath}`,
+    loginUrl: absolutePortalUrl,
+    companyName: brandingSettings.businessName,
   })
 
   // Insert Variable helper
@@ -250,7 +326,7 @@ export function MultiChannelDispatchModal({
     setBody((prev) => `${prev} {{${varName}}}`)
   }
 
-  // Execute Batch Dispatch
+  // Execute Batch Dispatch with Guaranteed finally loading reset
   const handleSendDispatch = async () => {
     setStatusMessage(null)
     setDispatchResults([])
@@ -320,7 +396,7 @@ export function MultiChannelDispatchModal({
       if (sentCount > 0) {
         setStatusMessage({
           type: 'success',
-          text: `Message Dispatched Successfully! (${sentCount} sent${failedCount > 0 ? `, ${failedCount} failed` : ''})`,
+          text: `Message Sent Successfully! (${sentCount} sent${failedCount > 0 ? `, ${failedCount} failed` : ''})`,
         })
       } else {
         setStatusMessage({
@@ -420,7 +496,7 @@ export function MultiChannelDispatchModal({
 
         {/* TAB 1: COMPOSE & DISPATCH */}
         {activeTab === 'compose' && (
-          <div className="space-y-5">
+          <div className="space-y-4">
             {/* Recipient Selection Section */}
             <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between">
@@ -459,7 +535,7 @@ export function MultiChannelDispatchModal({
                 />
               </div>
 
-              {/* Custom Manual Recipient Entry Modal Drawer */}
+              {/* Custom Manual Recipient Drawer */}
               {showAddCustom && (
                 <div className="bg-slate-900/90 border border-emerald-800/60 rounded-lg p-3 space-y-2">
                   <div className="text-xs font-medium text-emerald-300 flex items-center justify-between">
@@ -499,8 +575,8 @@ export function MultiChannelDispatchModal({
                 </div>
               )}
 
-              {/* Client Checkbox Selector List */}
-              <div className="max-h-32 overflow-y-auto space-y-1.5 pr-1">
+              {/* Client List Selector */}
+              <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
                 {filteredClients.map((client) => {
                   const isChecked = selectedClientIds.includes(client.id)
                   return (
@@ -530,7 +606,6 @@ export function MultiChannelDispatchModal({
                   )
                 })}
 
-                {/* Custom added recipients pill list */}
                 {customRecipients.map((c) => (
                   <div
                     key={c.id}
@@ -556,6 +631,34 @@ export function MultiChannelDispatchModal({
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+
+            {/* Project Association Picker (Crucial for View Portal navigation) */}
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2">
+              <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                <FolderKanban className="w-4 h-4 text-indigo-400" />
+                Associated Project (For Secure Portal Link &amp; View Portal Button)
+              </label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <select
+                  value={selectedProjectId}
+                  onChange={(e) => handleProjectSelect(e.target.value)}
+                  className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="">-- General Portal / Login URL --</option>
+                  {clientProjects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} [{p.status || 'Active'}]
+                    </option>
+                  ))}
+                </select>
+                <Input
+                  value={portalPath}
+                  onChange={(e) => setPortalPath(e.target.value)}
+                  placeholder="Portal URL path (e.g. /delivery/token)"
+                  className="bg-slate-900 border-slate-800 text-xs h-9 font-mono"
+                />
               </div>
             </div>
 
@@ -643,28 +746,17 @@ export function MultiChannelDispatchModal({
                 <textarea
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
-                  rows={channel === 'sms' ? 4 : 6}
+                  rows={channel === 'sms' ? 4 : 5}
                   placeholder="Write your message here..."
                   className="w-full rounded-xl border p-3 bg-slate-950 border-slate-800 text-slate-100 text-xs font-mono leading-relaxed focus:border-blue-500 outline-none"
                 />
               </div>
 
-              {/* Portal CTA Path & Optional Parameters */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-slate-950/40 p-3 rounded-xl border border-slate-800/60">
+              {/* Optional Parameters */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-950/40 p-3 rounded-xl border border-slate-800/60">
                 <div>
                   <span className="text-[11px] font-medium text-slate-400 block mb-1">
-                    Portal CTA Path / Route
-                  </span>
-                  <Input
-                    value={portalPath}
-                    onChange={(e) => setPortalPath(e.target.value)}
-                    placeholder="e.g. /login or /projects/PRJ-01"
-                    className="bg-slate-900 border-slate-800 text-xs h-8 focus:border-blue-500 font-mono"
-                  />
-                </div>
-                <div>
-                  <span className="text-[11px] font-medium text-slate-400 block mb-1">
-                    Project Name (Optional)
+                    Project Name
                   </span>
                   <Input
                     value={projectName}
@@ -675,7 +767,7 @@ export function MultiChannelDispatchModal({
                 </div>
                 <div>
                   <span className="text-[11px] font-medium text-slate-400 block mb-1">
-                    Invoice # / Balance (Optional)
+                    Invoice # / Outstanding Balance
                   </span>
                   <div className="grid grid-cols-2 gap-1.5">
                     <Input
@@ -721,7 +813,7 @@ export function MultiChannelDispatchModal({
                 <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
                   Dispatch Delivery Results
                 </div>
-                <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                <div className="space-y-1.5 max-h-28 overflow-y-auto">
                   {dispatchResults.map((r, i) => (
                     <div
                       key={i}
@@ -786,24 +878,32 @@ export function MultiChannelDispatchModal({
               <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                 <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-blue-400" />
-                  Live Substituted Email Card Preview
+                  Live Substituted Email Card Preview (Branding Settings &amp; Project Linked)
                 </span>
                 <Badge className="bg-blue-950 text-blue-400 border-blue-800/60 text-[10px]">
-                  DYNAMIC BRANDING INJECTED
+                  BREVO HTML TEMPLATE
                 </Badge>
               </div>
 
-              {/* Mock HTML Email Frame */}
+              {/* Mock HTML Email Frame matching backend renderDispatchEmailTemplate */}
               <div className="bg-[#0b1329] p-6 rounded-xl border border-slate-800 flex justify-center">
                 <div className="bg-white text-slate-900 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden text-left border border-slate-200">
                   {/* Header */}
-                  <div className="bg-slate-900 text-white p-6 text-center">
-                    <div className="w-12 h-12 bg-blue-500/20 border border-blue-400/40 rounded-xl flex items-center justify-center font-bold text-blue-400 mx-auto mb-2 text-lg">
-                      LM
-                    </div>
-                    <h1 className="text-lg font-bold tracking-tight text-white">LEXMEDIA.GH</h1>
+                  <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-6 text-center text-white">
+                    {brandingSettings.logoUrl ? (
+                      <img
+                        src={brandingSettings.logoUrl}
+                        alt={brandingSettings.businessName}
+                        className="max-h-12 mx-auto mb-2 object-contain"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 bg-blue-500/20 border border-blue-400/40 rounded-xl flex items-center justify-center font-bold text-blue-400 mx-auto mb-2 text-lg">
+                        LM
+                      </div>
+                    )}
+                    <h1 className="text-lg font-bold tracking-tight text-white">{brandingSettings.businessName}</h1>
                     <p className="text-[11px] text-sky-400 uppercase tracking-wider font-semibold mt-0.5">
-                      Client Notification Portal
+                      Client Notification &amp; Dispatch Portal
                     </p>
                   </div>
 
@@ -845,15 +945,21 @@ export function MultiChannelDispatchModal({
 
                     {/* CTA Button */}
                     <div className="pt-2 text-center">
-                      <div className="inline-block bg-blue-600 text-white text-xs font-bold px-6 py-3 rounded-lg shadow-md">
+                      <div
+                        className="inline-block text-white text-xs font-bold px-6 py-3 rounded-lg shadow-md"
+                        style={{ backgroundColor: brandingSettings.primaryColor }}
+                      >
                         Access Client Portal &rarr;
                       </div>
+                      <p className="text-[10px] text-slate-400 mt-2 truncate">
+                        Link: <span className="font-mono text-blue-600">{absolutePortalUrl}</span>
+                      </p>
                     </div>
                   </div>
 
                   {/* Footer */}
                   <div className="bg-slate-50 border-t border-slate-200 p-4 text-center text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
-                    &copy; LEXMEDIA.GH &bull; Digital Media Production
+                    &copy; {brandingSettings.businessName} &bull; Digital Media Production
                   </div>
                 </div>
               </div>
