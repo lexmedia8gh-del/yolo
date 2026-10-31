@@ -144,6 +144,13 @@ export async function POST(req: NextRequest) {
       }
 
       if (!isValidPin) {
+        console.warn('[PIN Verify] Verification failed for PIN attempt.', {
+          pinExists: !!pin,
+          hashExists: !!secData?.pinHash,
+          saltExists: !!secData?.pinSalt,
+          storedHash: secData?.pinHash,
+          storedSalt: secData?.pinSalt
+        });
         const attempt = recordFailedPinAttempt(ip)
         if (attempt.locked) {
           return NextResponse.json(
