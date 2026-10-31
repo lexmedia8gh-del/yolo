@@ -342,7 +342,7 @@ export async function POST(req: NextRequest) {
     }
 
     const amountInSubunits = Math.round(finalAmount * 100)
-    const reference = `LXM_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
+    const reference = `LXM_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
 
     let callbackUrl: string
     if (callbackPath) {
@@ -354,7 +354,32 @@ export async function POST(req: NextRequest) {
       callbackUrl = buildPaymentCallbackUrl(reference, token, req)
     }
 
-    const paystackSecret = process.env.PAYSTACK_SECRET_KEY
+    // Persist authoritative payment intent on the server so /api/paystack/verify can validate
+    // expected amount, currency, and linked entities even if callback query parameters are stripped.
+    try {
+      await adminDb.collection('paymentIntents').doc(reference).set({
+        reference,
+        token: token || '',
+        paymentRequestId: serverPaymentRequestId || '',
+        expectedAmount: finalAmount,
+        currency: 'GHS',
+        invoiceId: serverInvoiceId || '',
+        invoiceNumber: serverInvoiceNumber || '',
+        quickJobId: serverQuickJobId || '',
+        projectId: serverProjectId || '',
+        deliveryId: serverDeliveryId || '',
+        deliveryAccessToken: serverDeliveryAccessToken || '',
+        clientId: serverClientId || '',
+        clientName: serverClientName || '',
+        clientEmail: serverEmail || '',
+        status: 'initialized',
+        createdAt: new Date().toISOString(),
+      })
+    } catch (intentErr) {
+      console.warn('[Paystack Init] Non-blocking warning saving paymentIntent:', intentErr)
+    }
+
+    const paystackSecret = (process.env.PAYSTACK_SECRET_KEY || '').trim()
     if (!paystackSecret || paystackSecret.includes('xxxxxxxx') || paystackSecret.includes('placeholder')) {
       // Allow testing without variables before Vercel environment variables are populated
       console.log(`[Paystack Init - Sandbox Mode] Continuing without PAYSTACK_SECRET_KEY for testing.`)

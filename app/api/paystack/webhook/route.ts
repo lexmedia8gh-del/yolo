@@ -121,35 +121,41 @@ export async function POST(req: NextRequest) {
     // Build the batch
     const batch = adminDb.batch()
 
-    // Update ClientLink if found
-    if (linkRef && linkData) {
-      batch.update(linkRef, {
-        status: 'Paid',
-        paymentStatus: 'Paid',
-        paystackReference: reference,
-        updatedAt: FieldValue.serverTimestamp(),
-      })
-    }
-
-    // Update Invoice
     let invoiceNumber = linkData?.invoiceNumber || metadata.invoiceNumber || ''
     let clientName = linkData?.clientName || metadata.clientName || txData?.customer?.name || ''
+    let clientEmail = linkData?.clientEmail || txData?.customer?.email || ''
     let clientId = linkData?.clientId || metadata.clientId || ''
     let projectId = linkData?.projectId || metadataProjectId || ''
     let quickJobId = linkData?.quickJobId || metadataQuickJobId || ''
+    let projectName = linkData?.projectName || ''
     const invoiceId = linkData?.invoiceId || metadataInvoiceId || ''
 
+    let computedTotalAmount = Number(linkData?.amount || amountPaid)
+    let computedTotalPaid = amountPaid
+    let computedRemainingBalance = 0
+    let hasAuthoritativeBalance = false
+
+    // Update Invoice
     if (invoiceId) {
       const invoiceRef = adminDb.collection('invoices').doc(invoiceId)
       const invoiceSnap = await invoiceRef.get()
       if (invoiceSnap.exists) {
         const inv = invoiceSnap.data()!
         invoiceNumber = inv.invoiceNumber || invoiceNumber
-        const prevPaid = inv.amountPaid ?? 0
-        const invTotal = inv.total ?? 0
-        const newPaid = prevPaid + amountPaid
-        const newBalance = Math.max(0, invTotal - newPaid)
-        const newStatus = newPaid >= invTotal ? 'Paid' : 'Partially Paid'
+        projectName = inv.projectName || projectName
+        clientName = inv.clientName || clientName
+        clientEmail = inv.clientEmail || clientEmail
+        const prevPaid = Number(inv.amountPaid ?? 0)
+        const invTotal = Number(inv.total ?? 0)
+        const newPaid = Number((prevPaid + amountPaid).toFixed(2))
+        const newBalance = Math.max(0, Number((invTotal - newPaid).toFixed(2)))
+        const newStatus = newBalance <= 0.01 ? 'Paid' : 'Partially Paid'
+
+        computedTotalAmount = invTotal
+        computedTotalPaid = newPaid
+        computedRemainingBalance = newBalance
+        hasAuthoritativeBalance = true
+
         batch.update(invoiceRef, {
           amountPaid: newPaid,
           balanceDue: newBalance,
@@ -167,9 +173,14 @@ export async function POST(req: NextRequest) {
       const projectSnap = await projectRef.get()
       if (projectSnap.exists) {
         const proj = projectSnap.data()!
+        projectName = proj.name || projectName
+        clientName = proj.clientName || clientName
+        clientEmail = proj.clientEmail || clientEmail
+        if (!invoiceNumber) {
+          invoiceNumber = proj.reference || `PROJ-${String(projectId).slice(0, 8).toUpperCase()}`
+        }
         const projTotal = Number(proj.price ?? 0)
 
-        // Calculate verified payments sum + offline payments
         const existingPmtsSnap = await adminDb
           .collection('payments')
           .where('projectId', '==', projectId)
@@ -180,9 +191,17 @@ export async function POST(req: NextRequest) {
           0
         )
         const prevProjPaid = Math.max(existingPaidFromPmts, Number(proj.amountPaid || 0))
-        const newProjPaid = prevProjPaid + amountPaid
-        const newProjBalance = Math.max(0, projTotal - newProjPaid)
-        const newProjPayStatus = newProjPaid >= projTotal ? 'Paid' : 'Partially Paid'
+        const newProjPaid = Number((prevProjPaid + amountPaid).toFixed(2))
+        const newProjBalance = Math.max(0, Number((projTotal - newProjPaid).toFixed(2)))
+        const newProjPayStatus = newProjBalance <= 0.01 ? 'Paid' : 'Partially Paid'
+
+        if (!hasAuthoritativeBalance && projTotal > 0) {
+          computedTotalAmount = projTotal
+          computedTotalPaid = newProjPaid
+          computedRemainingBalance = newProjBalance
+          hasAuthoritativeBalance = true
+        }
+
         batch.update(projectRef, {
           amountPaid: newProjPaid,
           outstandingBalance: newProjBalance,
@@ -198,9 +217,14 @@ export async function POST(req: NextRequest) {
       const qjSnap = await quickJobRef.get()
       if (qjSnap.exists) {
         const qj = qjSnap.data()!
+        projectName = qj.jobDescription || qj.title || projectName
+        clientName = qj.clientName || clientName
+        clientEmail = qj.clientEmail || clientEmail
+        if (!invoiceNumber) {
+          invoiceNumber = qj.jobCode || `QJ-${String(quickJobId).slice(0, 8).toUpperCase()}`
+        }
         const qjTotal = Number(qj.originalAgreedPrice ?? 0)
 
-        // Calculate verified payments sum
         const existingPmtsSnap = await adminDb
           .collection('payments')
           .where('quickJobId', '==', quickJobId)
@@ -211,9 +235,16 @@ export async function POST(req: NextRequest) {
           0
         )
         const prevQjPaid = Math.max(existingPaidFromPmts, Number(qj.amountPaid || 0))
-        const newQjPaid = prevQjPaid + amountPaid
-        const newQjBalance = Math.max(0, qjTotal - newQjPaid)
-        const newQjPayStatus = newQjPaid >= qjTotal ? 'Paid' : 'Partially Paid'
+        const newQjPaid = Number((prevQjPaid + amountPaid).toFixed(2))
+        const newQjBalance = Math.max(0, Number((qjTotal - newQjPaid).toFixed(2)))
+        const newQjPayStatus = newQjBalance <= 0.01 ? 'Paid' : 'Partially Paid'
+
+        if (!hasAuthoritativeBalance && qjTotal > 0) {
+          computedTotalAmount = qjTotal
+          computedTotalPaid = newQjPaid
+          computedRemainingBalance = newQjBalance
+          hasAuthoritativeBalance = true
+        }
 
         batch.update(quickJobRef, {
           amountPaid: newQjPaid,
@@ -224,14 +255,35 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const isFullyPaid = hasAuthoritativeBalance
+      ? computedRemainingBalance <= 0.01
+      : amountPaid + 0.01 >= Number(linkData?.amount || amountPaid)
+
+    // Update ClientLink if found
+    if (linkRef && linkData) {
+      const requestedLinkAmount = Number(linkData.amount || 0)
+      const isLinkSatisfied = requestedLinkAmount <= 0 || amountPaid + 0.01 >= requestedLinkAmount
+      batch.update(linkRef, {
+        status: isLinkSatisfied ? 'Paid' : 'Partially Paid',
+        paymentStatus: isLinkSatisfied ? 'Paid' : 'Partially Paid',
+        paystackReference: reference,
+        updatedAt: FieldValue.serverTimestamp(),
+      })
+    }
+
     // Update Client
     if (clientId) {
       const clientRef = adminDb.collection('clients').doc(clientId)
       const clientSnap = await clientRef.get()
       if (clientSnap.exists) {
         const cl = clientSnap.data()!
-        const newClientPaid = (cl.totalPaid ?? 0) + amountPaid
-        const newClientOutstanding = Math.max(0, (cl.outstandingBalance ?? 0) - amountPaid)
+        if (!clientName) clientName = cl.name || ''
+        if (!clientEmail) clientEmail = cl.email || ''
+        const newClientPaid = Number(((cl.totalPaid ?? 0) + amountPaid).toFixed(2))
+        const newClientOutstanding = Math.max(
+          0,
+          Number(((cl.outstandingBalance ?? 0) - amountPaid).toFixed(2))
+        )
         const prevPaymentCount = cl.paymentCount ?? 0
         batch.update(clientRef, {
           totalPaid: newClientPaid,
@@ -243,7 +295,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── UNLOCK ASSOCIATED DELIVERY ─────────────────────────────────────
+    // ── UNLOCK ASSOCIATED DELIVERY (ONLY WHEN PERMITTED) ──────────────────
     let resolvedDeliveryAccessToken = linkData?.deliveryAccessToken || metadata.deliveryAccessToken || ''
     let deliveryDocToUnlock: any = null
 
@@ -281,35 +333,59 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (deliveryDocToUnlock) {
-      batch.update(deliveryDocToUnlock.ref, {
-        isReleased: true,
-        requiresFullPayment: false,
-        status: 'Delivered',
-        releasedAt: FieldValue.serverTimestamp(),
-        releasedBy: 'payment_verified',
-        unlockedAt: FieldValue.serverTimestamp(),
-        unlockedBy: 'paystack_webhook',
-        paystackReference: reference,
-        updatedAt: FieldValue.serverTimestamp(),
-      })
-
-      // Delivery unlocked activity log
-      const deliveryActivityRef = adminDb.collection('activityLogs').doc()
-      batch.set(deliveryActivityRef, {
-        event: 'delivery_unlocked',
-        description: `Deliverables automatically unlocked following verified payment of ${currency} ${amountPaid.toLocaleString()}`,
-        entityId: deliveryDocToUnlock.id,
-        entityType: 'delivery',
-        clientId,
-        clientName,
-        projectId,
-        quickJobId,
-        performedBy: 'system',
-        metadata: { reference, amountPaid, deliveryAccessToken: resolvedDeliveryAccessToken },
-        createdAt: FieldValue.serverTimestamp(),
-      })
+    const deliveryDocData = deliveryDocToUnlock?.data() || null
+    if (deliveryDocData && !projectName) {
+      projectName = deliveryDocData.projectName || deliveryDocData.title || ''
     }
+    const deliveryRequiresFullPayment = deliveryDocData
+      ? deliveryDocData.requiresFullPayment !== false
+      : true
+    const deliveryAlreadyReleased = Boolean(deliveryDocData?.isReleased)
+    const shouldUnlockDeliverables =
+      isFullyPaid || !deliveryRequiresFullPayment || deliveryAlreadyReleased
+
+    if (deliveryDocToUnlock) {
+      if (shouldUnlockDeliverables) {
+        batch.update(deliveryDocToUnlock.ref, {
+          isReleased: true,
+          status: 'Delivered',
+          amountPaid: computedTotalPaid,
+          remainingBalance: computedRemainingBalance,
+          releasedAt: FieldValue.serverTimestamp(),
+          releasedBy: 'payment_verified',
+          unlockedAt: FieldValue.serverTimestamp(),
+          unlockedBy: 'paystack_webhook',
+          paystackReference: reference,
+          updatedAt: FieldValue.serverTimestamp(),
+        })
+
+        const deliveryActivityRef = adminDb.collection('activityLogs').doc()
+        batch.set(deliveryActivityRef, {
+          event: 'delivery_unlocked',
+          description: `Deliverables automatically unlocked following verified payment of ${currency} ${amountPaid.toLocaleString()}`,
+          entityId: deliveryDocToUnlock.id,
+          entityType: 'delivery',
+          clientId,
+          clientName,
+          projectId,
+          quickJobId,
+          performedBy: 'system',
+          metadata: { reference, amountPaid, deliveryAccessToken: resolvedDeliveryAccessToken },
+          createdAt: FieldValue.serverTimestamp(),
+        })
+      } else {
+        batch.update(deliveryDocToUnlock.ref, {
+          amountPaid: computedTotalPaid,
+          remainingBalance: computedRemainingBalance,
+          updatedAt: FieldValue.serverTimestamp(),
+        })
+      }
+    }
+
+    const resolvedPaymentToken =
+      linkData?.token || token || invoiceId || projectId || quickJobId || ''
+    const receiptClean = reference.replace(/^LXM_/i, '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+    const receiptNumber = `RCP-${receiptClean.slice(-10) || '000001'}`
 
     // Create Payment Record
     const paymentRef = adminDb.collection('payments').doc()
@@ -319,18 +395,26 @@ export async function POST(req: NextRequest) {
       invoiceNumber,
       clientId,
       clientName,
+      clientEmail,
       projectId,
+      projectName,
       quickJobId,
       paymentRequestId: metadata.paymentRequestId || linkRef?.id || linkData?.id || token || '',
+      paymentToken: resolvedPaymentToken,
       deliveryId: deliveryDocToUnlock?.id || targetDeliveryId || '',
       deliveryAccessToken: resolvedDeliveryAccessToken,
       paystackReference: reference,
       reference,
+      receiptNumber,
       amount: amountPaid,
+      totalAmount: computedTotalAmount,
+      totalPaid: computedTotalPaid,
+      remainingBalance: computedRemainingBalance,
+      isFullyPaid,
       currency,
       channel,
       paymentMethod: channel,
-      paidAt: paidAt ? new Date(paidAt).toISOString() : FieldValue.serverTimestamp(),
+      paidAt: paidAt ? new Date(paidAt).toISOString() : new Date().toISOString(),
       status: 'success',
       verificationStatus: 'verified',
       source: 'webhook',
@@ -349,7 +433,7 @@ export async function POST(req: NextRequest) {
       projectId,
       quickJobId,
       performedBy: 'system',
-      metadata: { reference, channel, amount: amountPaid, currency },
+      metadata: { reference, channel, amount: amountPaid, currency, isFullyPaid },
       createdAt: FieldValue.serverTimestamp(),
     })
 
@@ -376,12 +460,12 @@ export async function POST(req: NextRequest) {
 
     await batch.commit()
 
-    console.log(`[Webhook] ✅ Payment processed: ${reference} — ${currency} ${amountPaid} from ${clientName}`)
+    console.log(`[Webhook] Payment processed: ${reference} — ${currency} ${amountPaid} from ${clientName}`)
 
-    // ── DISPATCH BREVO CONFIRMATION EMAIL ─────────────────────────────
-    if (resolvedDeliveryAccessToken) {
+    // ── DISPATCH BREVO CONFIRMATION EMAIL (ONLY WHEN DELIVERABLES UNLOCKED) ──
+    if (resolvedDeliveryAccessToken && shouldUnlockDeliverables) {
       try {
-        let recipientEmail = linkData?.clientEmail || txData?.customer?.email || ''
+        let recipientEmail = clientEmail || ''
         if (!recipientEmail && clientId) {
           const cSnap = await adminDb.collection('clients').doc(clientId).get()
           if (cSnap.exists) recipientEmail = cSnap.data()?.email || ''
@@ -397,13 +481,13 @@ export async function POST(req: NextRequest) {
           await sendPaymentConfirmedDeliveryEmail({
             toEmail: recipientEmail,
             clientName: clientName || 'Valued Client',
-            projectName: linkData?.projectName || deliveryDocToUnlock?.data()?.projectName || 'Your LexMedia Project',
+            projectName: projectName || 'Your LexMedia Project',
             deliveryUrl,
             amountPaid,
             invoiceNumber,
             lexmediaLogoUrl,
           })
-          console.log(`[Webhook] ✅ Confirmation email sent to ${recipientEmail}`)
+          console.log(`[Webhook] Confirmation email sent to ${recipientEmail}`)
         }
       } catch (emailErr) {
         console.warn('[Webhook] Post-payment confirmation email warning (non-blocking):', emailErr)

@@ -311,20 +311,107 @@ export async function GET(
       linkData.status === 'Paid' ||
       linkData.paymentStatus === 'Paid' ||
       invoiceData?.status === 'Paid' ||
-      (projectData && (projectData.paymentStatus === 'Paid' || (projectData.outstandingBalance !== undefined && projectData.outstandingBalance <= 0)))
+      (projectData && (projectData.paymentStatus === 'Paid' || (projectData.outstandingBalance !== undefined && projectData.outstandingBalance <= 0))) ||
+      (quickJobData && (quickJobData.paymentStatus === 'Paid' || (quickJobData.outstandingBalance !== undefined && quickJobData.outstandingBalance <= 0)))
 
     let deliveryAccessToken: string | null = null
+    let lastPayment: {
+      reference: string
+      receiptNumber: string
+      amount: number
+      currency: string
+      paidAt: string | null
+      channel: string
+    } | null = null
+
     try {
       const adminDb = getAdminDb()
+
+      // Resolve associated delivery only when permitted (fully paid or requiresFullPayment === false or already released)
+      let delDocData: any = null
       if (linkData.quickJobId) {
-        const qjSnap = await adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(linkData.quickJobId).get()
-        if (qjSnap.exists) {
-          deliveryAccessToken = qjSnap.data()?.deliveryAccessToken || null
-        }
-      } else if (linkData.invoiceId) {
+        const delSnap = await adminDb.collection(COLLECTIONS.DELIVERIES).where('quickJobId', '==', linkData.quickJobId).limit(1).get()
+        if (!delSnap.empty) delDocData = delSnap.docs[0].data()
+      }
+      if (!delDocData && linkData.invoiceId) {
         const delSnap = await adminDb.collection(COLLECTIONS.DELIVERIES).where('invoiceId', '==', linkData.invoiceId).limit(1).get()
-        if (!delSnap.empty) {
-          deliveryAccessToken = delSnap.docs[0].data()?.accessToken || null
+        if (!delSnap.empty) delDocData = delSnap.docs[0].data()
+      }
+      if (!delDocData && linkData.projectId) {
+        const delSnap = await adminDb.collection(COLLECTIONS.DELIVERIES).where('projectId', '==', linkData.projectId).limit(1).get()
+        if (!delSnap.empty) delDocData = delSnap.docs[0].data()
+      }
+
+      const isFullySettled = invoiceData
+        ? invoiceData.status === 'Paid' || Number(invoiceData.balanceDue ?? 1) <= 0.01
+        : projectData
+        ? projectData.paymentStatus === 'Paid' || Number(projectData.outstandingBalance ?? 1) <= 0.01
+        : quickJobData
+        ? quickJobData.paymentStatus === 'Paid' || Number(quickJobData.outstandingBalance ?? 1) <= 0.01
+        : isAlreadyPaid
+
+      if (delDocData) {
+        const requiresFull = delDocData.requiresFullPayment !== false
+        const permitted = Boolean(isFullySettled || delDocData.isReleased || !requiresFull)
+        if (permitted && delDocData.accessToken) {
+          deliveryAccessToken = delDocData.accessToken
+        }
+      } else if (isFullySettled && quickJobData?.deliveryAccessToken) {
+        deliveryAccessToken = quickJobData.deliveryAccessToken
+      }
+
+      // Resolve latest verified payment record for receipt display
+      let pSnap: FirebaseFirestore.QuerySnapshot | null = null
+      if (linkData.paystackReference) {
+        pSnap = await adminDb
+          .collection(COLLECTIONS.PAYMENTS)
+          .where('paystackReference', '==', linkData.paystackReference)
+          .limit(1)
+          .get()
+      }
+      if ((!pSnap || pSnap.empty) && linkData.invoiceId) {
+        pSnap = await adminDb
+          .collection(COLLECTIONS.PAYMENTS)
+          .where('invoiceId', '==', linkData.invoiceId)
+          .where('status', '==', 'success')
+          .limit(5)
+          .get()
+      } else if ((!pSnap || pSnap.empty) && linkData.projectId) {
+        pSnap = await adminDb
+          .collection(COLLECTIONS.PAYMENTS)
+          .where('projectId', '==', linkData.projectId)
+          .where('status', '==', 'success')
+          .limit(5)
+          .get()
+      } else if ((!pSnap || pSnap.empty) && linkData.quickJobId) {
+        pSnap = await adminDb
+          .collection(COLLECTIONS.PAYMENTS)
+          .where('quickJobId', '==', linkData.quickJobId)
+          .where('status', '==', 'success')
+          .limit(5)
+          .get()
+      }
+
+      if (pSnap && !pSnap.empty) {
+        const sortedDocs = [...pSnap.docs].sort((a, b) => {
+          const aTime = new Date(a.data().paidAt || 0).getTime() || 0
+          const bTime = new Date(b.data().paidAt || 0).getTime() || 0
+          return bTime - aTime
+        })
+        const p = sortedDocs[0].data()
+        const refStr = String(p.paystackReference || p.reference || '')
+        const cleanRef = refStr.replace(/^LXM_/i, '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+        lastPayment = {
+          reference: refStr,
+          receiptNumber: p.receiptNumber || (cleanRef ? `RCP-${cleanRef.slice(-10)}` : 'RCP-000001'),
+          amount: Number(p.amount || 0),
+          currency: String(p.currency || 'GHS'),
+          paidAt: p.paidAt
+            ? typeof p.paidAt?.toDate === 'function'
+              ? p.paidAt.toDate().toISOString()
+              : String(p.paidAt)
+            : null,
+          channel: String(p.channel || p.paymentMethod || 'card'),
         }
       }
     } catch {}
@@ -356,6 +443,7 @@ export async function GET(
         clientName: linkData.clientName || projectData?.clientName || quickJobData?.clientName || invoiceData?.clientName || 'Client',
         projectName: linkData.projectName || projectData?.name || quickJobData?.jobDescription || invoiceData?.projectName || '',
         invoiceNumber: linkData.invoiceNumber || invoiceData?.invoiceNumber || '',
+        paystackReference: linkData.paystackReference || lastPayment?.reference || '',
         status: resolvedStatus,
         paymentStatus: isAlreadyPaid ? 'Paid' : (linkData.paymentStatus || 'Pending Payment'),
         notes: linkData.notes || '',
@@ -370,6 +458,7 @@ export async function GET(
             invoiceNumber: invoiceData.invoiceNumber,
             status: invoiceData.status,
             total: invoiceData.total,
+            amountPaid: invoiceData.amountPaid,
             balanceDue: invoiceData.balanceDue,
           }
         : null,
@@ -399,6 +488,7 @@ export async function GET(
             paymentStatus: projectData.paymentStatus,
           }
         : null,
+      lastPayment,
       isCancelled,
       isExpired,
       isAlreadyPaid,

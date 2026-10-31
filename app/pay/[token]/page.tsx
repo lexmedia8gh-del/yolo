@@ -2,19 +2,18 @@
 
 export const dynamic = 'force-dynamic'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useId, useMemo } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import {
-  Zap,
   CheckCircle2,
   AlertCircle,
   CreditCard,
   Lock,
   Building2,
-  Calendar,
   FileText,
   Clock,
   ShieldCheck,
+  Printer,
 } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -25,8 +24,9 @@ import {
   getDocuments,
 } from '@/lib/firebase/firestore'
 import type { ClientLink, Invoice } from '@/lib/types'
-import { formatCurrency, formatDate, fetchWithTimeout, formatActionError } from '@/lib/utils'
-import { BrandingProvider, useBranding } from '@/lib/contexts/BrandingContext'
+import { formatCurrency, formatDateTime, fetchWithTimeout, formatActionError } from '@/lib/utils'
+import { useBranding } from '@/lib/contexts/BrandingContext'
+import { resolveBrandLogoCandidates, resolveBrandPalette } from '@/lib/branding/payment-theme'
 import toast from 'react-hot-toast'
 import {
   PageEnter,
@@ -40,17 +40,60 @@ import {
   PulseIcon,
 } from '@/lib/motion'
 
+function PortalBrandMark({
+  logoCandidates,
+  businessName,
+}: {
+  logoCandidates: string[]
+  businessName: string
+}) {
+  const [failed, setFailed] = useState<Record<string, boolean>>({})
+  const activeUrl = logoCandidates.find((u) => !failed[u]) || ''
+  if (!activeUrl) return null
+  return (
+    <img
+      src={activeUrl}
+      alt={`${businessName} logo`}
+      referrerPolicy="no-referrer"
+      onError={() => setFailed((prev) => ({ ...prev, [activeUrl]: true }))}
+      className="max-h-12 w-auto max-w-[190px] mx-auto object-contain select-none"
+    />
+  )
+}
+
 function PublicPaymentPageInner() {
   const params = useParams()
   const searchParams = useSearchParams()
   const token = (params?.token as string) || ''
   const refQuery = searchParams?.get('reference')
   const { branding } = useBranding()
+  const scopeId = useId().replace(/[^a-zA-Z0-9_-]/g, '')
+  const palette = useMemo(() => resolveBrandPalette(branding), [branding])
+  const logoCandidates = useMemo(() => resolveBrandLogoCandidates(branding, 'light'), [branding])
+
+  const scopedPayCss = useMemo(
+    () => `
+      [data-pay-scope="${scopeId}"] {
+        --pay-cta-bg: ${palette.ctaBg};
+        --pay-cta-text: ${palette.ctaText};
+        --pay-accent: ${palette.accentColor};
+      }
+    `,
+    [scopeId, palette]
+  )
 
   const [linkData, setLinkData] = useState<ClientLink | null>(null)
   const [invoiceData, setInvoiceData] = useState<Invoice | null>(null)
   const [quickJobData, setQuickJobData] = useState<any>(null)
   const [projectData, setProjectData] = useState<any>(null)
+  const [lastPayment, setLastPayment] = useState<{
+    reference: string
+    receiptNumber: string
+    amount: number
+    currency: string
+    paidAt: string | null
+    channel: string
+  } | null>(null)
   const [loading, setLoading] = useState(true)
   const [isProcessing, setIsProcessing] = useState(false)
   const [paymentSuccess, setPaymentSuccess] = useState(false)
@@ -78,6 +121,9 @@ function PublicPaymentPageInner() {
             }
             if (apiData.project) {
               setProjectData(apiData.project)
+            }
+            if (apiData.lastPayment) {
+              setLastPayment(apiData.lastPayment)
             }
             if (apiData.isAlreadyPaid) {
               setPaymentSuccess(true)
@@ -194,6 +240,12 @@ function PublicPaymentPageInner() {
             setLinkData(refreshData.link)
             if (refreshData.invoice) {
               setInvoiceData(refreshData.invoice)
+            }
+            if (refreshData.lastPayment) {
+              setLastPayment(refreshData.lastPayment)
+            }
+            if (refreshData.deliveryAccessToken) {
+              setDeliveryAccessToken(refreshData.deliveryAccessToken)
             }
           }
         }
@@ -322,130 +374,161 @@ function PublicPaymentPageInner() {
   const isFullyPaid = remainingBalance <= 0 || invoiceData?.status === 'Paid' || linkData.status === 'Paid' || projectData?.paymentStatus === 'Paid'
 
   if (isAlreadyPaid || paymentSuccess) {
+    const activeReference = lastPayment?.reference || (linkData as any).paystackReference || refQuery || ''
+    const activePaidAt = lastPayment?.paidAt || null
+
     return (
       <PageEnter>
-        <div className="min-h-screen bg-gray-50/80 flex flex-col justify-between p-4 sm:p-6 font-sans">
+        <div
+          data-pay-scope={scopeId}
+          className="min-h-screen bg-gray-50/80 flex flex-col justify-between p-4 sm:p-6 font-sans"
+        >
+          <style dangerouslySetInnerHTML={{ __html: scopedPayCss }} />
           <div className="max-w-xl mx-auto w-full space-y-6 my-auto py-6">
-            
             {/* Branding Header */}
             <SlideUp delay={0.05} className="text-center space-y-2">
-              {branding.logoUrl ? (
-                <img
-                  src={branding.logoUrl}
-                  alt={branding.businessName}
-                  className="h-14 mx-auto object-contain"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div
-                  className="inline-flex items-center justify-center w-12 h-12 rounded-2xl shadow-md mb-1"
-                  style={{ backgroundColor: branding.buttonColor || '#0A0A0A' }}
-                >
-                  <Zap size={24} style={{ color: branding.buttonTextColor || '#FFFFFF' }} />
-                </div>
-              )}
-              <h1 className="text-2xl font-bold tracking-tight" style={{ color: branding.textColor || '#111827' }}>
-                {(branding.businessName || 'LEXMEDIA.GH').toUpperCase()}
+              <PortalBrandMark
+                logoCandidates={logoCandidates}
+                businessName={palette.businessName}
+              />
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">
+                {palette.businessName}
               </h1>
-              <p className="text-xs uppercase font-semibold tracking-wider" style={{ color: branding.mutedTextColor || '#6B7280' }}>
-                Official Payment Portal
+              <p className="text-xs uppercase font-semibold tracking-wider text-gray-500">
+                Official Payment Receipt
               </p>
             </SlideUp>
 
-            {/* Dedicated Thank You Card */}
+            {/* Dedicated Confirmation & Receipt Card */}
             <CardReveal delay={0.12}>
-              <Card className="border border-gray-200/85 shadow-xl shadow-emerald-500/5 rounded-3xl overflow-hidden bg-white">
+              <Card className="invoice-paper-sheet border border-gray-200/85 shadow-xl shadow-emerald-500/5 rounded-3xl overflow-hidden bg-white">
                 <div className="p-6 sm:p-8 space-y-6 text-center">
-                  
-                  {/* Success Icon Animation */}
+                  {/* Success Icon */}
                   <div className="w-16 h-16 rounded-3xl bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center mx-auto shadow-sm">
-                    <CheckCircle2 size={32} className="animate-pulse" />
+                    <CheckCircle2 size={32} />
                   </div>
 
                   <div className="space-y-2">
-                    <h2 className="text-2xl font-black text-gray-900 tracking-tight">
-                      {isFullyPaid ? '🎉 Payment Complete!' : 'Thank You for Your Payment! 🎉'}
+                    <h2 className="text-2xl font-extrabold text-gray-900 tracking-tight">
+                      {isFullyPaid ? 'Payment Confirmed!' : 'Payment Received!'}
                     </h2>
                     <p className="text-sm text-gray-600 max-w-sm mx-auto leading-relaxed">
                       {isFullyPaid
-                        ? 'Thank you for completing your payment. Your payment has been successfully received.'
-                        : 'Your payment has been successfully received and recorded.'}
+                        ? 'Thank you for your payment. Your transaction has been securely verified and processed.'
+                        : 'Your payment has been securely verified and credited to your account.'}
                     </p>
                   </div>
 
-                  {/* Clean Relevant Information */}
+                  {/* Verified Receipt Information */}
                   <div className="bg-gray-50/80 rounded-2xl p-5 border border-gray-200/70 text-left space-y-3">
-                    <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-200/65">
+                    <div className="flex items-center justify-between gap-3 text-sm py-1.5 border-b border-gray-200/65">
                       <span className="text-gray-500 font-medium">Client</span>
-                      <span className="font-bold text-gray-900 text-right">{linkData.clientName || projectData?.clientName || quickJobData?.clientName || invoiceData?.clientName || 'Valued Client'}</span>
+                      <span className="font-bold text-gray-900 text-right break-words">
+                        {linkData.clientName || projectData?.clientName || quickJobData?.clientName || invoiceData?.clientName || 'Valued Client'}
+                      </span>
                     </div>
 
-                    <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-200/65">
+                    <div className="flex items-center justify-between gap-3 text-sm py-1.5 border-b border-gray-200/65">
                       <span className="text-gray-500 font-medium">{isQuickJob ? 'Job Description' : isProject ? 'Project' : 'Project / Service'}</span>
-                      <span className="font-semibold text-gray-900 text-right">
+                      <span className="font-semibold text-gray-900 text-right break-words max-w-[65%]">
                         {projectData?.name || quickJobData?.jobDescription || linkData.projectName || invoiceData?.projectName || linkData.title || 'Professional Service'}
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-200/65">
-                      <span className="text-gray-500 font-medium">Payment Received</span>
-                      <span className="font-mono font-bold text-emerald-600">
-                        {formatCurrency(paymentReceivedAmount, linkData.currency || projectData?.currency || invoiceData?.currency || quickJobData?.currency)}
+                    {(linkData.invoiceNumber || invoiceData?.invoiceNumber) && (
+                      <div className="flex items-center justify-between gap-3 text-sm py-1.5 border-b border-gray-200/65">
+                        <span className="text-gray-500 font-medium">Invoice Number</span>
+                        <span className="font-mono tabular-nums font-bold text-gray-900 text-right">
+                          {linkData.invoiceNumber || invoiceData?.invoiceNumber}
+                        </span>
+                      </div>
+                    )}
+
+                    {activeReference && (
+                      <div className="flex items-center justify-between gap-3 text-sm py-1.5 border-b border-gray-200/65">
+                        <span className="text-gray-500 font-medium shrink-0">Payment Reference</span>
+                        <span className="font-mono tabular-nums font-semibold text-gray-900 text-right break-all text-xs sm:text-sm">
+                          {activeReference}
+                        </span>
+                      </div>
+                    )}
+
+                    {activePaidAt && (
+                      <div className="flex items-center justify-between gap-3 text-sm py-1.5 border-b border-gray-200/65">
+                        <span className="text-gray-500 font-medium">Payment Date</span>
+                        <span className="font-semibold tabular-nums text-gray-900 text-right text-xs sm:text-sm">
+                          {formatDateTime(activePaidAt)}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between gap-3 text-sm py-1.5 border-b border-gray-200/65">
+                      <span className="text-gray-500 font-medium">Amount Paid</span>
+                      <span className="font-mono tabular-nums font-bold text-emerald-600">
+                        {formatCurrency(lastPayment?.amount || paymentReceivedAmount, linkData.currency || projectData?.currency || invoiceData?.currency || quickJobData?.currency)}
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-200/65">
+                    <div className="flex items-center justify-between gap-3 text-sm py-1.5 border-b border-gray-200/65">
                       <span className="text-gray-500 font-medium">{isQuickJob ? 'Original Job Total' : isProject ? 'Original Project Price' : 'Invoice Total'}</span>
-                      <span className="font-mono font-semibold text-gray-900">
+                      <span className="font-mono tabular-nums font-semibold text-gray-900">
                         {formatCurrency(originalTotal, linkData.currency || projectData?.currency || invoiceData?.currency || quickJobData?.currency)}
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between text-sm py-1.5 border-b border-gray-200/65">
+                    <div className="flex items-center justify-between gap-3 text-sm py-1.5 border-b border-gray-200/65">
                       <span className="text-gray-500 font-medium">Total Paid to Date</span>
-                      <span className="font-mono font-semibold text-gray-900">
+                      <span className="font-mono tabular-nums font-semibold text-gray-900">
                         {formatCurrency(totalPaid, linkData.currency || projectData?.currency || invoiceData?.currency || quickJobData?.currency)}
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between text-sm py-2 font-bold pt-1">
+                    <div className="flex items-center justify-between gap-3 text-sm py-2 font-bold pt-1">
                       <span className="text-gray-800">Remaining Balance</span>
-                      <span className="font-mono text-indigo-600 text-base">
+                      <span className="font-mono tabular-nums text-gray-900 text-base">
                         {formatCurrency(remainingBalance, linkData.currency || projectData?.currency || invoiceData?.currency || quickJobData?.currency)}
                       </span>
                     </div>
                   </div>
 
-                  {/* Security Badge */}
+                  {/* Security Verification Line */}
                   <div className="flex items-center justify-center gap-2 text-xs text-emerald-700 bg-emerald-50/80 py-2.5 px-4 rounded-xl border border-emerald-200">
                     <ShieldCheck size={16} /> Verified & Secured by Paystack
                   </div>
-                  
-                  {isFullyPaid && deliveryAccessToken && (
-                    <div className="pt-2">
-                      <Button
-                        onClick={() => {
-                          window.location.href = `/delivery/${deliveryAccessToken}`
-                        }}
-                        className="w-full py-6 text-base font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg shadow-indigo-500/20"
-                      >
-                        <FileText className="w-5 h-5 mr-2" />
-                        View My Deliverables
-                      </Button>
-                    </div>
-                  )}
 
+                  <div className="no-print space-y-2.5 pt-1">
+                    {isFullyPaid && deliveryAccessToken && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          window.location.href = `/delivery/secure/${encodeURIComponent(deliveryAccessToken)}`
+                        }}
+                        className="w-full min-h-[48px] py-3.5 px-5 text-sm sm:text-base font-bold bg-[var(--pay-cta-bg)] text-[var(--pay-cta-text)] hover:opacity-95 rounded-xl transition-opacity flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <FileText className="w-5 h-5" />
+                        <span>Access Deliverables Now</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="w-full min-h-[44px] py-2.5 px-4 text-xs sm:text-sm font-semibold border border-gray-300 hover:bg-gray-50 text-gray-800 rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Printer size={15} />
+                      <span>Print / Save Receipt</span>
+                    </button>
+                  </div>
                 </div>
               </Card>
             </CardReveal>
 
             {/* Bottom Branding Footer */}
-            <FadeIn delay={0.25} className="text-center">
+            <FadeIn delay={0.25} className="no-print text-center">
               <p className="text-xs text-gray-400">
-                &copy; {new Date().getFullYear()} {branding.businessName || 'LEXMEDIA.GH'}. All rights reserved.
+                &copy; {new Date().getFullYear()} {palette.businessName}. All rights reserved.
               </p>
             </FadeIn>
-
           </div>
         </div>
       </PageEnter>
@@ -454,29 +537,23 @@ function PublicPaymentPageInner() {
 
   return (
     <PageEnter>
-      <div className="min-h-screen bg-gray-50/80 flex flex-col justify-between p-4 sm:p-6 font-sans">
+      <div
+        data-pay-scope={scopeId}
+        className="min-h-screen bg-gray-50/80 flex flex-col justify-between p-4 sm:p-6 font-sans"
+      >
+        <style dangerouslySetInnerHTML={{ __html: scopedPayCss }} />
         <div className="max-w-xl mx-auto w-full space-y-6 my-auto py-6">
 
           {/* Branding Header */}
           <SlideUp delay={0.05} className="text-center space-y-2">
-            {branding.logoUrl ? (
-              <img
-                src={branding.logoUrl}
-                alt={branding.businessName}
-                className="h-14 mx-auto object-contain"
-              />
-            ) : (
-              <div
-                className="inline-flex items-center justify-center w-12 h-12 rounded-2xl shadow-md mb-1"
-                style={{ backgroundColor: branding.buttonColor || '#0A0A0A' }}
-              >
-                <Zap size={24} style={{ color: branding.buttonTextColor || '#FFFFFF' }} />
-              </div>
-            )}
-            <h1 className="text-2xl font-bold tracking-tight" style={{ color: branding.textColor || '#111827' }}>
-              {(branding.businessName || 'CTRL ROOM').toUpperCase()}
+            <PortalBrandMark
+              logoCandidates={logoCandidates}
+              businessName={palette.businessName}
+            />
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+              {palette.businessName}
             </h1>
-            <p className="text-xs uppercase font-semibold tracking-wider" style={{ color: branding.mutedTextColor || '#6B7280' }}>
+            <p className="text-xs uppercase font-semibold tracking-wider text-gray-500">
               Official Payment Portal
             </p>
           </SlideUp>
@@ -707,11 +784,7 @@ function PublicPaymentPageInner() {
                   ) : (
                     <Button
                       size="lg"
-                      className="w-full h-14 rounded-2xl font-bold text-base shadow-lg transition-transform active:scale-[0.99] flex items-center justify-center gap-2"
-                      style={{
-                        backgroundColor: branding.buttonColor || '#0A0A0A',
-                        color: branding.buttonTextColor || '#FFFFFF',
-                      }}
+                      className="w-full h-14 rounded-2xl font-bold text-base shadow-lg transition-transform active:scale-[0.99] flex items-center justify-center gap-2 bg-[var(--pay-cta-bg)] text-[var(--pay-cta-text)] hover:opacity-95"
                       icon={<Lock size={18} />}
                       loading={isProcessing}
                       loadingText="Connecting to Paystack..."
@@ -737,7 +810,7 @@ function PublicPaymentPageInner() {
           {/* Bottom Branding Footer */}
           <FadeIn delay={0.25} className="text-center">
             <p className="text-xs text-gray-400">
-              &copy; {new Date().getFullYear()} {branding.businessName || 'Ctrl Room'}. All rights reserved.
+              &copy; {new Date().getFullYear()} {palette.businessName}. All rights reserved.
             </p>
           </FadeIn>
 
@@ -749,10 +822,14 @@ function PublicPaymentPageInner() {
 
 export default function PublicPaymentPage() {
   return (
-    <BrandingProvider>
-      <React.Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-white"><Spinner size="lg" /></div>}>
-        <PublicPaymentPageInner />
-      </React.Suspense>
-    </BrandingProvider>
+    <React.Suspense
+      fallback={
+        <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#090D16] flex items-center justify-center">
+          <Spinner size="lg" />
+        </div>
+      }
+    >
+      <PublicPaymentPageInner />
+    </React.Suspense>
   )
 }
