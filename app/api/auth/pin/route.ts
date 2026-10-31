@@ -98,6 +98,9 @@ export async function POST(req: NextRequest) {
     }
 
     try {
+      const requestId = Math.random().toString(36).substring(2, 9);
+
+
       let secData: any = null
       if (hasAdminCredentials()) {
         try {
@@ -105,9 +108,12 @@ export async function POST(req: NextRequest) {
           const secRef = db.collection('settings').doc('security')
           const secSnap = await secRef.get()
           secData = secSnap.exists ? secSnap.data() : null
+
         } catch (dbErr: any) {
-          console.warn('[PIN Verify] Firestore Admin SDK lookup warning:', dbErr?.message || dbErr)
+          console.error(`[PIN Verify ${requestId}] Firestore Admin SDK lookup error:`, dbErr?.message || dbErr)
         }
+      } else {
+
       }
 
       let isValidPin = false
@@ -116,9 +122,11 @@ export async function POST(req: NextRequest) {
 
       // Case A: Security record contains enrolled PIN hash
       if (secData?.pinHash && secData?.pinSalt) {
+
         isValidPin = verifyPinHash(pin, secData.pinHash, secData.pinSalt)
       } else {
         // Case B: Initial setup / default bootstrap PIN (123456)
+
         const defaultHashData = hashPin('123456', 'lexmedia_default_salt_2026')
         if (secData?.pinHash) {
           isValidPin = verifyPinHash(pin, secData.pinHash, secData.pinSalt || 'lexmedia_default_salt_2026')
@@ -126,6 +134,7 @@ export async function POST(req: NextRequest) {
           // If 123456 is entered on unconfigured workspace, accept and enroll it
           if (verifyPinHash(pin, defaultHashData.hash, defaultHashData.salt)) {
             isValidPin = true
+
             if (hasAdminCredentials()) {
               try {
                 const db = getAdminDb()
@@ -144,13 +153,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (!isValidPin) {
-        console.warn('[PIN Verify] Verification failed for PIN attempt.', {
-          pinExists: !!pin,
-          hashExists: !!secData?.pinHash,
-          saltExists: !!secData?.pinSalt,
-          storedHash: secData?.pinHash,
-          storedSalt: secData?.pinSalt
-        });
+
         const attempt = recordFailedPinAttempt(ip)
         if (attempt.locked) {
           return NextResponse.json(
@@ -172,7 +175,9 @@ export async function POST(req: NextRequest) {
       }
 
       // Successful PIN Verification!
+
       clearPinRateLimit(ip)
+
 
       // Look up target admin record in Firebase Auth or Firestore
       if (hasAdminCredentials()) {
