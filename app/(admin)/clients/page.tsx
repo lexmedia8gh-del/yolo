@@ -26,6 +26,7 @@ import {
   Sparkles,
   ArrowUpDown,
   FileText,
+  Send,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -313,6 +314,11 @@ export default function ClientsPage() {
         subtitle="Manage client records, view project history, and track payment balances."
         action={
           <div className="flex items-center gap-2.5 flex-wrap">
+            <Link href="/dispatch">
+              <Button variant="outline" icon={<Send size={16} />}>
+                Dispatch
+              </Button>
+            </Link>
             <Button
               onClick={() => setIsTemplatesModalOpen(true)}
               variant="outline"

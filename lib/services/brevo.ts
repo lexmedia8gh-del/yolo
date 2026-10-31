@@ -5,11 +5,27 @@
  * Never import this file into client components or client-side code.
  */
 
-import { getAppUrl, getProductionUrl } from '@/lib/utils'
+import { getAppUrl, getProductionUrl, isLocalhostUrl, resolveStrictProductionBaseUrl } from '@/lib/utils'
 import { senderName, getEmailSender } from '@/lib/config/email'
+import { getAdminDb } from '@/lib/firebase/admin'
+import { sanitizeBrandingLogoUrlIsomorphic } from '@/lib/branding/logo-resolver'
+import {
+  renderDispatchEmailTemplate,
+  resolvePublicBrandAssetUrl,
+  type EmailBrandingOptions,
+  type DispatchEmailTemplateProps,
+} from '@/lib/templates/dispatchEmailRenderer'
 
-// Re-export centralized email sender configuration and production URL utility
-export { senderName, getEmailSender, getProductionUrl }
+// Re-export centralized email sender configuration, production URL utility, and shared dispatch renderer
+export {
+  senderName,
+  getEmailSender,
+  getProductionUrl,
+  renderDispatchEmailTemplate,
+  resolvePublicBrandAssetUrl,
+  type EmailBrandingOptions,
+  type DispatchEmailTemplateProps,
+}
 
 interface SendDeliveryEmailParams {
   toEmail: string
@@ -83,159 +99,82 @@ export interface SendInvoiceEmailParams {
 }
 
 /**
- * Makes a logo URL absolute — replaces relative /api/... paths with the production base.
- * Email clients (Brevo) can only fetch publicly accessible absolute URLs.
+ * Makes a logo URL absolute — replaces relative /api/... or /uploads/... paths with the production base.
+ * Never returns localhost or 127.0.0.1 URLs so outgoing emails never contain broken local images.
  */
-function makeAbsoluteLogoUrl(logoUrl: string | undefined): string {
-  if (!logoUrl) return ''
-  if (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) {
-    return getProductionUrl(logoUrl)
+function makeAbsoluteLogoUrl(logoUrl: string | undefined, explicitBaseUrl?: string): string {
+  return resolvePublicBrandAssetUrl(logoUrl, explicitBaseUrl)
+}
+
+/**
+ * Loads live Branding + Business contact settings directly from Firestore (`settings/branding` + `settings/business`)
+ * and resolves uploaded logo paths to public HTTPS URLs so changes in Settings -> Branding take effect immediately.
+ */
+export async function getLiveEmailBranding(requestContext?: any): Promise<EmailBrandingOptions> {
+  const strictBase = resolveStrictProductionBaseUrl(requestContext)
+  const baseUrl = strictBase.ok ? strictBase.baseUrl : ''
+
+  const defaults: EmailBrandingOptions = {
+    businessName: 'lexmedia.gh',
+    shortName: 'lex',
+    tagline: 'Professional Digital Services',
+    logoUrl: '',
+    logoLightUrl: '',
+    primaryColor: '#0F172A',
+    secondaryColor: '#1D63ED',
+    accentColor: '#1D63ED',
+    buttonColor: '#1D63ED',
+    buttonTextColor: '#FFFFFF',
+    supportEmail: getEmailSender().email,
+    supportPhone: '',
+    businessAddress: '',
+    website: '',
   }
-  // Relative URL — prepend production base
-  const prodBase = getAppUrl()
-  if (!prodBase) return '' // Can't make absolute without a base; hide image
-  const normalizedBase = prodBase.startsWith('http') ? prodBase : `https://${prodBase}`
-  return `${normalizedBase.replace(/\/$/, '')}${logoUrl}`
-}
 
-export interface EmailBrandingOptions {
-  businessName?: string
-  logoUrl?: string
-  primaryColor?: string
-  secondaryColor?: string
-  accentColor?: string
-}
+  try {
+    const db = getAdminDb()
+    const [brandSnap, bizSnap] = await Promise.all([
+      db.collection('settings').doc('branding').get(),
+      db.collection('settings').doc('business').get(),
+    ])
 
-export function renderDispatchEmailTemplate({
-  recipientName,
-  subject,
-  bodyText,
-  portalUrl,
-  buttonText = 'View Client Portal',
-  branding,
-  projectName,
-  invoiceNumber,
-  outstandingBalance,
-}: {
-  recipientName: string
-  subject: string
-  bodyText: string
-  portalUrl?: string
-  buttonText?: string
-  branding?: EmailBrandingOptions
-  projectName?: string
-  invoiceNumber?: string
-  outstandingBalance?: string
-}) {
-  const businessName = branding?.businessName || 'LEXMEDIA.GH'
-  const primaryColor = branding?.primaryColor || '#2563eb'
-  const cleanPortalUrl = portalUrl ? getProductionUrl(portalUrl) : getProductionUrl('/login')
-  const absLogo = makeAbsoluteLogoUrl(branding?.logoUrl)
+    const bData = brandSnap.exists ? brandSnap.data() || {} : {}
+    const bizData = bizSnap.exists ? bizSnap.data() || {} : {}
 
-  const paragraphs = bodyText
-    .split(/\n\n+/)
-    .map((p) => p.replace(/\n/g, '<br>'))
-    .map((p) => `<p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.6; color: #334155;">${p}</p>`)
-    .join('')
+    const rawLogo =
+      sanitizeBrandingLogoUrlIsomorphic(bData.logoUrl, bData.logoStoragePath) ||
+      sanitizeBrandingLogoUrlIsomorphic(bizData.logoURL, bizData.logoStoragePath)
+    const rawLightLogo = sanitizeBrandingLogoUrlIsomorphic(
+      bData.logoLightUrl,
+      bData.logoLightStoragePath
+    )
 
-  const headerLogoBlock = absLogo
-    ? `<img src="${escapeHtml(absLogo)}" alt="${escapeHtml(businessName)}" width="130" style="display: block; margin: 0 auto 12px auto; max-height: 56px; object-fit: contain;" />`
-    : `<table align="center" border="0" cellspacing="0" cellpadding="0" style="margin: 0 auto 12px auto;">
-        <tr>
-          <td align="center" style="background-color: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.25); width: 56px; height: 56px; border-radius: 14px;">
-            <span style="font-size: 24px; font-weight: 800; color: #38bdf8; font-family: monospace;">LM</span>
-          </td>
-        </tr>
-      </table>`
-
-  const metaDetailsBlock = (projectName || invoiceNumber || outstandingBalance)
-    ? `<table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin: 0 0 20px 0; padding: 16px 20px;">
-        <tr>
-          <td>
-            <table width="100%" border="0" cellspacing="0" cellpadding="0" style="font-size: 13px;">
-              ${projectName ? `
-              <tr>
-                <td style="color: #64748b; font-weight: 600; padding-bottom: 6px;">Project:</td>
-                <td align="right" style="font-weight: 700; color: #0f172a; padding-bottom: 6px;">${escapeHtml(projectName)}</td>
-              </tr>
-              ` : ''}
-              ${invoiceNumber ? `
-              <tr>
-                <td style="color: #64748b; font-weight: 600; padding-bottom: 6px;">Invoice #:</td>
-                <td align="right" style="font-weight: 700; color: #0f172a; padding-bottom: 6px;">${escapeHtml(invoiceNumber)}</td>
-              </tr>
-              ` : ''}
-              ${outstandingBalance ? `
-              <tr>
-                <td style="color: #be123c; font-weight: 600;">Outstanding Balance:</td>
-                <td align="right" style="font-weight: 800; color: #9f1239;">${escapeHtml(outstandingBalance)}</td>
-              </tr>
-              ` : ''}
-            </table>
-          </td>
-        </tr>
-      </table>`
-    : ''
-
-  const ctaButtonBlock = cleanPortalUrl
-    ? `<table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin: 24px 0 16px 0;">
-        <tr>
-          <td align="center">
-            <a href="${escapeHtml(cleanPortalUrl)}" target="_blank" style="display: inline-block; width: 85%; max-width: 320px; background-color: ${primaryColor}; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 24px; border-radius: 10px; text-align: center; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);">
-              ${escapeHtml(buttonText)} &rarr;
-            </a>
-          </td>
-        </tr>
-      </table>
-      <p style="font-size: 12px; color: #94a3b8; text-align: center; line-height: 1.5; margin-top: 12px; margin-bottom: 24px;">
-        Direct link: <a href="${escapeHtml(cleanPortalUrl)}" style="color: ${primaryColor}; text-decoration: none; word-break: break-all;">${escapeHtml(cleanPortalUrl)}</a>
-      </p>`
-    : ''
-
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escapeHtml(subject)}</title>
-</head>
-<body style="margin: 0; padding: 0; background-color: #0b1329; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
-  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #0b1329; padding: 40px 16px;">
-    <tr>
-      <td align="center">
-        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 580px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);">
-          
-          <!-- Header Banner -->
-          <tr>
-            <td style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 32px 28px; text-align: center;">
-              ${headerLogoBlock}
-              <h1 style="color: #ffffff; margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.3px;">${escapeHtml(businessName)}</h1>
-              <p style="color: #38bdf8; margin: 4px 0 0 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">Client Notification &amp; Dispatch Portal</p>
-            </td>
-          </tr>
-
-          <!-- Main Content -->
-          <tr>
-            <td style="padding: 32px 28px 24px 28px;">
-              ${paragraphs}
-              ${metaDetailsBlock}
-              ${ctaButtonBlock}
-            </td>
-          </tr>
-
-          <!-- Footer -->
-          <tr>
-            <td style="background-color: #f8fafc; padding: 20px 28px; border-top: 1px solid #e2e8f0; text-align: center;">
-              <p style="margin: 0; font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">&copy; ${escapeHtml(businessName)} &mdash; Digital Media &amp; Communications</p>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`
+    return {
+      businessName:
+        String(bData.businessName || bizData.businessName || defaults.businessName).trim() ||
+        'lexmedia.gh',
+      shortName: String(bData.shortName || defaults.shortName).trim(),
+      tagline: String(bData.tagline || bizData.tagline || defaults.tagline).trim(),
+      logoUrl: resolvePublicBrandAssetUrl(rawLogo, baseUrl),
+      logoLightUrl: resolvePublicBrandAssetUrl(rawLightLogo, baseUrl),
+      primaryColor: bData.primaryColor || defaults.primaryColor,
+      secondaryColor: bData.secondaryColor || defaults.secondaryColor,
+      accentColor: bData.accentColor || defaults.accentColor,
+      buttonColor: bData.buttonColor || bData.accentColor || defaults.buttonColor,
+      buttonTextColor: bData.buttonTextColor || defaults.buttonTextColor,
+      supportEmail:
+        String(bizData.email || bizData.supportEmail || defaults.supportEmail || '').trim(),
+      supportPhone: String(bizData.phone || bizData.supportPhone || '').trim(),
+      businessAddress: String(bizData.address || bizData.businessAddress || '').trim(),
+      website:
+        bizData.website && !isLocalhostUrl(String(bizData.website))
+          ? String(bizData.website).trim()
+          : '',
+    }
+  } catch (err) {
+    console.warn('[Brevo Branding] Falling back to default branding:', err)
+    return defaults
+  }
 }
 
 function renderEmailTemplate({
@@ -1205,6 +1144,7 @@ async function sendBrevoEmail({
         subject,
         htmlContent,
       }),
+      signal: AbortSignal.timeout(15000),
     })
 
     const data = await res.json()

@@ -72,6 +72,7 @@ service cloud.firestore {
     match /quickJobs/{docId}      { allow read, write: if isAdmin(); }
     match /addOns/{docId}         { allow read, write: if isAdmin(); }
     match /files/{docId}          { allow read, write: if isAdmin(); }
+    match /communication_history/{docId} { allow read, write: if isAdmin(); }
 
     // ─── Delivery System ─────────────────────────────────────────────────────
     // Delivery metadata is read by the server-side API routes using the Admin SDK

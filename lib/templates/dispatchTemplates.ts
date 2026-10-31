@@ -214,8 +214,10 @@ export interface SubstituteParams {
   clientName?: string
   clientId?: string
   clientEmail?: string
+  clientPhone?: string
   projectName?: string
   projectId?: string
+  projectStatus?: string
   invoiceNumber?: string
   invoiceAmount?: string
   amountPaid?: string
@@ -223,28 +225,53 @@ export interface SubstituteParams {
   paymentStatus?: string
   serviceName?: string
   loginUrl?: string
+  portalUrl?: string
   supportEmail?: string
+  supportPhone?: string
   companyName?: string
 }
 
 export function substitutePlaceholders(templateText: string, params: SubstituteParams): string {
   let result = templateText || ''
   const company = params.companyName || 'LEXMEDIA.GH'
+  const resolvedPortal = params.portalUrl || params.loginUrl || ''
   const mapping: Record<string, string> = {
     clientName: params.clientName || 'Valued Client',
-    clientId: params.clientId || 'LM-CLIENT',
-    clientEmail: params.clientEmail || 'client@example.com',
-    projectName: params.projectName || 'Media Production Project',
-    projectId: params.projectId || 'PRJ-001',
-    invoiceNumber: params.invoiceNumber || 'INV-0001',
+    client_name: params.clientName || 'Valued Client',
+    clientId: params.clientId || 'CLIENT',
+    client_id: params.clientId || 'CLIENT',
+    clientEmail: params.clientEmail || '',
+    client_email: params.clientEmail || '',
+    clientPhone: params.clientPhone || '',
+    client_phone: params.clientPhone || '',
+    projectName: params.projectName || 'Client Project',
+    project_name: params.projectName || 'Client Project',
+    projectId: params.projectId || 'PROJECT',
+    project_id: params.projectId || 'PROJECT',
+    projectStatus: params.projectStatus || 'Active',
+    project_status: params.projectStatus || 'Active',
+    invoiceNumber: params.invoiceNumber || 'N/A',
+    invoice_number: params.invoiceNumber || 'N/A',
     invoiceAmount: params.invoiceAmount || 'GH₵0.00',
+    invoice_amount: params.invoiceAmount || 'GH₵0.00',
     amountPaid: params.amountPaid || 'GH₵0.00',
+    amount_paid: params.amountPaid || 'GH₵0.00',
     outstandingBalance: params.outstandingBalance || 'GH₵0.00',
+    outstanding_balance: params.outstandingBalance || 'GH₵0.00',
     paymentStatus: params.paymentStatus || 'Pending',
-    serviceName: params.serviceName || 'Media Production',
-    loginUrl: params.loginUrl || 'https://lexmedia.gh/login',
+    payment_status: params.paymentStatus || 'Pending',
+    serviceName: params.serviceName || 'Digital Production',
+    service_name: params.serviceName || 'Digital Production',
+    loginUrl: resolvedPortal,
+    login_url: resolvedPortal,
+    portalUrl: resolvedPortal,
+    portal_url: resolvedPortal,
     supportEmail: params.supportEmail || 'lexmedia8gh@gmail.com',
+    support_email: params.supportEmail || 'lexmedia8gh@gmail.com',
+    supportPhone: params.supportPhone || '',
+    support_phone: params.supportPhone || '',
     companyName: company,
+    company_name: company,
   }
 
   for (const [key, value] of Object.entries(mapping)) {

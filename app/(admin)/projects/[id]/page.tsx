@@ -25,6 +25,7 @@ import {
   Plus,
   Eye,
   PiggyBank,
+  Send,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -43,6 +44,7 @@ import { PaymentDetailsModal } from '@/components/payments/PaymentDetailsModal'
 import { ProjectPaymentLinkModal } from '@/components/projects/ProjectPaymentLinkModal'
 import { ProjectPaymentRequests } from '@/components/projects/ProjectPaymentRequests'
 import { EditProjectModal } from '@/components/projects/EditProjectModal'
+import { MultiChannelDispatchModal } from '@/components/dispatch/MultiChannelDispatchModal'
 import type { Project, Invoice, Payment, ClientLink, ProjectStatus } from '@/lib/types'
 import {
   formatCurrency,
@@ -80,6 +82,7 @@ export default function ProjectDetailPage() {
   const [projectLinks, setProjectLinks] = useState<ClientLink[]>([])
   const [showCreateLinkModal, setShowCreateLinkModal] = useState(false)
   const [showEditProjectModal, setShowEditProjectModal] = useState(false)
+  const [showDispatchModal, setShowDispatchModal] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const [updatingStatus, setUpdatingStatus] = useState(false)
@@ -259,6 +262,14 @@ export default function ProjectDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<Send size={14} />}
+            onClick={() => setShowDispatchModal(true)}
+          >
+            Dispatch
+          </Button>
           <Button
             variant="primary"
             size="sm"
@@ -668,6 +679,34 @@ export default function ProjectDetailPage() {
           onClose={() => setShowEditProjectModal(false)}
           payments={payments}
           links={projectLinks}
+          onSuccess={() => {
+            reloadProjectData()
+          }}
+        />
+      )}
+
+      {/* Multi-Channel Dispatch Modal pre-bound to Project & Client */}
+      {project && showDispatchModal && (
+        <MultiChannelDispatchModal
+          isOpen={showDispatchModal}
+          onClose={() => setShowDispatchModal(false)}
+          initialClient={
+            client
+              ? {
+                  id: client.id,
+                  name: client.fullName || project.clientName || 'Valued Client',
+                  email: client.email || '',
+                  phone: client.phone || client.whatsappNumber || '',
+                  companyName: client.company || '',
+                }
+              : project.clientId
+              ? {
+                  id: project.clientId,
+                  name: project.clientName || 'Valued Client',
+                }
+              : null
+          }
+          initialProjectId={project.id}
           onSuccess={() => {
             reloadProjectData()
           }}

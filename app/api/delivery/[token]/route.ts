@@ -232,13 +232,42 @@ export async function GET(
 
     const totalSize = formattedFiles.reduce((sum, f) => sum + (f.fileSize || 0), 0)
 
-    let invoiceTotal = 0
-    let totalPaid = 0
-    let remainingBalance = 0
-    let currency = 'GHS'
+    let invoiceTotal = Number(deliveryDocData.projectTotal || 0) || 0
+    let totalPaid = Number(deliveryDocData.amountPaid || 0) || 0
+    let remainingBalance =
+      deliveryDocData.remainingBalance !== undefined
+        ? Math.max(0, Number(deliveryDocData.remainingBalance) || 0)
+        : Math.max(0, invoiceTotal - totalPaid)
+    let currency = deliveryDocData.currency || 'GHS'
     let clientEmail = deliveryDocData.clientEmail || ''
-    let invoiceNumber = ''
-    let paymentLinkToken = token
+    let invoiceNumber = deliveryDocData.invoiceNumber || ''
+    let paymentLinkToken = deliveryDocData.paymentLinkToken || token
+    let projectStatus = deliveryDocData.projectStatus || deliveryDocData.status || 'Active'
+    let serviceName = deliveryDocData.serviceName || ''
+
+    if (deliveryDocData.projectId) {
+      try {
+        const adminDb = getAdminDb()
+        const projSnap = await adminDb.collection(COLLECTIONS.PROJECTS).doc(deliveryDocData.projectId).get()
+        if (projSnap.exists) {
+          const proj = projSnap.data()!
+          projectStatus = proj.status || projectStatus
+          serviceName = proj.serviceName || serviceName
+          if (!invoiceTotal && proj.price) {
+            invoiceTotal = Number(proj.price) || 0
+            totalPaid = Number(proj.amountPaid || 0) || 0
+            remainingBalance =
+              proj.outstandingBalance !== undefined
+                ? Math.max(0, Number(proj.outstandingBalance) || 0)
+                : Math.max(0, invoiceTotal - totalPaid)
+          }
+          currency = proj.currency || currency
+          if (!paymentLinkToken || paymentLinkToken === token) {
+            paymentLinkToken = deliveryDocData.projectId
+          }
+        }
+      } catch {}
+    }
 
     if (deliveryDocData.invoiceId) {
       try {
@@ -246,12 +275,12 @@ export async function GET(
         const invSnap = await adminDb.collection(COLLECTIONS.INVOICES).doc(deliveryDocData.invoiceId).get()
         if (invSnap.exists) {
           const inv = invSnap.data()!
-          invoiceTotal = inv.total || 0
-          totalPaid = inv.amountPaid || 0
+          invoiceTotal = inv.total ?? invoiceTotal
+          totalPaid = inv.amountPaid ?? totalPaid
           remainingBalance = inv.balanceDue !== undefined ? inv.balanceDue : Math.max(0, invoiceTotal - totalPaid)
-          currency = inv.currency || 'GHS'
+          currency = inv.currency || currency
           clientEmail = inv.clientEmail || clientEmail
-          invoiceNumber = inv.invoiceNumber || ''
+          invoiceNumber = inv.invoiceNumber || invoiceNumber
           if (inv.paymentLinkToken) {
             paymentLinkToken = inv.paymentLinkToken
           }
@@ -263,10 +292,10 @@ export async function GET(
         const qjSnap = await adminDb.collection(COLLECTIONS.QUICK_JOBS).doc(deliveryDocData.quickJobId).get()
         if (qjSnap.exists) {
           const qj = qjSnap.data()!
-          invoiceTotal = qj.originalAgreedPrice || qj.total || 0
-          totalPaid = qj.amountPaid || 0
+          invoiceTotal = qj.originalAgreedPrice || qj.total || invoiceTotal
+          totalPaid = qj.amountPaid ?? totalPaid
           remainingBalance = qj.outstandingBalance !== undefined ? qj.outstandingBalance : Math.max(0, invoiceTotal - totalPaid)
-          currency = qj.currency || 'GHS'
+          currency = qj.currency || currency
           clientEmail = qj.clientEmail || clientEmail
           if (qj.deliveryAccessToken) {
             paymentLinkToken = qj.deliveryAccessToken
@@ -294,7 +323,10 @@ export async function GET(
       (invoiceTotal > 0 && totalPaid >= invoiceTotal) ||
       !deliveryDocData.requiresFullPayment
 
-    const isLockedState = Boolean(deliveryDocData.requiresFullPayment && !isFullyPaid)
+    // Only lock deliverables behind payment screen when deliverable files exist AND payment is required
+    const isLockedState = Boolean(
+      formattedFiles.length > 0 && deliveryDocData.requiresFullPayment && !isFullyPaid
+    )
 
     // Security Gate: Strip download URLs when deliverables are locked pending payment
     const safeFiles = isLockedState
@@ -307,10 +339,13 @@ export async function GET(
     return NextResponse.json({
       delivery: {
         id: deliveryId,
-        title: deliveryDocData.title || 'Project Delivery',
+        projectId: deliveryDocData.projectId || null,
+        title: deliveryDocData.title || 'Project Portal',
         projectName: deliveryDocData.projectName || '',
         clientName: deliveryDocData.clientName || '',
-        status: deliveryDocData.status || 'Delivered',
+        status: deliveryDocData.status || 'Active',
+        projectStatus,
+        serviceName,
         isReleased: deliveryDocData.isReleased || false,
         expiresAt: toISO(deliveryDocData.expiresAt),
         releasedAt: toISO(deliveryDocData.releasedAt),

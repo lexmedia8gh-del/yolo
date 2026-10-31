@@ -20,6 +20,7 @@ import {
   Zap,
   BarChart3,
   Eye,
+  Send,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/hooks/useAuth'
@@ -81,6 +82,11 @@ const navItems = [
     label: 'Payment Links',
     href: '/links',
     icon: Link2,
+  },
+  {
+    label: 'Dispatch',
+    href: '/dispatch',
+    icon: Send,
   },
   {
     label: 'WhatsApp',

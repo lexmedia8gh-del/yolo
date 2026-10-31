@@ -70,10 +70,13 @@ interface DeliveryFileDTO {
 
 interface DeliveryDTO {
   id: string
+  projectId?: string | null
   title: string
   projectName: string
   clientName: string
   status: string
+  projectStatus?: string
+  serviceName?: string
   expiresAt: string | null
   releasedAt: string | null
   notes: string
@@ -474,8 +477,12 @@ function ClientDeliveryPageInner() {
           <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20">
             <div className="max-w-3xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                {branding.logoLightUrl ? (
-                  <img src={branding.logoLightUrl} alt={branding.businessName} className="h-8 object-contain" />
+                {branding.logoLightUrl || branding.logoUrl ? (
+                  <img
+                    src={branding.logoLightUrl || branding.logoUrl}
+                    alt={branding.businessName}
+                    className="h-8 w-auto max-w-[160px] object-contain"
+                  />
                 ) : (
                   <div
                     className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md"
@@ -588,9 +595,15 @@ function ClientDeliveryPageInner() {
     )
   }
 
-  // ── FIRST VIEW: CLIENT WELCOME MESSAGE OVERLAY / SECTION ───────────
+  // ── FIRST VIEW: PROJECT PORTAL & DELIVERABLES OVERVIEW ───────────
   if (!showFilesPortal) {
-    const customMessage = delivery.notes?.trim() || 'Your deliverables are ready. Thank you for choosing LEXMEDIA.GH.'
+    const hasDeliverables = files.length > 0
+    const activeProjectStatus = delivery.projectStatus || delivery.status || 'In Progress'
+    const customMessage =
+      delivery.notes?.trim() ||
+      (hasDeliverables
+        ? `Your deliverables for ${delivery.projectName || delivery.title} are ready for review and download.`
+        : `Welcome to your dedicated project portal for ${delivery.projectName || delivery.title}. Track production milestones, billing status, and upcoming deliverables here.`)
 
     return (
       <PageEnter>
@@ -599,8 +612,12 @@ function ClientDeliveryPageInner() {
           <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20">
             <div className="max-w-3xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                {branding.logoLightUrl ? (
-                  <img src={branding.logoLightUrl} alt={branding.businessName} className="h-8 object-contain" />
+                {branding.logoLightUrl || branding.logoUrl ? (
+                  <img
+                    src={branding.logoLightUrl || branding.logoUrl}
+                    alt={branding.businessName}
+                    className="h-8 w-auto max-w-[160px] object-contain"
+                  />
                 ) : (
                   <div
                     className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md"
@@ -613,77 +630,134 @@ function ClientDeliveryPageInner() {
                   <span className="font-bold tracking-tight text-white text-base">
                     {branding.businessName || 'LEXMEDIA.GH'}
                   </span>
-                  <span className="hidden sm:inline-block text-[11px] text-slate-400 font-mono ml-2 px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700">
-                    Delivery Portal
+                  <span className="hidden sm:inline-block text-[11px] text-slate-400 font-mono ml-2 px-2 py-0.5 rounded-lg bg-slate-800 border border-slate-700">
+                    Client Project Portal
                   </span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   <ShieldCheck size={13} />
-                  Deliverables Ready
+                  {hasDeliverables ? 'Deliverables Ready' : activeProjectStatus}
                 </span>
               </div>
             </div>
           </header>
 
-          {/* Main Welcome Message View */}
+          {/* Main Project Portal View */}
           <main className="max-w-2xl mx-auto px-4 sm:px-6 py-10 sm:py-16 w-full flex-1 flex flex-col items-center justify-center space-y-8">
-            <CardReveal className="w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-10 shadow-2xl space-y-8 relative overflow-hidden">
+            <CardReveal className="w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-10 shadow-2xl space-y-7 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-56 h-56 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
 
               {/* Icon & Greeting Header */}
               <div className="text-center space-y-3 relative z-10">
                 <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center mx-auto text-indigo-400 shadow-md">
-                  <Sparkles size={32} />
+                  <Layers size={30} />
                 </div>
                 <div className="space-y-1">
                   <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-                    Your Deliverables Are Ready
+                    {delivery.projectName || delivery.title}
                   </h1>
                   <p className="text-sm font-medium text-indigo-400">
-                    Hello <strong className="text-white font-semibold">{delivery.clientName}</strong> 👋
+                    Prepared for <strong className="text-white font-semibold">{delivery.clientName}</strong>
                   </p>
                 </div>
               </div>
 
               {/* Polished Custom Client Message Box */}
-              <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-3 relative z-10 shadow-inner">
+              <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-6 space-y-3 relative z-10">
                 <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-indigo-400 border-b border-slate-800/80 pb-3">
                   <MessageSquare size={15} />
-                  <span>Message from {branding.businessName || 'LEXMEDIA.GH'}</span>
+                  <span>Overview from {branding.businessName || 'LEXMEDIA.GH'}</span>
                 </div>
-                <p className="text-base sm:text-lg text-slate-200 leading-relaxed font-sans whitespace-pre-wrap pt-1">
-                  &ldquo;{customMessage}&rdquo;
+                <p className="text-sm sm:text-base text-slate-200 leading-relaxed font-sans whitespace-pre-wrap pt-1">
+                  {customMessage}
                 </p>
               </div>
 
-              {/* Project & Assets Meta Info */}
-              <div className="bg-slate-900/60 rounded-2xl p-4 border border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300 relative z-10">
-                <div className="flex items-center gap-2">
-                  <Layers size={16} className="text-indigo-400" />
-                  <span>
-                    Project: <strong className="text-white font-semibold">{delivery.projectName || delivery.title}</strong>
+              {/* Project & Financial Meta Info */}
+              <div className="bg-slate-950/60 rounded-2xl p-5 border border-slate-800/80 space-y-3 text-sm relative z-10">
+                <div className="flex items-center justify-between pb-2.5 border-b border-slate-800/70">
+                  <span className="text-slate-400">Project</span>
+                  <span className="font-semibold text-white">{delivery.projectName || delivery.title}</span>
+                </div>
+                {delivery.serviceName && (
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-800/70">
+                    <span className="text-slate-400">Service</span>
+                    <span className="font-medium text-slate-200">{delivery.serviceName}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between pb-2.5 border-b border-slate-800/70">
+                  <span className="text-slate-400">Production Status</span>
+                  <span className="font-semibold text-indigo-400">{activeProjectStatus}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Deliverable Files</span>
+                  <span className="font-mono text-slate-200 tabular-nums">
+                    {files.length > 0
+                      ? `${files.length} asset${files.length === 1 ? '' : 's'} (${formatFileSize(delivery.totalSize)})`
+                      : 'In Production'}
                   </span>
                 </div>
-                <div className="font-mono bg-slate-800 px-3 py-1 rounded-full text-slate-200 border border-slate-700">
-                  {files.length} asset{files.length === 1 ? '' : 's'} ({formatFileSize(delivery.totalSize)})
-                </div>
+                {financials && financials.invoiceTotal > 0 && (
+                  <div className="pt-2.5 border-t border-slate-800/70 flex items-center justify-between">
+                    <span className="text-slate-400">
+                      {financials.remainingBalance > 0 ? 'Balance Due' : 'Payment Status'}
+                    </span>
+                    <span
+                      className={
+                        financials.remainingBalance > 0
+                          ? 'font-bold text-amber-400 font-mono tabular-nums'
+                          : 'font-bold text-emerald-400'
+                      }
+                    >
+                      {financials.remainingBalance > 0
+                        ? formatCurrency(financials.remainingBalance, financials.currency)
+                        : 'Paid in Full'}
+                    </span>
+                  </div>
+                )}
               </div>
 
-              {/* Primary View Deliverables Button */}
-              <div className="space-y-3 relative z-10 pt-2">
-                <button
-                  onClick={() => setShowFilesPortal(true)}
-                  className="w-full py-4 px-8 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-base sm:text-lg transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-3 cursor-pointer active:scale-[0.99]"
-                >
-                  <Layers size={20} />
-                  <span>View Deliverables</span>
-                  <ArrowRight size={20} />
-                </button>
+              {/* Primary Action Buttons */}
+              <div className="space-y-3 relative z-10 pt-1">
+                {hasDeliverables ? (
+                  <button
+                    onClick={() => setShowFilesPortal(true)}
+                    className="w-full py-4 px-8 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-base transition-all shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-3 cursor-pointer active:scale-[0.99]"
+                  >
+                    <Layers size={20} />
+                    <span>View Deliverables</span>
+                    <ArrowRight size={20} />
+                  </button>
+                ) : null}
+
+                {financials && financials.remainingBalance > 0 && (
+                  <button
+                    onClick={handlePayRemaining}
+                    disabled={isProcessingPayment}
+                    aria-busy={isProcessingPayment || undefined}
+                    className="w-full py-3.5 px-6 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm sm:text-base transition-all flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-65 disabled:cursor-wait"
+                  >
+                    {isProcessingPayment ? (
+                      <>
+                        <Spinner size="sm" />
+                        <span>Connecting to Paystack...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CreditCard size={18} />
+                        <span>
+                          Pay Balance ({formatCurrency(financials.remainingBalance, financials.currency)})
+                        </span>
+                      </>
+                    )}
+                  </button>
+                )}
+
                 <p className="text-center text-xs text-slate-400 flex items-center justify-center gap-1.5">
                   <ShieldCheck size={14} className="text-emerald-400" />
-                  Verified Transfer · High-Resolution Delivery
+                  Verified Client Portal · {branding.businessName || 'LEXMEDIA.GH'}
                 </p>
               </div>
             </CardReveal>
@@ -712,8 +786,12 @@ function ClientDeliveryPageInner() {
           <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20">
             <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                {branding.logoLightUrl ? (
-                  <img src={branding.logoLightUrl} alt={branding.businessName} className="h-8 object-contain" />
+                {branding.logoLightUrl || branding.logoUrl ? (
+                  <img
+                    src={branding.logoLightUrl || branding.logoUrl}
+                    alt={branding.businessName}
+                    className="h-8 w-auto max-w-[160px] object-contain"
+                  />
                 ) : (
                   <div
                     className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md"

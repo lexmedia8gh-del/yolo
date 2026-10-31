@@ -189,18 +189,68 @@ function extractHostFromContext(context: any): string | null {
 }
 
 /**
+ * Detects whether a hostname or URL points to a local/loopback development address
+ * (localhost, 127.x.x.x, 0.0.0.0, [::1], .local, or common dev ports on local hosts).
+ */
+export function isLocalhostUrl(input?: string | null): boolean {
+  if (!input || typeof input !== 'string') return false
+  const trimmed = input.trim().toLowerCase()
+  if (!trimmed) return false
+
+  const checkHostAndPort = (hostname: string, port: string): boolean => {
+    const cleanHost = hostname.replace(/^\[|\]$/g, '').toLowerCase()
+    if (
+      cleanHost === 'localhost' ||
+      cleanHost.endsWith('.localhost') ||
+      cleanHost.endsWith('.local') ||
+      cleanHost === '0.0.0.0' ||
+      cleanHost === '::1' ||
+      cleanHost === '0:0:0:0:0:0:0:1' ||
+      /^127(?:\.\d{1,3}){3}$/.test(cleanHost)
+    ) {
+      return true
+    }
+    if (port && ['3000', '3001', '5173', '8080', '4173'].includes(port)) {
+      return true
+    }
+    return false
+  }
+
+  try {
+    const withProto =
+      trimmed.startsWith('http://') || trimmed.startsWith('https://')
+        ? trimmed
+        : `http://${trimmed}`
+    const parsed = new URL(withProto)
+    return checkHostAndPort(parsed.hostname, parsed.port)
+  } catch {
+    return (
+      trimmed.includes('localhost') ||
+      trimmed.includes('127.0.0.1') ||
+      trimmed.includes('0.0.0.0') ||
+      trimmed.includes('[::1]')
+    )
+  }
+}
+
+/**
  * Authoritative Centralized Base URL Resolver.
  * Priority:
- * 1. Explicit production URL ONLY when production mode is intentionally enabled.
- * 2. Current request origin when available (headers or window origin).
- * 3. Configured APP_URL / NEXT_PUBLIC_APP_URL (rejecting vercel.com).
+ * 1. Explicit canonical production URL ONLY when production mode is intentionally enabled.
+ * 2. Configured non-localhost APP_URL / NEXT_PUBLIC_APP_URL (never overridden by internal localhost headers).
+ * 3. Non-localhost request origin (x-forwarded-host / host) or browser origin.
  * 4. Vercel runtime deployment hostname when deployed on Vercel.
- * 5. Localhost fallback (http://localhost:3000) during local development.
+ * 5. Local request/browser origin or DEFAULT_DEV_DOMAIN ONLY during local UI browsing.
  */
 export function getAppBaseUrl(context?: any): string {
   // Configured environment variables
   const configuredAppUrl = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || '').trim()
   const safeConfiguredAppUrl = isVercelPlatformDomain(configuredAppUrl) ? '' : configuredAppUrl
+  const normalizedConfiguredUrl = safeConfiguredAppUrl ? normalizeUrl(safeConfiguredAppUrl) : ''
+  const hasNonLocalConfiguredUrl =
+    Boolean(normalizedConfiguredUrl) &&
+    !isVercelPlatformDomain(normalizedConfiguredUrl) &&
+    !isLocalhostUrl(normalizedConfiguredUrl)
 
   // Vercel deployment variables
   const rawVercelHost =
@@ -216,9 +266,10 @@ export function getAppBaseUrl(context?: any): string {
     .replace(/\/+$/, '')
 
   const isVercelHostValid =
-    cleanVercelHost &&
+    Boolean(cleanVercelHost) &&
     !isVercelPlatformDomain(cleanVercelHost) &&
-    cleanVercelHost !== 'vercel.com'
+    cleanVercelHost !== 'vercel.com' &&
+    !isLocalhostUrl(cleanVercelHost)
 
   // 1. Explicit production domain ONLY when production mode is intentionally enabled
   const isProductionExplicitlyEnabled =
@@ -227,36 +278,35 @@ export function getAppBaseUrl(context?: any): string {
     (process.env.APP_ENV === 'production' && safeConfiguredAppUrl.includes('lexmedia.gh')) ||
     safeConfiguredAppUrl === CANONICAL_PRODUCTION_DOMAIN
 
-  // If in Vercel preview or testing, do not force production domain
   const isVercelTesting =
     process.env.VERCEL_ENV === 'preview' ||
     process.env.APP_ENV === 'testing' ||
-    (safeConfiguredAppUrl && safeConfiguredAppUrl.includes('.vercel.app'))
+    Boolean(safeConfiguredAppUrl && safeConfiguredAppUrl.includes('.vercel.app'))
 
   if (isProductionExplicitlyEnabled && !isVercelTesting) {
     return CANONICAL_PRODUCTION_DOMAIN
   }
 
-  // 2. Current request origin when available
-  // 2a. Server-side request headers
+  // 2. Configured non-localhost production/deployment APP_URL takes priority over loopback headers
+  if (hasNonLocalConfiguredUrl) {
+    return normalizedConfiguredUrl
+  }
+
+  // 3a. Non-localhost server-side request headers (e.g. Cloud Run / Vercel / custom domain)
   const hostFromContext = extractHostFromContext(context)
-  if (hostFromContext && !isVercelPlatformDomain(hostFromContext)) {
+  if (
+    hostFromContext &&
+    !isVercelPlatformDomain(hostFromContext) &&
+    !isLocalhostUrl(hostFromContext)
+  ) {
     return hostFromContext
   }
 
-  // 2b. Browser context: Authoritative active origin
+  // 3b. Non-localhost browser origin
   if (typeof window !== 'undefined' && window.location?.origin) {
     const origin = window.location.origin.replace(/\/+$/, '')
-    if (origin && !isVercelPlatformDomain(origin)) {
+    if (origin && !isVercelPlatformDomain(origin) && !isLocalhostUrl(origin)) {
       return origin
-    }
-  }
-
-  // 3. Safe configured APP_URL (e.g. testing URL like https://lexmedia-preview-git-main.vercel.app)
-  if (safeConfiguredAppUrl) {
-    const normalized = normalizeUrl(safeConfiguredAppUrl)
-    if (normalized && !isVercelPlatformDomain(normalized)) {
-      return normalized
     }
   }
 
@@ -265,17 +315,157 @@ export function getAppBaseUrl(context?: any): string {
     return `https://${cleanVercelHost}`
   }
 
-  // 5. Localhost only during local development
-  const isLocalDev =
-    process.env.NODE_ENV === 'development' ||
-    process.env.APP_ENV === 'development' ||
-    process.env.APP_ENV === 'local'
+  // 5. Fallback for local UI navigation ONLY (never permitted for outgoing dispatch emails)
+  if (hostFromContext && !isVercelPlatformDomain(hostFromContext)) {
+    return hostFromContext
+  }
 
-  if (isLocalDev) {
-    return DEFAULT_DEV_DOMAIN
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    const origin = window.location.origin.replace(/\/+$/, '')
+    if (origin && !isVercelPlatformDomain(origin)) {
+      return origin
+    }
+  }
+
+  if (normalizedConfiguredUrl && !isVercelPlatformDomain(normalizedConfiguredUrl)) {
+    return normalizedConfiguredUrl
   }
 
   return DEFAULT_DEV_DOMAIN
+}
+
+/**
+ * Strictly resolves the public production base URL for outgoing client communications
+ * (Brevo emails, SMS, WhatsApp links, portal links, and email logo URLs).
+ * NEVER falls back to localhost, 127.0.0.1, 0.0.0.0, or local development ports.
+ */
+export function resolveStrictProductionBaseUrl(context?: any): {
+  ok: boolean
+  baseUrl: string
+  error?: string
+} {
+  const configuredAppUrl = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || '').trim()
+
+  // If APP_URL was explicitly set to localhost/loopback, surface a clear configuration error
+  // unless a non-localhost public deployment host is available.
+  const safeConfigured =
+    configuredAppUrl && !isVercelPlatformDomain(configuredAppUrl)
+      ? normalizeUrl(configuredAppUrl)
+      : ''
+
+  if (safeConfigured && !isLocalhostUrl(safeConfigured)) {
+    const httpsBase = safeConfigured.replace(/^http:\/\//i, 'https://')
+    return { ok: true, baseUrl: httpsBase }
+  }
+
+  const isProductionExplicitlyEnabled =
+    process.env.PRODUCTION_DOMAIN_CONFIGURED === 'true' ||
+    process.env.FORCE_PRODUCTION_DOMAIN === 'true'
+  if (isProductionExplicitlyEnabled) {
+    return { ok: true, baseUrl: CANONICAL_PRODUCTION_DOMAIN }
+  }
+
+  const hostFromContext = extractHostFromContext(context)
+  if (
+    hostFromContext &&
+    !isVercelPlatformDomain(hostFromContext) &&
+    !isLocalhostUrl(hostFromContext)
+  ) {
+    return { ok: true, baseUrl: hostFromContext.replace(/^http:\/\//i, 'https://') }
+  }
+
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    const origin = window.location.origin.replace(/\/+$/, '')
+    if (origin && !isVercelPlatformDomain(origin) && !isLocalhostUrl(origin)) {
+      return { ok: true, baseUrl: origin.replace(/^http:\/\//i, 'https://') }
+    }
+  }
+
+  const rawVercelHost =
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+    process.env.NEXT_PUBLIC_VERCEL_URL ||
+    process.env.VERCEL_BRANCH_URL ||
+    process.env.VERCEL_URL ||
+    ''
+  const cleanVercelHost = rawVercelHost.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')
+  if (
+    cleanVercelHost &&
+    !isVercelPlatformDomain(cleanVercelHost) &&
+    !isLocalhostUrl(cleanVercelHost)
+  ) {
+    return { ok: true, baseUrl: `https://${cleanVercelHost}` }
+  }
+
+  return {
+    ok: false,
+    baseUrl: '',
+    error:
+      'Production base URL (APP_URL) is missing or points to localhost/127.0.0.1. Configure APP_URL with your public HTTPS domain before dispatching client emails or portal links.',
+  }
+}
+
+/**
+ * Validates that NO outgoing dispatch URL, logo URL, portal CTA, or message link
+ * contains localhost, 127.0.0.1, 0.0.0.0, [::1], or a local development port.
+ */
+export function validateOutgoingDispatchUrls(input: {
+  baseUrl?: string
+  portalUrl?: string
+  logoUrl?: string
+  htmlContent?: string
+  textContent?: string
+}): { valid: boolean; offendingUrls: string[]; error?: string } {
+  const offending = new Set<string>()
+
+  const inspectUrl = (candidate?: string) => {
+    if (!candidate || typeof candidate !== 'string') return
+    const trimmed = candidate.trim()
+    if (!trimmed) return
+    if (isLocalhostUrl(trimmed) || isVercelPlatformDomain(trimmed)) {
+      offending.add(trimmed)
+    }
+  }
+
+  if (!input.baseUrl || isLocalhostUrl(input.baseUrl)) {
+    offending.add(input.baseUrl || '(missing APP_URL)')
+  }
+
+  inspectUrl(input.portalUrl)
+  inspectUrl(input.logoUrl)
+
+  const urlAttrRegex = /(?:href|src)=["']([^"']+)["']/gi
+  if (input.htmlContent) {
+    let m: RegExpExecArray | null
+    while ((m = urlAttrRegex.exec(input.htmlContent)) !== null) {
+      const val = m[1].trim()
+      if (!val.startsWith('mailto:') && !val.startsWith('tel:') && !val.startsWith('#')) {
+        inspectUrl(val)
+        if (val.startsWith('/')) {
+          offending.add(`relative-url:${val}`)
+        }
+      }
+    }
+  }
+
+  const rawHttpRegex = /https?:\/\/[^\s"'<>]+/gi
+  for (const source of [input.htmlContent || '', input.textContent || '']) {
+    if (!source) continue
+    let m: RegExpExecArray | null
+    while ((m = rawHttpRegex.exec(source)) !== null) {
+      inspectUrl(m[0])
+    }
+  }
+
+  if (offending.size > 0) {
+    const list = Array.from(offending)
+    return {
+      valid: false,
+      offendingUrls: list,
+      error: `Blocked invalid or local development URL(s) in outgoing dispatch: ${list.slice(0, 3).join(', ')}. Ensure APP_URL is configured to your production HTTPS domain.`,
+    }
+  }
+
+  return { valid: true, offendingUrls: [] }
 }
 
 /**
@@ -658,9 +848,9 @@ export function validateAppUrl(urlStr: string, context?: any): AppUrlValidationR
     }
 
     if (isTrustedHost(hostname)) {
-      // In production or testing mode, ensure localhost URLs are upgraded to safe base
-      const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1'
-      const baseIsLocalhost = safeBase.includes('localhost') || safeBase.includes('127.0.0.1')
+      // Always upgrade localhost/loopback URLs to safeBase whenever safeBase is non-localhost
+      const isLocalhost = isLocalhostUrl(trimmed)
+      const baseIsLocalhost = isLocalhostUrl(safeBase)
       if (isLocalhost && !baseIsLocalhost) {
         return {
           isValid: true,

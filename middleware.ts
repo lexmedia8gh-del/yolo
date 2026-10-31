@@ -14,6 +14,7 @@ const PROTECTED_PATHS = [
   '/settings',
   '/quick-jobs',
   '/previews',
+  '/dispatch',
 ]
 
 // Routes that should redirect to dashboard if already authenticated

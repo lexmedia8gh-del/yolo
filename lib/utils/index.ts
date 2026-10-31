@@ -526,6 +526,10 @@ export {
   sanitizeRedirectUrl,
   normalizeUrl,
   isTrustedHost,
+  isLocalhostUrl,
+  resolveStrictProductionBaseUrl,
+  validateOutgoingDispatchUrls,
 } from './app-url'
+
 
 
